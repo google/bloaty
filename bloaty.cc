@@ -21,9 +21,20 @@
 #include <vector>
 
 #include <stdlib.h>
+#include <signal.h>
 
 #include "re2/re2.h"
 #include <assert.h>
+
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#define CHECK_SYSCALL(call) \
+  if (call < 0) { \
+    perror(#call " " __FILE__ ":" TOSTRING(__LINE__)); \
+    exit(1); \
+  }
+
+std::string* name_path;
 
 
 /** LineReader ****************************************************************/
@@ -118,18 +129,87 @@ class NameStripper {
 
 class Demangler {
  public:
-  std::string Demangle(const std::string& symbol) {
-    // TODO: optimize to keep a pipe open so we don't exec c++filt separately for
-    // every single symbol.
-    std::string last;
-    for ( auto& line : ReadLinesFromPipe("c++filt " + symbol) ) {
-      last = line;
+  Demangler() {
+    int toproc_pipe_fd[2];
+    int fromproc_pipe_fd[2];
+    if (pipe(toproc_pipe_fd) < 0 || pipe(fromproc_pipe_fd) < 0) {
+      perror("pipe");
+      exit(1);
     }
-    if (!last.empty()) {
-      last.erase(last.size() - 1);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+      perror("fork");
+      exit(1);
     }
-    return last;
+
+    if (pid) {
+      // Parent.
+      CHECK_SYSCALL(close(toproc_pipe_fd[0]));
+      CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
+      write_fd_ = toproc_pipe_fd[1];
+      read_fd_ = fromproc_pipe_fd[0];
+      child_pid_ = pid;
+    } else {
+      // Child.
+      CHECK_SYSCALL(close(STDIN_FILENO));
+      CHECK_SYSCALL(close(STDOUT_FILENO));
+      CHECK_SYSCALL(dup2(toproc_pipe_fd[0], STDIN_FILENO));
+      CHECK_SYSCALL(dup2(fromproc_pipe_fd[1], STDOUT_FILENO));
+
+      CHECK_SYSCALL(close(toproc_pipe_fd[0]));
+      CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
+      CHECK_SYSCALL(close(toproc_pipe_fd[1]));
+      CHECK_SYSCALL(close(fromproc_pipe_fd[0]));
+
+      char prog[] = "c++filt";
+      char *const argv[] = {prog, NULL};
+      CHECK_SYSCALL(execvp("c++filt", argv));
+    }
   }
+
+  ~Demangler() {
+    int status;
+    kill(child_pid_, SIGTERM);
+    waitpid(child_pid_, &status, WEXITED);
+  }
+
+  std::string Demangle(const std::string& symbol) {
+    char buf[2048];
+    const char *writeptr = symbol.c_str();
+    const char *writeend = writeptr + symbol.size();
+    char *readptr = buf;
+
+    while (writeptr < writeend) {
+      ssize_t bytes = write(write_fd_, writeptr, writeend - writeptr);
+      if (bytes < 0) {
+        perror("read");
+        exit(1);
+      }
+      writeptr += bytes;
+    }
+    write(write_fd_, "\n", 1);
+    do {
+      ssize_t bytes = read(read_fd_, readptr, sizeof(buf) - (readptr - buf));
+      if (bytes < 0) {
+        perror("read");
+        exit(1);
+      }
+      readptr += bytes;
+    } while(readptr[-1] != '\n');
+
+    --readptr;  // newline.
+    *readptr = '\0';
+
+    std::string ret(buf);
+
+    return ret;
+  }
+
+ private:
+  int write_fd_;
+  int read_fd_;
+  pid_t child_pid_;
 };
 
 
@@ -151,8 +231,6 @@ struct Object {
   Object(const std::string& name_) :
       name(name_),
       size(0),
-      in_ref_count(0),
-      seen_count(0),
       file(NULL) {}
 
   // Declared name of the symbol.
@@ -166,13 +244,11 @@ struct Object {
     weight = size_;
   }
 
+  uint32_t id;
   uintptr_t vmaddr;
   size_t size;
   size_t weight;
-  uint32_t in_ref_count;
-  uint32_t seen_count;
-  uint32_t first_id;
-  std::vector<Object*> first_stack;
+  size_t max_weight;
 
   // Whether this is from a data section (rather than code).
   // When this is true we will scan the object for pointers.
@@ -185,79 +261,168 @@ struct Object {
   std::set<Object*> refs;
 };
 
-class Stacks {
+class DominatorCalculator {
  public:
-  void Insert(Object* obj, uint32_t id) {
-    stacks_[id].push_back(obj);
-    stack_.push_back(obj);
-    stack_set_.insert(obj);
-  }
-
-  bool IsOnStack(Object* obj) {
-    return stack_set_.find(obj) != stack_set_.end();
-  }
-
-  void Remove(Object* obj, uint32_t id) {
-    assert(stacks_[id].back() == obj);
-    assert(stack_.back() == obj);
-    stacks_[id].pop_back();
-    stack_.pop_back();
-    stack_set_.erase(obj);
-  }
-
-  Object* FindAncestor(Object* node) {
-    std::cerr << "Finding ancestor for " << node->name << "\n";
-    // Find ancestor in the more efficient way.
-    uint32_t id = node->first_id;
-    auto it = stacks_.upper_bound(id);
-    assert(it != stacks_.begin());
-    --it;
-    while (it->second.empty()) {
-      assert(it != stacks_.begin());
-      --it;
-    }
-    Object* ancestor = it->second.back();
-
-    std::cerr << "The fast way yielded " << ancestor->name << "\n";
-
-    // Find ancestor in the safer way.
-    for (int i = node->first_stack.size() - 1; i >= 0; i--) {
-      if (stack_set_.find(node->first_stack[i]) != stack_set_.end()) {
-        std::cerr << "The safe way yielded " << node->first_stack[i]->name << "\n";
-        assert(node->first_stack[i] == ancestor);
-        break;
+  static void Calculate(Object* root, uint32_t total,
+                        std::unordered_map<Object*, Object*>* dominators) {
+    DominatorCalculator calculator;
+    calculator.CalculateDominators(root, total);
+    for (const auto& info : calculator.node_info_) {
+      if (!info.node) {
+        // Unreachable nodes won't have this.
+        continue;
       }
+      if (info.dom == 0) {
+        // Main won't have this.  But make sure no node can have id 0.
+        continue;
+      }
+      (*dominators)[info.node] = calculator.node_info_[info.dom].node;
     }
-
-    return ancestor;
-  }
-
-  Object* GetTop() {
-    assert(!stack_.empty());
-    return stack_.back();
-  }
-
-  void StoreFirstStack(Object* obj, uint32_t id) {
-    obj->first_id = id;
-    obj->first_stack = stack_;
   }
 
  private:
-  std::map<uint32_t, std::vector<Object*>> stacks_;
-  std::vector<Object*> stack_;
-  std::set<Object*> stack_set_;
+  void Initialize(Object* pv) {
+    uint32_t v = pv->id;
+    node_info_[v].node = pv;
+    Semi(v) = ++n_;
+    Vertex(n_) = v;
+    Label(v) = v;
+    Ancestor(v) = 0;
+    for (const auto& target : pv->refs) {
+      uint32_t w = target->id;
+      if (Semi(w) == 0) {
+        Parent(w) = v;
+        Initialize(target);
+      }
+      Pred(w).insert(v);
+    }
+  }
+
+  void Link(uint32_t v, uint32_t w) {
+    Ancestor(w) = v;
+  }
+
+  void Compress(uint32_t v) {
+    if (Ancestor(Ancestor(v)) != 0) {
+      Compress(Ancestor(v));
+      if (Semi(Label(Ancestor(v))) < Semi(Label(v))) {
+        Label(v) = Label(Ancestor(v));
+      }
+      Ancestor(v) = Ancestor(Ancestor(v));
+    }
+  }
+
+  uint32_t Eval(uint32_t v) {
+    if (Ancestor(v) == 0) {
+      return v;
+    } else {
+      Compress(v);
+      return Label(v);
+    }
+  }
+
+  void CalculateDominators(Object* pr, uint32_t total) {
+    uint32_t r = pr->id;
+    n_ = 0;
+    node_info_.resize(total);
+    ordering_.resize(total);
+
+    Initialize(pr);
+
+    for (uint32_t i = n_ - 1; i > 0; --i) {
+      uint32_t w = Vertex(i);
+
+      for (uint32_t v : Pred(w)) {
+        uint32_t u = Eval(v);
+        if (Semi(u) < Semi(w)) {
+          Semi(w) = Semi(u);
+        }
+      }
+      Bucket(Vertex(Semi(w))).insert(w);
+      Link(Parent(w), w);
+
+      for (uint32_t v : Bucket(Parent(w))) {
+        uint32_t u = Eval(v);
+        Dom(v) = Semi(u) < Semi(v) ? u : Parent(w);
+      }
+    }
+
+    for (uint32_t i = 1; i < n_; i++) {
+      uint32_t w = Vertex(i);
+      if (Dom(w) != Vertex(Semi(w))) {
+        Dom(w) = Dom(Dom(w));
+      }
+    }
+
+    Dom(r) = 0;
+  }
+
+  uint32_t& Parent(uint32_t v) {
+    return node_info_[v].parent;
+  }
+
+  uint32_t& Ancestor(uint32_t v) {
+    return node_info_[v].ancestor;
+  }
+
+  uint32_t& Semi(uint32_t v) {
+    return node_info_[v].semi;
+  }
+
+  uint32_t& Label(uint32_t v) {
+    return node_info_[v].label;
+  }
+
+  uint32_t& Dom(uint32_t v) {
+    return node_info_[v].dom;
+  }
+
+  uint32_t& Vertex(uint32_t v) {
+    return ordering_[v];
+  }
+
+  std::set<uint32_t>& Pred(uint32_t v) {
+    return node_info_[v].pred;
+  }
+
+  std::set<uint32_t>& Bucket(uint32_t v) {
+    return node_info_[v].bucket;
+  }
+
+  uint32_t n_;
+
+  struct NodeInfo {
+    Object* node;
+    uint32_t parent;
+    uint32_t ancestor;
+    uint32_t label;
+    uint32_t semi;
+    uint32_t dom;
+    std::set<uint32_t> pred;
+    std::set<uint32_t> bucket;
+  };
+  std::vector<NodeInfo> node_info_;
+  std::vector<uint32_t> ordering_;  // i -> (node_info_ index)
 };
 
 class Program {
  public:
+  Program() : next_id_(1), total_size_(0) {}
+
   Object* AddObject(const std::string& name, uintptr_t vmaddr, size_t size, bool data) {
+
+    if (name_path && name == *name_path) {
+      std::cerr << "Adding object " << name << ", " << data << "\n";
+    }
 
     auto pair = objects_.emplace(name, name);
     Object* ret = &pair.first->second;
+    ret->id = next_id_++;
     ret->vmaddr = vmaddr;
     ret->SetSize(size);
     ret->data = data;
     ret->name = name;
+    total_size_ += size;
     objects_by_addr_[vmaddr] = ret;
 
     auto demangled = demangler_.Demangle(name);
@@ -289,9 +454,6 @@ class Program {
     if (it != objects_by_addr_.end()) {
       Object* to = it->second;
       if (to) {
-        if (from->refs.insert(to).second) {
-          to->in_ref_count++;
-        }
         if (from->file && to->file) {
           from->file->refs.insert(to->file);
         }
@@ -315,57 +477,55 @@ class Program {
     return it == objects_.end() ? NULL : &it->second;
   }
 
-  uint32_t CalculateWeights(Object* node, uint32_t id, Stacks* stacks) {
-    if (node->seen_count++ == 0) {
-      stacks->Insert(node, id);
-      stacks->StoreFirstStack(node, id);
-      for ( auto& target : node->refs ) {
-        if (!stacks->IsOnStack(target)) {  // Break cycles for now.
-          id = CalculateWeights(target, id, stacks) + 1;
-        }
-      }
-      stacks->Remove(node, node->first_id);
-    }
-
-    if (node->in_ref_count == 0) {
-      // Nobody references us, so we don't add our weight to anything.
-      std::cerr << "Not adding weight from " << node->name << ", nobody references us.\n";
-    } else if (node->in_ref_count == 1) {
-      // We have exactly one caller, so just add ourself to our caller's weight.
-      std::cerr << "Adding weight from " << node->name << " to " << stacks->GetTop()->name << "\n";
-      stacks->GetTop()->weight += node->weight;
-    } else if (node->in_ref_count == node->seen_count) {
-      // We have multiple callers, find the lowest common ancestor by looking
-      // for the deepest node on our stack with a first_id <= to ours.
-      Object* ancestor = stacks->FindAncestor(node);
-      std::cerr << "Ancestor for " << node->name << " was " << ancestor->name << "\n";
-      ancestor->weight += node->weight;
-    } else {
-      std::cerr << "Skipping: " << node->name << " because we expect " << (node->in_ref_count - node->seen_count) << " more in edges.\n";
-    }
-
-    return id;
-  }
-
   void PrintDotGraph(Object* obj, std::ofstream* out, std::set<Object*>* seen) {
     if (!seen->insert(obj).second) {
       return;
     }
 
-    *out << "  \"" << obj->name << "\" [label=\"" << obj->pretty_name << "\\nsize: " << obj->size << "\\nweight: " << obj->weight << "\"];\n";
+    *out << "  \"" << obj->name << "\" [label=\"" << obj->pretty_name << "\\nsize: " << obj->size << "\\nweight: " << obj->weight << "\", fontsize=" << std::max(obj->size * 800.0 / total_size_, 9.0) << "];\n";
 
     for ( auto& target : obj->refs ) {
-      //if (target->weight > 200) {
-        *out << "  \"" << obj->name << "\" -> \"" << target->name << "\";\n";
+      if (target->max_weight > 500) {
+        *out << "  \"" << obj->name << "\" -> \"" << target->name << "\" [penwidth=" << (pow(target->weight * 100.0 / max_weight_, 0.6)) << "];\n";
         PrintDotGraph(target, out, seen);
-      //}
+      }
+    }
+  }
+
+  void CalculateWeights(Object* obj,
+                        const std::unordered_map<Object*, Object*>& dominators,
+                        std::set<Object*>* seen) {
+    if (!seen->insert(obj).second) {
+      return;
+    }
+
+    obj->weight = obj->size;
+    obj->max_weight = obj->weight;
+
+    for (auto target : obj->refs) {
+      CalculateWeights(target, dominators, seen);
+      obj->max_weight = std::max(obj->max_weight, target->max_weight);
+    }
+
+    auto it = dominators.find(obj);
+    //assert(it != dominators.end());
+    if (it == dominators.end()) {
+    } else {
+      it->second->weight += obj->weight;
     }
   }
 
   void PrintSymbolsByTransitiveWeight() {
-    Object* obj = FindFunctionByName("_main");
-    Stacks stacks;
-    CalculateWeights(obj, 0, &stacks);
+    Object* root = FindFunctionByName("_main");
+
+    {
+      std::unordered_map<Object*, Object*> dominators;
+      DominatorCalculator::Calculate(root, next_id_, &dominators);
+      std::set<Object*> seen;
+      CalculateWeights(root, dominators, &seen);
+      max_weight_  = root->max_weight;
+    }
+    //CalculateWeights(root);
     /*
 
     std::vector<Object*> object_list;
@@ -391,29 +551,39 @@ class Program {
       out << "  \"" << object->name << "\"\n";
     }
     */
-    std::set<Object*> seen;
-    PrintDotGraph(obj, &out, &seen);
+    {
+      std::set<Object*> seen;
+      PrintDotGraph(root, &out, &seen);
+    }
     out << "}\n";
   }
 
-  void GC(Object* obj, std::set<Object*>* garbage) {
+  void GC(Object* obj, std::set<Object*>* garbage, std::vector<Object*>* stack) {
     if (garbage->erase(obj) != 1) {
       return;
     }
 
-    std::cerr << "Reached obj: " << obj->name << "\n";
+    stack->push_back(obj);
+
+    if (name_path && obj->name == *name_path) {
+      std::string indent;
+      for (auto obj : *stack) {
+        indent += "  ";
+        std::cerr << indent << "-> " << obj->name << "\n";
+      }
+    }
 
     for ( auto& child : obj->refs ) {
-      GC(child, garbage);
+      GC(child, garbage, stack);
     }
+
+    stack->pop_back();
   }
 
   void GCFiles(File* file, std::set<File*>* garbage) {
     if (garbage->erase(file) != 1) {
       return;
     }
-
-    std::cerr << "Reached file: " << file->name << "\n";
 
     for ( auto& child : file->refs ) {
       GCFiles(child, garbage);
@@ -422,6 +592,7 @@ class Program {
 
   void PrintGarbage() {
     std::set<Object*> garbage;
+    std::vector<Object*> stack;
 
     for ( auto& pair : objects_ ) {
       garbage.insert(&pair.second);
@@ -434,16 +605,13 @@ class Program {
       exit(1);
     }
 
-    GC(obj, &garbage);
+    GC(obj, &garbage, &stack);
 
     std::cerr << "Total objects: " << objects_.size() << "\n";
     std::cerr << "Garbage objects: " << garbage.size() << "\n";
 
     for ( auto& obj : garbage ) {
-      std::cerr << "Garbage obj: " << obj->name << "\n";
-      for ( auto& ref : obj->refs ) {
-        ref->in_ref_count--;
-      }
+      //std::cerr << "Garbage obj: " << obj->name << "\n";
     }
 
     if (obj->file) {
@@ -458,7 +626,7 @@ class Program {
       std::cerr << "Garbage files: " << garbage_files.size() << "\n";
 
       for ( auto& file : garbage_files ) {
-        std::cerr << "Garbage file: " << file->name << "\n";
+        //std::cerr << "Garbage file: " << file->name << "\n";
       }
     }
   }
@@ -516,6 +684,10 @@ class Program {
     printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
   }
 
+  uint32_t next_id_;
+  size_t total_size_;
+  size_t max_weight_;
+
   // Files, indexed by filename.
   std::unordered_map<std::string, File> files_;
 
@@ -538,6 +710,7 @@ void ParseMachOSymbols(const std::string& filename, Program* program) {
 
   // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
   // [16 spaces]0x00000001000015a0 (     0x9) __ZN10LineReader5beginEv [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
+  // [16 spaces]0x0000000100038468 (     0x8) __ZN3re2L12empty_stringE [NameNList, MangledNameNList, NList]
   RE2 pattern1(R"(^\s{16}0x([0-9a-f]+) \(\s*0x([0-9a-f]+)\) (.+) \[((?:FUNC)?))");
 
   // [20 spaces]0x00000001000009e0 (    0x21) tests/test_def.c:471
@@ -644,9 +817,7 @@ void ParseMachODisassembly(const std::string& filename, Program* program) {
         std::cerr << "Whoops!  Couldn't find a function entry for: '" << name << "'\n";
       }
 
-      if (current_function->refs.insert(target_function).second) {
-        target_function->in_ref_count++;
-      }
+      current_function->refs.insert(target_function);
 
       if (current_function->file != NULL && target_function->file != NULL) {
         current_function->file->refs.insert(target_function->file);
@@ -702,8 +873,14 @@ void ParseVTables(const std::string& filename, Program* program) {
 
   for ( auto& pair : program->objects_ ) {
     Object* obj = &pair.second;
+    bool verbose = false;
     if (!obj->data) {
       continue;
+    }
+
+    if (name_path && obj->name == *name_path) {
+      std::cerr << "VTable scanning " << obj->name << "\n";
+      verbose = true;
     }
 
     if (!computed_delta) {
@@ -715,6 +892,9 @@ void ParseVTables(const std::string& filename, Program* program) {
       uintptr_t addr;
       fseek(f, obj->vmaddr + delta + i, SEEK_SET);
       fread(&addr, sizeof(uintptr_t), 1, f);
+      if (verbose) {
+        fprintf(stderr, "  Try add ref to: %x\n", (int)addr);
+      }
       program->TryAddRef(obj, addr);
     }
   }
@@ -726,6 +906,10 @@ int main(int argc, char *argv[]) {
   if (argc < 2) {
     std::cerr << "Usage: bloaty <binary file>\n";
     exit(1);
+  }
+
+  if (argc == 3) {
+    name_path = new std::string(argv[2]);
   }
 
   Program program;
