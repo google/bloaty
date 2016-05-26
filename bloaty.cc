@@ -366,7 +366,7 @@ class DominatorCalculator {
 
 class Program {
  public:
-  Program() : next_id_(1), total_size_(0) {}
+  Program() : next_id_(1), total_size_(0), entry_(NULL) {}
 
   Object* AddObject(const std::string& name, uintptr_t vmaddr, size_t size, bool data) {
 
@@ -441,7 +441,7 @@ class Program {
     }
   }
 
-  File* GetFile(const std::string& filename) {
+  File* GetOrCreateFile(const std::string& filename) {
     // C++17: auto pair = files_.try_emplace(filename, filename);
     auto it = files_.find(filename);
     if (it == files_.end()) {
@@ -707,6 +707,10 @@ Object* ProgramDataSink::FindObjectByAddr(uintptr_t addr) {
   return program_->FindObjectByAddr(addr);
 }
 
+File* ProgramDataSink::GetOrCreateFile(const std::string& filename) {
+  return program_->GetOrCreateFile(filename);
+}
+
 void ProgramDataSink::AddRef(Object* from, Object* to) {
   if (name_path && from->name == *name_path) {
     std::cerr << "  Add ref from " << from->name << " to " << to->name << "\n";
@@ -721,10 +725,6 @@ void ProgramDataSink::SetEntryPoint(Object* obj) {
 void ProgramDataSink::AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff,
                                      size_t filesize) {
   program_->AddFileMapping(vmaddr, fileoff, filesize);
-}
-
-bool StartsWith(const std::string& haystack, const std::string& needle) {
-  return !haystack.compare(0, needle.length(), needle);
 }
 
 void ParseVTables(const std::string& filename, Program* program) {
@@ -778,12 +778,8 @@ int main(int argc, char *argv[]) {
   }
 
   Program program;
-  //ParseMachOSymbols(argv[1], &program);
-  //ParseMachODisassembly(argv[1], &program);
   ProgramDataSink sink(&program);
-  ParseELFSymbols(argv[1], &sink);
-  ParseELFDisassembly(argv[1], &sink);
-  ParseELFFileMapping(argv[1], &sink);
+  ReadObjectData(argv[1], &sink);
   ParseVTables(argv[1], &program);
 
   if (!program.HasFiles()) {

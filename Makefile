@@ -3,8 +3,16 @@
 
 CXXFLAGS=-std=c++11 -ffunction-sections -fdata-sections -Wall -g -I third_party/re2 -O2
 
-bloaty: bloaty.o elf.o third_party/re2/obj/libre2.a
-	g++ -Wl,-gc-sections -static -o bloaty bloaty.o elf.o third_party/re2/obj/libre2.a -lpthread
+ifeq ($(shell uname), Darwin)
+  OBJFORMAT = macho.o
+  GC_SECTIONS = -Wl,-dead_strip
+else
+  OBJFORMAT = elf.o
+  GC_SECTIONS = -Wl,-gc-sections
+endif
+
+bloaty: bloaty.o $(OBJFORMAT) third_party/re2/obj/libre2.a
+	g++ $(GC_SECTIONS) -o bloaty bloaty.o $(OBJFORMAT) third_party/re2/obj/libre2.a -lpthread
 
 elf.o: elf.cc
 bloaty.o: bloaty.cc
@@ -16,7 +24,6 @@ third_party/re2/Makefile: .gitmodules
 	git submodule init && git submodule update
 
 clean:
-	rm -f bloaty
+	rm -f bloaty bloaty.o elf.o macho.o
 	cd third_party/re2 && make clean
 	rm -rf *.dSYM
-

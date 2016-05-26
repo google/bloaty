@@ -21,7 +21,6 @@ struct File {
   std::set<File*> refs;
 };
 
-
 struct Object {
   Object(const std::string& name_) :
       name(name_),
@@ -56,7 +55,6 @@ struct Object {
   std::set<Object*> refs;
 };
 
-
 class ProgramDataSink {
  public:
   ProgramDataSink(Program* program) : program_(program) {}
@@ -68,6 +66,7 @@ class ProgramDataSink {
   void AddRef(Object* from, Object* to);
   void SetEntryPoint(Object* obj);
   void AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff, size_t filesize);
+  File* GetOrCreateFile(const std::string& filename);
 
  private:
   Program* program_;
@@ -120,8 +119,7 @@ class LineIterator {
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
 
-void ParseELFSymbols(const std::string& filename, ProgramDataSink* sink);
-void ParseELFDisassembly(const std::string& filename, ProgramDataSink* sink);
-void ParseELFFileMapping(const std::string& filename, ProgramDataSink* sink);
+// Provided by arch-specific platform module.
+void ReadObjectData(const std::string& filename, ProgramDataSink* sink);
 
 #endif

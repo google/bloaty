@@ -1,4 +1,8 @@
 
+#include <iostream>
+#include "bloaty.h"
+#include "re2/re2.h"
+
 // There are several programs that offer useful information about
 // binaries:
 //
@@ -7,8 +11,15 @@
 // - size: display binary size
 // - symbols: display symbols, drawing on more sources
 // - pagestuff: display page-oriented information
+// - dsymutil: create .dSYM bundle with DWARF information inside
+// - dwarfdump: dump DWARF debugging information from .o or .dSYM
 
-void ParseMachOSymbols(const std::string& filename, Program* program) {
+bool StartsWith(const std::string& haystack, const std::string& needle) {
+  return !haystack.compare(0, needle.length(), needle);
+}
+
+static void ParseMachOSymbols(const std::string& filename,
+                              ProgramDataSink* program) {
   std::string cmd = std::string("symbols -fullSourcePath -noDemangling ") + filename;
 
   // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
@@ -35,7 +46,7 @@ void ParseMachOSymbols(const std::string& filename, Program* program) {
       obj_with_unknown_filename = program->AddObject(name, addr, size, maybe_func.empty());
     } else if (RE2::PartialMatch(line, pattern2, RE2::Hex(&addr), RE2::Hex(&size), &name, &line_num)) {
       // OPT: avoid the lookup if this is the same filename as the last entry.
-      File* file = program->GetFile(name);
+      File* file = program->GetOrCreateFile(name);
       if (obj_with_unknown_filename) {
         // This is a heuristic.  We assume that the first source line for a
         // function represents the file that function was declared in.  Ideally
@@ -48,7 +59,8 @@ void ParseMachOSymbols(const std::string& filename, Program* program) {
   }
 }
 
-void ParseMachODisassembly(const std::string& filename, Program* program) {
+static void ParseMachODisassembly(const std::string& filename,
+                                  ProgramDataSink* program) {
   std::string cmd = std::string("otool -tV ") + filename;
 
   // ReadLinesFromPipe(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&):
@@ -74,8 +86,10 @@ void ParseMachODisassembly(const std::string& filename, Program* program) {
     size_t addr;
     if (lea_offset) {
       if (RE2::PartialMatch(line, addr_pattern, RE2::Hex(&addr))) {
-        program->TryAddRef(current_function, (long)addr + lea_offset - 16);
-        program->TryAddRef(current_function, (long)addr + lea_offset);
+        Object* dest = program->FindObjectByAddr((long)addr + lea_offset);
+        if (current_function && dest) {
+          program->AddRef(current_function, dest);
+        }
         lea_offset = 0;
       }
     }
@@ -90,13 +104,13 @@ void ParseMachODisassembly(const std::string& filename, Program* program) {
       }
       */
     } else if (RE2::PartialMatch(line, func_pattern, &current_function_name)) {
-      current_function = program->FindFunctionByName(current_function_name);
+      current_function = program->FindObjectByName(current_function_name);
 
       if (!current_function && current_function_name[0] == '_') {
         current_function_name = current_function_name.substr(1);
       }
 
-      current_function = program->FindFunctionByName(current_function_name);
+      current_function = program->FindObjectByName(current_function_name);
 
       if (!current_function) {
         std::cerr << "Couldn't find function for name: " << current_function_name << "\n";
@@ -106,10 +120,10 @@ void ParseMachODisassembly(const std::string& filename, Program* program) {
       while (name[name.size() - 1] == ' ') {
         name.resize(name.size() - 1);
       }
-      Object* target_function = program->FindFunctionByName(name);
+      Object* target_function = program->FindObjectByName(name);
       if (!target_function && name[0] == '_') {
         name = name.substr(1);
-        target_function = program->FindFunctionByName(name);
+        target_function = program->FindObjectByName(name);
       }
 
       if (!current_function) {
@@ -131,7 +145,8 @@ void ParseMachODisassembly(const std::string& filename, Program* program) {
 
 // Returns the difference between the data segment's file offset and vmaddr.
 // This number can be added to a vmaddr to locate the file offset.
-long GetDataSegmentDelta(const std::string& filename) {
+static void ParseMachOFileMapping(const std::string& filename,
+                                  ProgramDataSink* sink) {
   std::string cmd = std::string("otool -l ") + filename;
   // Load command 2
   //       cmd LC_SEGMENT_64
@@ -146,24 +161,52 @@ long GetDataSegmentDelta(const std::string& filename) {
   //    nsects 7
   //     flags 0x0
 
-  RE2 seg_pattern(R"(^  segname __DATA)");
-  RE2 vmaddr_pattern(R"(^   vmaddr 0x([0-9a-f]+))");
-  RE2 fileoff_pattern(R"(^  fileoff ([0-9a-f]+))");
-  bool in_dataseg = false;
-  size_t vmaddr;
-  size_t fileoff;
+  RE2 key_decimal_pattern(R"((\w+) ([1-9][0-9]*))");
+  RE2 key_hex_pattern(R"((\w+) 0x([0-9a-f]+))");
+  RE2 key_text_pattern(R"( (\w+) (\w+))");
+  std::string key;
+  std::string text_val;
+  uintptr_t val;
+  uintptr_t vmaddr;
+  uintptr_t fileoff;
+  uintptr_t filesize;
+
+  // The entry point appears to be relative to the vmaddr of the first __TEXT
+  // segment.  Should verify that this is the precise rule.
+  uintptr_t first_text_vmaddr = 0;
+  bool in_text_section = false;
 
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
-    if (StartsWith(line, "  segname __DATA")) {
-      in_dataseg = true;
-    } else if (in_dataseg && RE2::PartialMatch(line, vmaddr_pattern, RE2::Hex(&vmaddr))) {
-      // Proceed...
-    } else if (in_dataseg && RE2::PartialMatch(line, fileoff_pattern, &fileoff)) {
-      // This will likely underflow, but that is ok/expected.
-      return fileoff - vmaddr;
-    }
-  }
 
-  std::cerr << "Didn't find data segment.\n";
-  exit(1);
+    if (RE2::PartialMatch(line, key_decimal_pattern, &key, &val) ||
+        RE2::PartialMatch(line, key_hex_pattern, &key, RE2::Hex(&val))) {
+      if (key == "vmaddr") {
+        vmaddr = val;
+        if (first_text_vmaddr == 0 && in_text_section) {
+          first_text_vmaddr = vmaddr;
+        }
+      } else if (key == "fileoff") {
+        fileoff = val;
+      } else if (key == "filesize") {
+        filesize = val;
+        sink->AddFileMapping(vmaddr, fileoff, filesize);
+      } else if (key == "entryoff") {
+        Object* entry = sink->FindObjectByAddr(first_text_vmaddr + val);
+        if (entry) {
+          sink->SetEntryPoint(entry);
+        }
+      }
+    } else if (RE2::PartialMatch(line, key_text_pattern, &key, &text_val)) {
+      if (key == "segname") {
+        in_text_section = (text_val == "__TEXT");
+      }
+    }
+
+  }
+}
+
+void ReadObjectData(const std::string& filename, ProgramDataSink* sink) {
+  ParseMachOSymbols(filename, sink);
+  ParseMachODisassembly(filename, sink);
+  ParseMachOFileMapping(filename, sink);
 }
