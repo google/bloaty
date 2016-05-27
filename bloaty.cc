@@ -185,6 +185,7 @@ class Demangler {
   }
 
   std::string Demangle(const std::string& symbol) {
+    return symbol;
     char buf[2048];
     const char *writeptr = symbol.c_str();
     const char *writeend = writeptr + symbol.size();
@@ -215,6 +216,10 @@ class Demangler {
     *readptr = '\0';
 
     std::string ret(buf);
+    if (ret.empty()) {
+      fprintf(stderr, "Failed to demangle: %s\n", symbol.c_str());
+    }
+    assert(ret.size() > 0);
 
     return ret;
   }
@@ -414,6 +419,14 @@ class Program {
 
   void AddObjectAlias(Object* obj, const std::string& name) {
     objects_[name] = obj;
+
+    // Keep the lexicographcally-first name as the canonical one.
+    if (name < obj->name) {
+      obj->aliases.insert(obj->name);
+      obj->name = name;
+    } else {
+      obj->aliases.insert(name);
+    }
   }
 
   void AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff, size_t filesize) {
@@ -464,7 +477,7 @@ class Program {
 
   bool HasFiles() { return files_.size() > 0; }
 
-  Object* FindFunctionByName(const std::string& name) {
+  Object* FindObjectByName(const std::string& name) {
     auto it = objects_.find(name);
     return it == objects_.end() ? NULL : it->second;
   }
@@ -502,9 +515,9 @@ class Program {
     }
   }
 
-  void CalculateWeights(Object* obj,
-                        const std::unordered_map<Object*, Object*>& dominators,
-                        std::set<Object*>* seen) {
+  void CalculateWeightsRecursive(
+      Object* obj, const std::unordered_map<Object*, Object*>& dominators,
+      std::set<Object*>* seen) {
     if (!seen->insert(obj).second) {
       return;
     }
@@ -513,7 +526,7 @@ class Program {
     obj->max_weight = obj->weight;
 
     for (auto target : obj->refs) {
-      CalculateWeights(target, dominators, seen);
+      CalculateWeightsRecursive(target, dominators, seen);
       obj->max_weight = std::max(obj->max_weight, target->max_weight);
     }
 
@@ -525,19 +538,19 @@ class Program {
     }
   }
 
-  void PrintSymbolsByTransitiveWeight() {
+  void CalculateWeights() {
     if (!entry_) {
       std::cerr << "Transitive weight graph requires entry point.";
     }
 
-    {
-      std::unordered_map<Object*, Object*> dominators;
-      DominatorCalculator::Calculate(entry_, next_id_, &dominators);
-      std::set<Object*> seen;
-      CalculateWeights(entry_, dominators, &seen);
-      max_weight_  = entry_->max_weight;
-    }
+    std::unordered_map<Object*, Object*> dominators;
+    DominatorCalculator::Calculate(entry_, next_id_, &dominators);
+    std::set<Object*> seen;
+    CalculateWeightsRecursive(entry_, dominators, &seen);
+    max_weight_  = entry_->max_weight;
+  }
 
+  void PrintSymbolsByTransitiveWeight() {
     std::vector<Object*> object_list;
     object_list.reserve(objects_.size());
     for ( auto& pair : objects_ ) {
@@ -624,9 +637,9 @@ class Program {
 
     for (auto& obj : garbage_sorted) {
       //if (name_path && obj->name == *name_path) {
-      if (obj->size > 0) {
-        fprintf(stderr, "Garbage obj: %s (%s %lx)\n", obj->pretty_name.c_str(), obj->name.c_str(), obj->vmaddr);
-      }
+      //if (obj->size > 0) {
+      //  fprintf(stderr, "Garbage obj: %s (%s %lx)\n", obj->pretty_name.c_str(), obj->name.c_str(), obj->vmaddr);
+      //}
       //}
     }
 
@@ -727,11 +740,15 @@ Object* ProgramDataSink::AddObject(const std::string& name, uintptr_t vmaddr,
 }
 
 Object* ProgramDataSink::FindObjectByName(const std::string& name) {
-  return program_->FindFunctionByName(name);
+  return program_->FindObjectByName(name);
 }
 
 Object* ProgramDataSink::FindObjectByAddr(uintptr_t addr) {
   return program_->FindObjectByAddr(addr);
+}
+
+Object* ProgramDataSink::FindObjectContainingAddr(uintptr_t addr) {
+  return program_->FindObjectContainingAddr(addr);
 }
 
 File* ProgramDataSink::GetOrCreateFile(const std::string& filename) {
@@ -799,11 +816,171 @@ void ParseVTables(const std::string& filename, Program* program) {
   fclose(f);
 }
 
+std::string GetCacheFilename(std::string filename,
+                             const std::string& build_id) {
+  return std::string("/tmp/blc.") + basename(&filename[0]) + "." + build_id;
+}
+
+bool TryOpenCacheFile(const std::string& filename, const std::string& build_id,
+                      Program* program) {
+  const std::string cache_filename = GetCacheFilename(filename, build_id);
+  std::ifstream input(cache_filename);
+  if (!input.is_open()) {
+    return false;
+  }
+  std::cerr << "Found cache file: " << cache_filename << "\n";
+
+#define FIELD R"(([^\t]+)\t)"
+  RE2 pattern(FIELD FIELD FIELD FIELD FIELD R"(([^\t]+))");
+  RE2 pattern2(R"(([^, ]+))");
+  RE2 refs_pattern(R"(([^ ]+) -> {([^}]*)})");
+  RE2 entry_pattern(R"(ENTRY: ([^ \n]+))");
+  std::string line;
+  uintptr_t vmaddr;
+  uintptr_t size;
+  uintptr_t weight;
+  uintptr_t max_weight;
+  std::string name;
+  std::string refs;
+  std::string from;
+  std::string aliases;
+  while (std::getline(input, line)) {
+    if (RE2::FullMatch(line, pattern, RE2::Hex(&vmaddr), RE2::Hex(&size),
+                       RE2::Hex(&weight), RE2::Hex(&max_weight),
+                       &name, &aliases)) {
+      Object* obj = program->AddObject(name, vmaddr, size, false);
+      obj->weight = weight;
+      obj->max_weight = max_weight;
+
+      std::string alias;
+      re2::StringPiece piece(aliases);
+      while (RE2::FindAndConsume(&piece, pattern2, &alias)) {
+        obj->aliases.insert(alias);
+      }
+    } else if (RE2::FullMatch(line, refs_pattern, &from, &refs)) {
+      Object* obj = program->FindObjectByName(from);
+      if (!obj) {
+        std::cerr << "Ref from undefined object? " << name << "\n";
+      }
+
+      re2::StringPiece piece(refs);
+      std::string ref;
+      while (RE2::FindAndConsume(&piece, pattern2, &ref)) {
+        Object* target = program->FindObjectByName(ref);
+        if (!target) {
+          std::cerr << "Ref to undefined object? " << name << ", " << ref << "\n";
+          exit(1);
+        }
+        obj->refs.insert(target);
+      }
+
+    } else if (RE2::FullMatch(line, entry_pattern, &name)) {
+      Object* obj = program->FindObjectByName(name);
+      if (!obj) {
+        std::cerr << "Unknown entry point? " << name << "\n";
+      }
+      program->SetEntryPoint(obj);
+    } else {
+      std::cerr << "Bad line: " << line << "\n";
+      exit(1);
+    }
+  }
+
+  return true;
+}
+
+void WriteCacheFile(Program* program, const std::string& filename,
+                    const std::string& build_id) {
+  const std::string cache_filename = GetCacheFilename(filename, build_id);
+  std::ofstream output(cache_filename);
+  if (!output.is_open()) {
+    std::cerr << "Couldn't open for writing: " << cache_filename << "\n";
+    exit(1);
+  }
+
+  const auto& object_map = program->objects_;
+
+  // Create an ordered list of canonical names.
+  std::set<std::string> names;
+  for (const auto& pair : object_map) {
+    names.insert(pair.second->name);  // Might be a duplicate.
+  }
+
+  for (const auto& name : names) {
+    Object* obj = program->FindObjectByName(name);
+    output << std::hex << obj->vmaddr << "\t";
+    output << std::hex << obj->size << "\t";
+    output << std::hex << obj->weight << "\t";
+    output << std::hex << obj->max_weight << "\t";
+    output << obj->name << "\t";
+
+    output << "{";
+    bool first = true;
+    for (const auto& alias : obj->aliases) {
+      if (first) {
+        first = false;
+      } else {
+        output << ", ";
+      }
+      // Could output IDs instead of names for significant size reduction.
+      output << alias;
+    }
+    output << "}";
+    output << "\n";
+  }
+
+  for (const auto& name : names) {
+    Object* obj = program->FindObjectByName(name);
+    if (obj->refs.empty()) {
+      continue;
+    }
+
+    output << obj->name << " -> ";
+    output << "{";
+    bool first = true;
+    for (const auto& target : obj->refs) {
+      if (first) {
+        first = false;
+      } else {
+        output << ", ";
+      }
+      // Could output IDs instead of names for significant size reduction.
+      output << target->name;
+    }
+    output << "}";
+    output << "\n";
+  }
+
+  if (program->entry_) {
+    output << "ENTRY: " << program->entry_->name << "\n";
+  }
+
+  std::cerr << "Wrote cache file: " << cache_filename << "\n";
+}
+
+void ReadObjectData(const std::string& filename, ProgramDataSink* sink) {
+#ifdef __APPLE__
+  ReadMachOObjectData(filename, sink);
+#else
+  ReadELFObjectData(filename, sink);
+#endif
+}
+
+std::string ReadBuildId(const std::string& filename) {
+#ifdef __APPLE__
+  return ReadMachOBuildId(filename);
+#else
+  return ReadELFBuildId(filename);
+#endif
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     std::cerr << "Usage: bloaty <binary file>\n";
     exit(1);
   }
+
+  const std::string filename = argv[1];
 
   if (argc == 3) {
     name_path = new std::string(argv[2]);
@@ -812,16 +989,20 @@ int main(int argc, char *argv[]) {
   Program program;
   ProgramDataSink sink(&program);
 
-#ifdef __APPLE__
-  ReadMachOObjectData(argv[1], &sink);
-#else
-  ReadELFObjectData(argv[1], &sink);
-#endif
+  const std::string build_id = ReadBuildId(filename);
+  bool found_cache = TryOpenCacheFile(filename, build_id, &program);
 
-  ParseVTables(argv[1], &program);
+  if (!found_cache) {
+    ReadObjectData(filename, &sink);
+    ParseVTables(filename, &program);
+    program.CalculateWeights();
+    if (!program.HasFiles()) {
+      std::cerr << "Warning: no debug information present.\n";
+    }
+  }
 
-  if (!program.HasFiles()) {
-    std::cerr << "Warning: no debug information present.\n";
+  if (!found_cache) {
+    WriteCacheFile(&program, filename, build_id);
   }
 
   program.PrintGarbage();

@@ -24,11 +24,19 @@ struct File {
 struct Object {
   Object(const std::string& name_) :
       name(name_),
+      vmaddr(0),
       size(0),
+      weight(0),
+      max_weight(0),
       file(NULL) {}
 
   // Declared name of the symbol.
   std::string name;
+
+  // A single object can be known by multiple names.  We take the first one
+  // lexicographically as the primary name and others (if any) live here as
+  // aliases.
+  std::set<std::string> aliases;
 
   // Name possibly put through c++filt, but also reduced to remove overloads if possible.
   std::string pretty_name;
@@ -123,6 +131,8 @@ LineReader ReadLinesFromPipe(const std::string& cmd);
 
 // Provided by arch-specific platform module.
 void ReadELFObjectData(const std::string& filename, ProgramDataSink* sink);
+std::string ReadELFBuildId(const std::string& filename);
 void ReadMachOObjectData(const std::string& filename, ProgramDataSink* sink);
+std::string ReadMachOBuildId(const std::string& filename);
 
 #endif

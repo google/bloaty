@@ -4,6 +4,8 @@
 #include "re2/re2.h"
 #include "bloaty.h"
 
+#include <assert.h>
+
 // There are several programs that offer useful information about
 // binaries:
 //
@@ -61,9 +63,18 @@ static void ParseELFSymbols(const std::string& filename,
 
       if (type == "NOTYPE" || type == "TLS" || ndx == "UND" || ndx == "ABS") {
         // Skip.
+      } else if (name.empty()) {
+        // This happens in lots of cases where there is a section like .interp
+        // or .dynsym.  We could import these and let the section list refine
+        // them, but they would show up as garbage symbols until we figure out
+        // how to indicate that they are reachable.
+        continue;
       } else if (type == "FUNC" || type == "IFUNC") {
         sink->AddObject(name, addr, size, false);
       } else {
+        if (name.empty()) {
+          fprintf(stderr, "Line: %s\n", line.c_str());
+        }
         sink->AddObject(name, addr, size, true);
       }
     }
@@ -102,26 +113,163 @@ static void ParseELFSections(const std::string& filename,
 
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
     if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size))) {
-      if (addr == 0x4807e0) {
-        verbose = true;
-      }
       Object* obj = sink->FindObjectByAddr(addr);
-      if (verbose) {
-        if (obj) {
-          fprintf(stderr, "Address: %lx, obj: %s, %lx\n", addr, obj->name.c_str(), obj->size);
-        } else {
-          fprintf(stderr, "Address: %lx, no obj!\n", addr);
-        }
-      }
       if (obj && obj->size == 0) {
         std::cerr << "Updating size of " << obj->name << " to: " << size << "\n";
         obj->size = size;
       }
     }
-    verbose = false;
   }
 
 }
+
+// This is a relatively complicated state machine designed to do something that
+// might not actually be important.  It's trying to avoid creating spurious
+// references by avoiding scanning constants in unreachable code.
+class RefAdder {
+ public:
+  RefAdder(ProgramDataSink* sink) : sink_(sink) {}
+
+  void OnFunction(const std::string& name) {
+    for (auto it = scanned_refs_.begin(); it != scanned_refs_.end() ; ) {
+      if (it->second) {
+        ++it;
+      } else {
+        scanned_refs_.erase(it++);
+      }
+    }
+    if (!scanned_refs_.empty() && current_function_) {
+      fprintf(stderr, "Function (%s): Discarding the following scanned refs.\n", current_function_->name.c_str());
+      for (const auto& pair : scanned_refs_) {
+        if (pair.second) {
+          fprintf(stderr, "  %lx: %s\n", pair.first, pair.second->name.c_str());
+        }
+      }
+    }
+
+    scanned_refs_.clear();
+    branch_targets_.clear();
+    scanning_ = false;
+
+    // Needed?
+    // if (!current_function && current_function_name[0] == '_') {
+    //   current_function_name = current_function_name.substr(1);
+    // }
+
+    // current_function = sink->FindObjectByName(current_function_name);
+
+    current_function_ = sink_->FindObjectByName(name);
+
+    if (!current_function_) {
+      std::cerr << "Couldn't find function for name: " << name << "\n";
+    }
+  }
+
+  void OnAddrRef(uintptr_t current_addr, uintptr_t dest_addr) {
+    Object* to = sink_->FindObjectContainingAddr(dest_addr);
+    if (to) {
+      AddOrStore(current_addr, to);
+    }
+  }
+
+  void OnNameRef(uintptr_t current_addr, const std::string& dest_name) {
+    Object* to = sink_->FindObjectByName(dest_name);
+    if (to) {
+      AddOrStore(current_addr, to);
+    }
+  }
+
+  void OnUnconditionalBranch(uintptr_t current_addr, uintptr_t dest_addr) {
+    if (verbose) {
+      fprintf(stderr, "Unconditional branch at: %lx -> %lx\n", current_addr, dest_addr);
+    }
+    if (dest_addr) {
+      AddBranchTarget(current_addr, dest_addr);
+    }
+    //scanning_ = true;
+    if (!scanned_refs_.empty() && scanned_refs_.rbegin()->second) {
+      scanned_refs_.emplace(std::make_pair(current_addr, nullptr));
+    }
+  }
+
+  void OnConditionalBranch(uintptr_t current_addr, uintptr_t dest_addr) {
+    if (verbose) {
+      fprintf(stderr, "Conditional branch at: %lx -> %lx\n", current_addr, dest_addr);
+    }
+    AddBranchTarget(current_addr, dest_addr);
+  }
+
+ private:
+
+  void AddRef(Object* to) {
+    sink_->AddRef(current_function_, to);
+  }
+
+  void AddOrStore(uintptr_t current_addr, Object* dest) {
+    if (!current_function_) {
+      return;
+    }
+
+    MaybeStopScanning(current_addr);
+    if (scanning_) {
+      scanned_refs_.emplace(std::make_pair(current_addr, dest));
+    } else {
+      AddRef(dest);
+    }
+  }
+
+  void AddBranchTarget(uintptr_t current_addr, uintptr_t dest_addr) {
+    MaybeStopScanning(current_addr);
+    if (dest_addr > current_addr) {
+      // Forward branch.  Store the branch target so we know to stop passively
+      // scanning when we see it.
+      branch_targets_.insert(dest_addr);
+    } else {
+      // Backward branch.  Add any scanned-but-unadded refs (if any) starting at
+      // this dest.
+      auto r = &scanned_refs_;
+
+      for (auto it = r->lower_bound(dest_addr); it != r->end() ; ) {
+        if (it->second == NULL) {
+          break;
+        } else {
+          AddRef(it->second);
+          r->erase(it++);
+        }
+      }
+    }
+  }
+
+  void MaybeStopScanning(uintptr_t current_addr) {
+    auto it = branch_targets_.begin();
+    if (it != branch_targets_.end() && current_addr >= *it) {
+      branch_targets_.erase(it);
+      scanning_ = false;
+    }
+  }
+
+  // While we are scanning through code we think is unreachable, we accumulate
+  // the addresses we find here, in case we find out later that the code is
+  // actually reachable.  The pairs are:
+  //   (current address, Object*)
+  //
+  // A NULL Object* represents an unconditional branch.
+  std::map<uintptr_t, Object*> scanned_refs_;
+
+  // When we think we are in unreachable code and we are just scanning, this is
+  // ture.
+  bool scanning_ = false;
+
+  // The function we are inside. 
+  Object* current_function_ = NULL;
+
+  // Track a list of jump targets we have seen.  If we see an unconditional
+  // branch (jmp or ret) we start putting addresses in scanned_addresses instead
+  // of adding them directly until we hit the next jump target.
+  std::set<uintptr_t> branch_targets_;
+
+  ProgramDataSink* sink_;
+};
 
 static void ParseELFDisassembly(const std::string& filename,
                                 ProgramDataSink* sink) {
@@ -136,8 +284,19 @@ static void ParseELFDisassembly(const std::string& filename,
   //   43f80b:       eb ce                   jmp    43f7db <_ZN3re26Regexp8ToStringEv>
   RE2 call_pattern(R"((?:call|jmp)\s+[0-9a-f]+ <([\w.]+)>)");
 
+  // jmp    4b0c40 <
+  // 40059b:       eb 03                   jmp    4005a0 <_ZN10LogMessageC2EPKcii.constprop.136+0x136>
+  // 52c597:       c3                      ret
+  RE2 unconditional_jmp(R"(jmp\s+([0-9a-f]+))");
+
+  //   40287b:       73 03                   jae    402880 <_ZN19DominatorCalculator8CompressEj+0x70>
+  RE2 conditional_jmp(R"(\sj[a-z]+\s+([0-9a-f]+) <)");
+
   //   43f941:       4c 8d 25 70 44 21 00    lea    r12,[rip+0x214470]        # 653db8 <__frame_dummy_init_array_entry+0x10>
   RE2 ref_pattern(R"(# [0-9a-f]+ <([\w.]+)(?:\+0x[0-9a-f]+)?>)");
+
+  // To capture tha address at the beginning of the line.
+  RE2 addr_pattern(R"(^\s*([0-9a-f]+))");
 
   // Some references only show up like this. :(
   // It's a guess whether this is really an address.
@@ -148,48 +307,31 @@ static void ParseELFDisassembly(const std::string& filename,
   //   42fdc5:       41 bf e0 f2 51 00       mov    r15d,0x51f2e0
   RE2 const_pattern(R"(0x([0-9a-f]+))");
 
-  Object* current_function = NULL;
   std::string current_function_name;
   std::string name;
+  uintptr_t current_addr;
   uintptr_t addr;
 
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
+  RefAdder adder(sink);
+
+  for (auto& line : ReadLinesFromPipe(cmd)) {
     if (RE2::FullMatch(line, func_pattern, &current_function_name)) {
-      current_function = sink->FindObjectByName(current_function_name);
-
-      if (!current_function && current_function_name[0] == '_') {
-        current_function_name = current_function_name.substr(1);
-      }
-
-      current_function = sink->FindObjectByName(current_function_name);
-
-      if (!current_function) {
-        std::cerr << "Couldn't find function for name: " << current_function_name << "\n";
-      }
-    } else if (RE2::PartialMatch(line, call_pattern, &name) ||
-               RE2::PartialMatch(line, ref_pattern, &name)) {
-      Object* target_function = sink->FindObjectByName(name);
-      if (!target_function && name[0] == '_') {
-        name = name.substr(1);
-        target_function = sink->FindObjectByName(name);
-      }
-
-      if (!current_function) {
-        //std::cerr << line << "\n";
-        //std::cerr << "Whoops!  Found an edge but no current function.  Name: " << name << "\n";
-      } else if (!target_function) {
-        //std::cerr << line << "\n";
-        //std::cerr << "Whoops!  Couldn't find a function entry for: '" << name << "'\n";
+      adder.OnFunction(current_function_name);
+    } else if (RE2::PartialMatch(line, addr_pattern, RE2::Hex(&current_addr))) {
+      if (RE2::PartialMatch(line, call_pattern, &name) ||
+          RE2::PartialMatch(line, ref_pattern, &name)) {
+        adder.OnNameRef(current_addr, name);
+      } else if (RE2::PartialMatch(line, unconditional_jmp, RE2::Hex(&addr))) {
+        adder.OnUnconditionalBranch(current_addr, addr);
+      } else if (line.find(" ret ") != std::string::npos) {
+        adder.OnUnconditionalBranch(current_addr, 0);
+      } else if (RE2::PartialMatch(line, conditional_jmp, RE2::Hex(&addr))) {
+        adder.OnConditionalBranch(current_addr, addr);
       } else {
-        sink->AddRef(current_function, target_function);
-      }
-    }
-
-    re2::StringPiece piece(line);
-    while (RE2::FindAndConsume(&piece, const_pattern, RE2::Hex(&addr))) {
-      Object* to = sink->FindObjectByAddr(addr);
-      if (current_function && to) {
-        sink->AddRef(current_function, to);
+        re2::StringPiece piece(line);
+        while (RE2::FindAndConsume(&piece, const_pattern, RE2::Hex(&addr))) {
+          adder.OnAddrRef(current_addr, addr);
+        }
       }
     }
   }
@@ -224,6 +366,22 @@ static void ParseELFFileMapping(const std::string& filename,
 
   Object* entry = sink->FindObjectByAddr(entry_addr);
   sink->SetEntryPoint(entry);
+}
+
+std::string ReadELFBuildId(const std::string& filename) {
+  // Build ID: 669eba985387d24f7d959e0f0e49d9209bcf975b
+  RE2 pattern(R"(Build ID: (\w+))");
+  std::string cmd = std::string("readelf -n ") + filename;
+  std::string build_id;
+
+  for (auto& line : ReadLinesFromPipe(cmd)) {
+    if (RE2::PartialMatch(line, pattern, &build_id)) {
+      return build_id;
+    }
+  }
+
+  std::cerr << "Didn't find BUILD id.\n";
+  exit(1);
 }
 
 void ReadELFObjectData(const std::string& filename, ProgramDataSink* sink) {
