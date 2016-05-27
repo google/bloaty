@@ -18,6 +18,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <stdlib.h>
@@ -115,10 +116,17 @@ class RangeMap {
 
   bool TryGet(uintptr_t addr, T* val) {
     auto it = mappings_.upper_bound(addr);
-    if (it == mappings_.begin() || (--it, it->first + it->second.second < addr)) {
-      if (verbose) {
-        fprintf(stderr, "Lookup failed! %lx wasn't inside (%lx, %lx)\n", addr, it->first, it->first + it->second.second);
-      }
+    if (it == mappings_.begin() || (--it, it->first + it->second.second <= addr)) {
+      return false;
+    }
+    assert(addr >= it->first && addr < it->first + it->second.second);
+    *val = it->second.first;
+    return true;
+  }
+
+  bool TryGetExactly(uintptr_t addr, T* val) {
+    auto it = mappings_.find(addr);
+    if (it == mappings_.end()) {
       return false;
     }
     *val = it->second.first;
@@ -374,8 +382,8 @@ class Program {
       fprintf(stderr, "Adding object %s addr=%lx, size=%lx\n", name.c_str(), vmaddr, size);
     }
 
-    auto pair = objects_.emplace(name, name);
-    Object* ret = &pair.first->second;
+    Object* ret = new Object(name);
+    objects_[name] = ret;
     ret->id = next_id_++;
     ret->vmaddr = vmaddr;
     ret->SetSize(size);
@@ -404,6 +412,10 @@ class Program {
     return ret;
   }
 
+  void AddObjectAlias(Object* obj, const std::string& name) {
+    objects_[name] = obj;
+  }
+
   void AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff, size_t filesize) {
     file_offsets_.Add(vmaddr, filesize, vmaddr - fileoff);
   }
@@ -430,7 +442,7 @@ class Program {
     Object* to;
     if (objects_by_addr_.TryGet(vmaddr, &to)) {
       if (verbose) {
-        fprintf(stderr, "Added ref! %s -> %s\n", from->name.c_str(), to->name.c_str());
+        fprintf(stderr, "Added ref! %s -> %s\n", from->pretty_name.c_str(), to->pretty_name.c_str());
       }
       from->refs.insert(to);
       //if (to) {
@@ -454,10 +466,19 @@ class Program {
 
   Object* FindFunctionByName(const std::string& name) {
     auto it = objects_.find(name);
-    return it == objects_.end() ? NULL : &it->second;
+    return it == objects_.end() ? NULL : it->second;
   }
 
   Object* FindObjectByAddr(uintptr_t addr) {
+    Object* ret;
+    if (objects_by_addr_.TryGetExactly(addr, &ret)) {
+      return ret;
+    } else {
+      return NULL;
+    }
+  }
+
+  Object* FindObjectContainingAddr(uintptr_t addr) {
     Object* ret;
     if (objects_by_addr_.TryGet(addr, &ret)) {
       return ret;
@@ -520,8 +541,7 @@ class Program {
     std::vector<Object*> object_list;
     object_list.reserve(objects_.size());
     for ( auto& pair : objects_ ) {
-      object_list.push_back(&pair.second);
-      assert(pair.first == pair.second.name);
+      object_list.push_back(pair.second);
     }
 
     std::sort(object_list.begin(), object_list.end(), [](Object* a, Object* b) {
@@ -548,7 +568,8 @@ class Program {
     out << "}\n";
   }
 
-  void GC(Object* obj, std::set<Object*>* garbage, std::vector<Object*>* stack) {
+  void GC(Object* obj, std::unordered_set<Object*>* garbage,
+          std::vector<Object*>* stack) {
     if (garbage->erase(obj) != 1) {
       return;
     }
@@ -581,11 +602,11 @@ class Program {
   }
 
   void PrintGarbage() {
-    std::set<Object*> garbage;
+    std::unordered_set<Object*> garbage;
     std::vector<Object*> stack;
 
     for ( auto& pair : objects_ ) {
-      garbage.insert(&pair.second);
+      garbage.insert(pair.second);
     }
 
     if (!entry_) {
@@ -594,12 +615,18 @@ class Program {
     }
 
     GC(entry_, &garbage, &stack);
+    std::vector<Object*> garbage_sorted;
+    std::copy(garbage.begin(), garbage.end(),
+              std::back_inserter(garbage_sorted));
+    std::sort(garbage_sorted.begin(), garbage_sorted.end(), [](Object* a, Object* b) {
+      return a->pretty_name > b->pretty_name;
+    });
 
-    for (auto& obj : garbage) {
+    for (auto& obj : garbage_sorted) {
       //if (name_path && obj->name == *name_path) {
-      //if (obj->size > 0) {
-      //  std::cerr << "Garbage obj: " << obj->pretty_name << "\n";
-      //}
+      if (obj->size > 0) {
+        fprintf(stderr, "Garbage obj: %s (%s %lx)\n", obj->pretty_name.c_str(), obj->name.c_str(), obj->vmaddr);
+      }
       //}
     }
 
@@ -629,9 +656,9 @@ class Program {
     std::vector<Object*> object_list;
     object_list.reserve(objects_.size());
     for ( auto& pair : objects_ ) {
-      object_list.push_back(&pair.second);
-      assert(pair.first == pair.second.name);
-      total += pair.second.size;
+      object_list.push_back(pair.second);
+      assert(pair.first == pair.second->name);
+      total += pair.second->size;
     }
 
     std::sort(object_list.begin(), object_list.end(), [](Object* a, Object* b) {
@@ -684,7 +711,7 @@ class Program {
   std::unordered_map<std::string, File> files_;
 
   // Objects, indexed by name.
-  std::unordered_map<std::string, Object> objects_;
+  std::unordered_map<std::string, Object*> objects_;
   std::unordered_map<std::string, Object*> stripped_pretty_names_;
   RangeMap<Object*> objects_by_addr_;
   RangeMap<uintptr_t> file_offsets_;
@@ -711,9 +738,14 @@ File* ProgramDataSink::GetOrCreateFile(const std::string& filename) {
   return program_->GetOrCreateFile(filename);
 }
 
+void ProgramDataSink::AddObjectAlias(Object* obj, const std::string& name) {
+  program_->AddObjectAlias(obj, name);
+}
+
 void ProgramDataSink::AddRef(Object* from, Object* to) {
-  if (name_path && from->name == *name_path) {
-    std::cerr << "  Add ref from " << from->name << " to " << to->name << "\n";
+  if (name_path &&
+      (from->name == *name_path || to->name == *name_path)) {
+    std::cerr << "  Add ref from " << from->pretty_name << " to " << to->pretty_name << "\n";
   }
   from->refs.insert(to);
 }
@@ -731,7 +763,7 @@ void ParseVTables(const std::string& filename, Program* program) {
   FILE* f = fopen(filename.c_str(), "rb");
 
   for (auto& pair : program->objects_) {
-    Object* obj = &pair.second;
+    Object* obj = pair.second;
 
     if (!obj->data) {
       continue;
@@ -779,7 +811,13 @@ int main(int argc, char *argv[]) {
 
   Program program;
   ProgramDataSink sink(&program);
-  ReadObjectData(argv[1], &sink);
+
+#ifdef __APPLE__
+  ReadMachOObjectData(argv[1], &sink);
+#else
+  ReadELFObjectData(argv[1], &sink);
+#endif
+
   ParseVTables(argv[1], &program);
 
   if (!program.HasFiles()) {

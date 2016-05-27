@@ -167,8 +167,8 @@ static void ParseMachOFileMapping(const std::string& filename,
   std::string key;
   std::string text_val;
   uintptr_t val;
-  uintptr_t vmaddr;
-  uintptr_t fileoff;
+  uintptr_t vmaddr = 0;
+  uintptr_t fileoff = 0;
   uintptr_t filesize;
 
   // The entry point appears to be relative to the vmaddr of the first __TEXT
@@ -205,7 +205,7 @@ static void ParseMachOFileMapping(const std::string& filename,
   }
 }
 
-void ReadObjectData(const std::string& filename, ProgramDataSink* sink) {
+void ReadMachOObjectData(const std::string& filename, ProgramDataSink* sink) {
   ParseMachOSymbols(filename, sink);
   ParseMachODisassembly(filename, sink);
   ParseMachOFileMapping(filename, sink);

@@ -61,8 +61,10 @@ class ProgramDataSink {
 
   Object* AddObject(const std::string& name, uintptr_t vmaddr, size_t size,
                     bool data);
+  void AddObjectAlias(Object* obj, const std::string& name);
   Object* FindObjectByName(const std::string& name);
   Object* FindObjectByAddr(uintptr_t addr);
+  Object* FindObjectContainingAddr(uintptr_t addr);
   void AddRef(Object* from, Object* to);
   void SetEntryPoint(Object* obj);
   void AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff, size_t filesize);
@@ -120,6 +122,7 @@ class LineIterator {
 LineReader ReadLinesFromPipe(const std::string& cmd);
 
 // Provided by arch-specific platform module.
-void ReadObjectData(const std::string& filename, ProgramDataSink* sink);
+void ReadELFObjectData(const std::string& filename, ProgramDataSink* sink);
+void ReadMachOObjectData(const std::string& filename, ProgramDataSink* sink);
 
 #endif

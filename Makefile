@@ -11,8 +11,8 @@ else
   GC_SECTIONS = -Wl,-gc-sections
 endif
 
-bloaty: bloaty.o $(OBJFORMAT) third_party/re2/obj/libre2.a
-	g++ $(GC_SECTIONS) -o bloaty bloaty.o $(OBJFORMAT) third_party/re2/obj/libre2.a -lpthread
+bloaty: bloaty.o macho.o elf.o third_party/re2/obj/libre2.a
+	$(CXX) $(GC_SECTIONS) -o bloaty bloaty.o macho.o elf.o third_party/re2/obj/libre2.a -lpthread
 
 elf.o: elf.cc
 bloaty.o: bloaty.cc

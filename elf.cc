@@ -32,7 +32,34 @@ static void ParseELFSymbols(const std::string& filename,
     size_t addr, size;
 
     if (RE2::FullMatch(line, pattern, RE2::Hex(&addr), &size, &type, &ndx, &name)) {
-      if (type == "NOTYPE" || ndx == "UND" || ndx == "ABS") {
+      // We can't skip symbols of size 0 because some symbols appear to
+      // have size 0 in the symbol table even though their true size appears to
+      // be clearly greater than zero.  For example:
+      //
+      // $ readelf -s --wide
+      //  Symbol table '.symtab' contains 22833 entries:
+      //    Num:    Value          Size Type    Bind   Vis      Ndx Name
+      // [...]
+      //     10: 0000000000034450     0 FUNC    LOCAL  DEFAULT   13 __do_global_dtors_aux
+      //
+      // $ objdump -d -r -M intel
+      // 0000000000034450 <__do_global_dtors_aux>:
+      //   34450:       80 3d 69 b7 45 00 00    cmp    BYTE PTR [rip+0x45b769],0x0        # 48fbc0 <completed.6687>
+      //   34457:       75 72                   jne    344cb <__do_global_dtors_aux+0x7b>
+
+      Object* obj = sink->FindObjectByAddr(addr);
+      if (obj && obj->size > 0 && size > 0) {
+        if (obj->vmaddr == addr && obj->size == size) {
+          sink->AddObjectAlias(obj, name);
+          continue;
+        } else {
+          fprintf(stderr, "Imperfect duplicate: (%s, %lx, %lx) (%s, %lx, %lx)\n",
+                  obj->name.c_str(), obj->vmaddr, obj->size, name.c_str(), addr, size);
+          exit(1);
+        }
+      }
+
+      if (type == "NOTYPE" || type == "TLS" || ndx == "UND" || ndx == "ABS") {
         // Skip.
       } else if (type == "FUNC" || type == "IFUNC") {
         sink->AddObject(name, addr, size, false);
@@ -41,6 +68,59 @@ static void ParseELFSymbols(const std::string& filename,
       }
     }
   }
+}
+
+extern bool verbose;
+static void ParseELFSections(const std::string& filename,
+                             ProgramDataSink* sink) {
+  std::string cmd = std::string("readelf -S --wide ") + filename;
+  // We use the section headers to patch up the symbol table a little.
+  // There are a few cases where the symbol table shows a zero size for
+  // a symbol, but the symbol corresponds to a section which has a useful
+  // size in the section headers.  For example:
+  //
+  // $ readelf -s --wide
+  // Symbol table '.dynsym' contains 307 entries:
+  //    Num:    Value          Size Type    Bind   Vis      Ndx Name
+  //  [...]
+  //      4: 00000000004807e0     0 OBJECT  LOCAL  DEFAULT   23 __CTOR_LIST__
+  //
+  // $ readelf -S
+  // Section Headers:
+  //  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  //  [...]
+  //  [23] .ctors            PROGBITS        00000000004807e0 47f7e0 0004d0 00  WA  0   0  8
+  //
+  // It would be nice if the linker would put the correct size in the symbol
+  // table!
+
+  //  [23] .ctors            PROGBITS        00000000004807e0 47f7e0 0004d0 00  WA  0   0  8
+  RE2 pattern(R"(([0-9a-f]+) (?:[0-9a-f]+) ([0-9a-f]+))");
+
+  uintptr_t addr;
+  uintptr_t size;
+
+  for ( auto& line : ReadLinesFromPipe(cmd) ) {
+    if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size))) {
+      if (addr == 0x4807e0) {
+        verbose = true;
+      }
+      Object* obj = sink->FindObjectByAddr(addr);
+      if (verbose) {
+        if (obj) {
+          fprintf(stderr, "Address: %lx, obj: %s, %lx\n", addr, obj->name.c_str(), obj->size);
+        } else {
+          fprintf(stderr, "Address: %lx, no obj!\n", addr);
+        }
+      }
+      if (obj && obj->size == 0) {
+        std::cerr << "Updating size of " << obj->name << " to: " << size << "\n";
+        obj->size = size;
+      }
+    }
+    verbose = false;
+  }
+
 }
 
 static void ParseELFDisassembly(const std::string& filename,
@@ -57,7 +137,7 @@ static void ParseELFDisassembly(const std::string& filename,
   RE2 call_pattern(R"((?:call|jmp)\s+[0-9a-f]+ <([\w.]+)>)");
 
   //   43f941:       4c 8d 25 70 44 21 00    lea    r12,[rip+0x214470]        # 653db8 <__frame_dummy_init_array_entry+0x10>
-  RE2 ref_pattern(R"(# [0-9a-f]+ <([\w.]+)(?:\+0x\d+)?>)");
+  RE2 ref_pattern(R"(# [0-9a-f]+ <([\w.]+)(?:\+0x[0-9a-f]+)?>)");
 
   // Some references only show up like this. :(
   // It's a guess whether this is really an address.
@@ -146,8 +226,9 @@ static void ParseELFFileMapping(const std::string& filename,
   sink->SetEntryPoint(entry);
 }
 
-void ReadObjectData(const std::string& filename, ProgramDataSink* sink) {
-  ParseELFSymbols(filename, &sink);
-  ParseELFDisassembly(filename, &sink);
-  ParseELFFileMapping(filename, &sink);
+void ReadELFObjectData(const std::string& filename, ProgramDataSink* sink) {
+  ParseELFSymbols(filename, sink);
+  ParseELFSections(filename, sink);
+  ParseELFDisassembly(filename, sink);
+  ParseELFFileMapping(filename, sink);
 }
