@@ -605,6 +605,7 @@ class Program {
     double total = 0;
 
     CalculatePrettyNames();
+    size_t could_be_mapped = 0;
 
     std::vector<Object*> object_list;
     object_list.reserve(objects_.size());
@@ -612,6 +613,7 @@ class Program {
     for ( auto& pair : objects_ ) {
       auto obj = pair.second;
       if (obj->file != &no_file_) {
+        could_be_mapped += obj->size;
         continue;
       }
       object_list.push_back(pair.second);
@@ -628,11 +630,13 @@ class Program {
     for ( auto object : object_list) {
       size_t size = object->size;
       cumulative += size;
-      const std::string& name = object->pretty_name;
+      const std::string& name = object->name + " (" + object->pretty_name + ")";
       printf("%5.1f%% %5.1f%%  %6d %s\n", size / total * 100, cumulative / total * 100, (int)size, name.c_str());
     }
 
-    printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
+    printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL could NOT be mapped to source files");
+    double real_total = total + could_be_mapped;
+    printf("%d / %d could not be mapped to source files (%0.1f%%)\n", (int)total, (int)real_total, (total * 100) / real_total);
   }
 
   void TryAddRef(Object* from, uintptr_t vmaddr) {
@@ -762,13 +766,13 @@ class Program {
       return a->pretty_name > b->pretty_name;
     });
 
-    for (auto& obj : garbage_sorted) {
+    //for (auto& obj : garbage_sorted) {
       //if (name_path && obj->name == *name_path) {
       //if (obj->size > 0) {
       //  fprintf(stderr, "Garbage obj: %s (%s %lx)\n", obj->pretty_name.c_str(), obj->name.c_str(), obj->vmaddr);
       //}
       //}
-    }
+    //}
 
     if (entry_->file) {
       std::set<File*> garbage_files;
@@ -1247,16 +1251,24 @@ void DoSymbolAnalysis(const std::string& filename) {
 }
 
 int main(int argc, char *argv[]) {
+  /*
   if (argc < 3) {
     std::cerr << "Usage: bloaty <binary file> <rule map>\n";
     exit(1);
   }
+  */
+
+  if (argc < 2) {
+    std::cerr << "Usage: bloaty <binary file>\n";
+    exit(1);
+  }
 
   const std::string bin_file = argv[1];
-  const std::string rule_map = argv[2];
 
+  /*
   RuleMap map;
   map.ReadMapFile(rule_map);
+  */
 
   Program program;
   ProgramDataSink sink(&program);
@@ -1267,6 +1279,7 @@ int main(int argc, char *argv[]) {
   bloaty::GetFunctionFilePairs(bin_file, &sink);
   ParseELFFileMapping(bin_file, &sink);
 
+  /*
   Rule* entry = nullptr;
   if (program.entry()) {
     Object* obj_entry = program.entry();
@@ -1291,5 +1304,6 @@ int main(int argc, char *argv[]) {
   map.PrintWeightGraph(entry);
   map.PrintDepGraph();
   map.PrintDomTree();
+  */
   program.PrintNoFile();
 }
