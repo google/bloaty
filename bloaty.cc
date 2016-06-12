@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -27,6 +28,7 @@
 #include <sys/wait.h>
 
 #include "re2/re2.h"
+#include "leveldb/table.h"
 #include <assert.h>
 
 #include "bloaty.h"
@@ -40,6 +42,25 @@
   }
 
 std::string* name_path;
+
+std::string ClampSize(const std::string& input, size_t size) {
+  if (input.size() < size) {
+    return input;
+  } else {
+    return input.substr(0, size);
+  }
+}
+
+std::string SiPrint(size_t size) {
+  const char *prefixes[] = {"", "k", "M", "G", "T"};
+  int n = 0;
+  while (size > 1024) {
+    size /= 1024;
+    n++;
+  }
+
+  return std::to_string(size) + prefixes[n];
+}
 
 void LineReader::Next() {
   char buf[256];
@@ -72,7 +93,7 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
     exit(1);
   }
 
-  return LineReader(pipe);
+  return LineReader(pipe, true);
 }
 
 class NameStripper {
@@ -157,8 +178,15 @@ class Demangler {
       // Parent.
       CHECK_SYSCALL(close(toproc_pipe_fd[0]));
       CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-      write_fd_ = toproc_pipe_fd[1];
-      read_fd_ = fromproc_pipe_fd[0];
+      int write_fd = toproc_pipe_fd[1];
+      int read_fd = fromproc_pipe_fd[0];
+      write_file_ = fdopen(write_fd, "w");
+      FILE* read_file = fdopen(read_fd, "r");
+      if (write_file_ == NULL || read_file == NULL) {
+        perror("fdopen");
+        exit(1);
+      }
+      reader_.reset(new LineReader(read_file, false));
       child_pid_ = pid;
     } else {
       // Child.
@@ -182,61 +210,49 @@ class Demangler {
     int status;
     kill(child_pid_, SIGTERM);
     waitpid(child_pid_, &status, WEXITED);
+    fclose(write_file_);
   }
 
   std::string Demangle(const std::string& symbol) {
-    return symbol;
-    char buf[2048];
     const char *writeptr = symbol.c_str();
     const char *writeend = writeptr + symbol.size();
-    char *readptr = buf;
 
     while (writeptr < writeend) {
-      ssize_t bytes = write(write_fd_, writeptr, writeend - writeptr);
-      if (bytes < 0) {
-        perror("read");
+      size_t bytes = fwrite(writeptr, 1, writeend - writeptr, write_file_);
+      if (bytes == 0) {
+        perror("fread");
         exit(1);
       }
       writeptr += bytes;
     }
-    if (write(write_fd_, "\n", 1) != 1) {
-      perror("read");
+    if (fwrite("\n", 1, 1, write_file_) != 1) {
+      perror("fwrite");
       exit(1);
     }
-    do {
-      ssize_t bytes = read(read_fd_, readptr, sizeof(buf) - (readptr - buf));
-      if (bytes < 0) {
-        perror("read");
-        exit(1);
-      }
-      readptr += bytes;
-    } while(readptr[-1] != '\n');
-
-    --readptr;  // newline.
-    *readptr = '\0';
-
-    std::string ret(buf);
-    if (ret.empty()) {
-      fprintf(stderr, "Failed to demangle: %s\n", symbol.c_str());
+    if (fflush(write_file_) != 0) {
+      perror("fflush");
+      exit(1);
     }
-    assert(ret.size() > 0);
 
-    return ret;
+    reader_->Next();
+    return reader_->line();
   }
 
  private:
-  int write_fd_;
-  int read_fd_;
+  FILE* write_file_;
+  std::unique_ptr<LineReader> reader_;
   pid_t child_pid_;
 };
 
 
 /** Program data structures ***************************************************/
 
+// Uses the simpler of the two algorithms described here:
+//   https://www.cs.princeton.edu/courses/archive/fall03/cs528/handouts/a%20fast%20algorithm%20for%20finding.pdf
+template <class T>
 class DominatorCalculator {
  public:
-  static void Calculate(Object* root, uint32_t total,
-                        std::unordered_map<Object*, Object*>* dominators) {
+  static void Calculate(T* root, uint32_t total) {
     DominatorCalculator calculator;
     calculator.CalculateDominators(root, total);
     for (const auto& info : calculator.node_info_) {
@@ -248,12 +264,12 @@ class DominatorCalculator {
         // Main won't have this.  But make sure no node can have id 0.
         continue;
       }
-      (*dominators)[info.node] = calculator.node_info_[info.dom].node;
+      info.node->dominator = calculator.node_info_[info.dom].node;
     }
   }
 
  private:
-  void Initialize(Object* pv) {
+  void Initialize(T* pv) {
     uint32_t v = pv->id;
     node_info_[v].node = pv;
     Semi(v) = ++n_;
@@ -293,7 +309,7 @@ class DominatorCalculator {
     }
   }
 
-  void CalculateDominators(Object* pr, uint32_t total) {
+  void CalculateDominators(T* pr, uint32_t total) {
     uint32_t r = pr->id;
     n_ = 0;
     node_info_.resize(total);
@@ -364,7 +380,7 @@ class DominatorCalculator {
   uint32_t n_;
 
   struct NodeInfo {
-    Object* node;
+    T* node;
     uint32_t parent;
     uint32_t ancestor;
     uint32_t label;
@@ -377,9 +393,134 @@ class DominatorCalculator {
   std::vector<uint32_t> ordering_;  // i -> (node_info_ index)
 };
 
+template <class T>
+class WeightGraphPrinter {
+ public:
+  void Print(T* entry, uint32_t maxid) {
+    DominatorCalculator<T>::Calculate(entry, maxid);
+    std::set<T*> seen;
+    CalculateWeightsRecursive(entry, &seen);
+    std::ofstream out("/tmp/graph.dot");
+    out << "digraph weights {\n";
+    out << "  rankdir=LR;\n";
+    /*
+    for ( auto object : object_list) {
+      out << "  \"" << object->name << "\"\n";
+    }
+    */
+    {
+      std::unordered_map<T*, std::unordered_set<T*>> dominating;
+      for (auto obj : seen) {
+        total_size_ += obj->size;
+        if (obj->dominator) {
+          //if (name_path && obj->dominator->name == *name_path) {
+            //std::cerr << "Adding dominator: " << obj->name << " -> " << *name_path << "\n";
+          //  std::cerr << "Adding dominator: " << obj->dominator->name << " -> " << obj->name << "\n";
+          //}
+          dominating[obj->dominator].insert(obj);
+        }
+      }
+
+      PrintDotGraph(entry, &out, dominating);
+    }
+    out << "}\n";
+  }
+
+ private:
+  size_t total_size_ = 0;
+
+  uint32_t FontSize(size_t size) {
+    return 9 + pow(size * 200.0 / total_size_, 0.7);
+  }
+
+  void PrintDotGraph(T* obj, std::ofstream* out,
+      const std::unordered_map<T*, std::unordered_set<T*>>& dominating) {
+    size_t other_size = 0;
+    size_t max_other = 0;
+    size_t other_count = 0;
+    size_t unsummarized = 0;
+    auto it = dominating.find(obj);
+    if (it != dominating.end()) {
+      const std::unordered_set<T*> direct = it->second;
+      std::vector<T*> sorted;
+      std::copy(direct.begin(), direct.end(),
+                std::back_inserter(sorted));
+      std::sort(sorted.begin(), sorted.end(), [&](T* a, T* b) {
+        auto it_a = dominating.find(a);
+        auto it_b = dominating.find(b);
+        size_t children_a = (it_a == dominating.end()) ? 0 : it_a->second.size();
+        size_t children_b = (it_b == dominating.end()) ? 0 : it_b->second.size();
+        if (children_a != children_b) {
+          return children_a > children_b;
+        }
+        return a->size > b->size;
+      });
+      for (size_t i = 0; i < sorted.size(); i++) {
+        T* target = sorted[i];
+        if ((static_cast<double>(target->weight) / total_size_) > 0.001) {
+          unsummarized++;
+          *out << "  \"" << obj->name << "\" -> \"" << target->name << "\";\n"; // [penwidth=" << (pow(obj->weight * 100.0 / max_weight_, 0.6)) << "];\n";
+          PrintDotGraph(target, out, dominating);
+        } else {
+          other_count++;
+          other_size += target->weight;
+          max_other = std::max(target->weight, max_other);
+        }
+      }
+    }
+
+    if (unsummarized > 0) {
+      if (other_size) {
+        std::string other_name = obj->name + " OTHER";
+        *out << "  \"" << obj->name << "\" -> \"" << other_name
+             << "\";\n";  // [penwidth=" << (pow(obj->weight * 100.0 /
+                          // max_weight_, 0.6)) << "];\n";
+        *out << "  \"" << other_name << "\" [shape=box, label=\"["
+             << other_count << " others under " << SiPrint(max_other)
+             << "]\\nsize: " << SiPrint(other_size)
+             << "\", fontsize=" << FontSize(other_size) << "];\n";
+      }
+      *out << "  \"" << obj->name << "\" [shape=box, label=\""
+           << ClampSize(obj->pretty_name, 80)
+           << "\\nsize: " << SiPrint(obj->size)
+           << "\\nweight: " << SiPrint(obj->weight)
+           << "\", fontsize=" << FontSize(obj->size) << "];\n";
+    } else {
+      size_t size = obj->size + other_size;
+      std::string label = ClampSize(obj->pretty_name, 80);
+      if (other_count > 0 && max_other > 0) {
+        label += "\\nand " + std::to_string(other_count) + " children under " +
+                 SiPrint(max_other);
+      }
+      *out << "  \"" << obj->name << "\" [shape=box, label=\"" << label
+           << "\\nsize: " << SiPrint(size)
+           << "\", fontsize=" << FontSize(obj->weight) << "];\n";
+    }
+  }
+
+  void CalculateWeightsRecursive(T* obj, std::set<T*>* seen) {
+    if (!seen->insert(obj).second) {
+      return;
+    }
+
+    obj->weight = obj->size;
+    obj->max_weight = obj->weight;
+
+    for (auto target : obj->refs) {
+      CalculateWeightsRecursive(target, seen);
+      obj->max_weight = std::max(obj->max_weight, target->max_weight);
+    }
+
+    if (obj->dominator) {
+      obj->dominator->weight += obj->weight;
+    }
+  }
+};
+
 class Program {
  public:
-  Program() : next_id_(1), total_size_(0), entry_(NULL) {}
+  Program() : no_file_("[couldn't resolve source filename]") {}
+  Object* entry() { return entry_; }
 
   Object* AddObject(const std::string& name, uintptr_t vmaddr, size_t size, bool data) {
 
@@ -394,27 +535,40 @@ class Program {
     ret->SetSize(size);
     ret->data = data;
     ret->name = name;
+    ret->file = &no_file_;
+    no_file_.object_size += ret->size;
     total_size_ += size;
     objects_by_addr_.Add(vmaddr, size, ret);
 
-    auto demangled = demangler_.Demangle(name);
-    if (stripper_.StripName(demangled)) {
-      auto it = stripped_pretty_names_.find(stripper_.stripped());
-      if (it == stripped_pretty_names_.end()) {
-        stripped_pretty_names_[stripper_.stripped()] = ret;
-        ret->pretty_name = stripper_.stripped();
-      } else {
-        ret->pretty_name = demangled;
-        if (it->second) {
-          it->second->pretty_name = demangler_.Demangle(it->second->name);
-          it->second = NULL;
-        }
-      }
-    } else {
-      ret->pretty_name = demangled;
+    return ret;
+  }
+
+  void CalculatePrettyNames() {
+    if (pretty_names_calculated_) {
+      return;
     }
 
-    return ret;
+    for (auto& pair: objects_) {
+      Object* obj = pair.second;
+      auto demangled = demangler_.Demangle(obj->name);
+      if (stripper_.StripName(demangled)) {
+        auto it = stripped_pretty_names_.find(stripper_.stripped());
+        if (it == stripped_pretty_names_.end()) {
+          stripped_pretty_names_[stripper_.stripped()] = obj;
+          obj->pretty_name = stripper_.stripped();
+        } else {
+          obj->pretty_name = demangled;
+          if (it->second) {
+            it->second->pretty_name = demangler_.Demangle(it->second->name);
+            it->second = NULL;
+          }
+        }
+      } else {
+        obj->pretty_name = demangled;
+      }
+    }
+
+    pretty_names_calculated_ = true;
   }
 
   void AddObjectAlias(Object* obj, const std::string& name) {
@@ -445,6 +599,40 @@ class Program {
 
   void SetEntryPoint(Object* obj) {
     entry_ = obj;
+  }
+
+  void PrintNoFile() {
+    double total = 0;
+
+    CalculatePrettyNames();
+
+    std::vector<Object*> object_list;
+    object_list.reserve(objects_.size());
+    // XXX: should uniquify objects, can have dupes because of aliases.
+    for ( auto& pair : objects_ ) {
+      auto obj = pair.second;
+      if (obj->file != &no_file_) {
+        continue;
+      }
+      object_list.push_back(pair.second);
+      //assert(pair.first == pair.second->name);
+      total += pair.second->size;
+    }
+
+    std::sort(object_list.begin(), object_list.end(), [](Object* a, Object* b) {
+      return a->size > b->size;
+    });
+
+    size_t cumulative = 0;
+
+    for ( auto object : object_list) {
+      size_t size = object->size;
+      cumulative += size;
+      const std::string& name = object->pretty_name;
+      printf("%5.1f%% %5.1f%%  %6d %s\n", size / total * 100, cumulative / total * 100, (int)size, name.c_str());
+    }
+
+    printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
   }
 
   void TryAddRef(Object* from, uintptr_t vmaddr) {
@@ -500,55 +688,6 @@ class Program {
     }
   }
 
-  void PrintDotGraph(Object* obj, std::ofstream* out, std::set<Object*>* seen) {
-    if (!seen->insert(obj).second) {
-      return;
-    }
-
-    *out << "  \"" << obj->name << "\" [label=\"" << obj->pretty_name << "\\nsize: " << obj->size << "\\nweight: " << obj->weight << "\", fontsize=" << std::max(obj->size * 80000.0 / total_size_, 9.0) << "];\n";
-
-    for ( auto& target : obj->refs ) {
-      if (target->max_weight > 30000) {
-        *out << "  \"" << obj->name << "\" -> \"" << target->name << "\" [penwidth=" << (pow(target->weight * 100.0 / max_weight_, 0.6)) << "];\n";
-        PrintDotGraph(target, out, seen);
-      }
-    }
-  }
-
-  void CalculateWeightsRecursive(
-      Object* obj, const std::unordered_map<Object*, Object*>& dominators,
-      std::set<Object*>* seen) {
-    if (!seen->insert(obj).second) {
-      return;
-    }
-
-    obj->weight = obj->size;
-    obj->max_weight = obj->weight;
-
-    for (auto target : obj->refs) {
-      CalculateWeightsRecursive(target, dominators, seen);
-      obj->max_weight = std::max(obj->max_weight, target->max_weight);
-    }
-
-    auto it = dominators.find(obj);
-    //assert(it != dominators.end());
-    if (it == dominators.end()) {
-    } else {
-      it->second->weight += obj->weight;
-    }
-  }
-
-  void CalculateWeights() {
-    if (!entry_) {
-      std::cerr << "Transitive weight graph requires entry point.";
-    }
-
-    std::unordered_map<Object*, Object*> dominators;
-    DominatorCalculator::Calculate(entry_, next_id_, &dominators);
-    std::set<Object*> seen;
-    CalculateWeightsRecursive(entry_, dominators, &seen);
-    max_weight_  = entry_->max_weight;
-  }
 
   void PrintSymbolsByTransitiveWeight() {
     std::vector<Object*> object_list;
@@ -567,18 +706,6 @@ class Program {
       printf(" %7d %s\n", (int)object->weight, object->pretty_name.c_str());
     }
 
-    std::ofstream out("graph.dot");
-    out << "digraph weights {\n";
-    /*
-    for ( auto object : object_list) {
-      out << "  \"" << object->name << "\"\n";
-    }
-    */
-    {
-      std::set<Object*> seen;
-      PrintDotGraph(entry_, &out, &seen);
-    }
-    out << "}\n";
   }
 
   void GC(Object* obj, std::unordered_set<Object*>* garbage,
@@ -716,9 +843,14 @@ class Program {
     printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
   }
 
-  uint32_t next_id_;
-  size_t total_size_;
-  size_t max_weight_;
+  void PrintWeightGraph() {
+    WeightGraphPrinter<Object> printer;
+    printer.Print(entry_, next_id_);
+  }
+
+  uint32_t next_id_ = 1;
+  size_t total_size_ = 0;
+  size_t max_weight_ = 0;
 
   // Files, indexed by filename.
   std::unordered_map<std::string, File> files_;
@@ -728,10 +860,12 @@ class Program {
   std::unordered_map<std::string, Object*> stripped_pretty_names_;
   RangeMap<Object*> objects_by_addr_;
   RangeMap<uintptr_t> file_offsets_;
-  Object* entry_;
+  Object* entry_ = nullptr;
+  bool pretty_names_calculated_ = false;
 
   NameStripper stripper_;
   Demangler demangler_;
+  File no_file_;
 };
 
 Object* ProgramDataSink::AddObject(const std::string& name, uintptr_t vmaddr,
@@ -974,18 +1108,121 @@ std::string ReadBuildId(const std::string& filename) {
 #endif
 }
 
-int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    std::cerr << "Usage: bloaty <binary file>\n";
-    exit(1);
+class RuleMap {
+ public:
+  RuleMap() : next_id_(1) {}
+
+  void Split(const std::string& str, std::string* part1, std::string* part2) {
+    size_t n = str.find(": ");
+    if (n == std::string::npos) {
+      std::cout << "No separator?\n";
+      exit(1);
+    }
+    part1->assign(str, 0, n);
+    part2->assign(str, n + 2, std::string::npos);
   }
 
-  const std::string filename = argv[1];
-
-  if (argc == 3) {
-    name_path = new std::string(argv[2]);
+  Rule* GetOrCreateRule(const std::string& name) {
+    // C++17: auto pair = rules_.try_emplace(filename, filename);
+    auto it = rules_.find(name);
+    if (it == rules_.end()) {
+      it = rules_.emplace(name, name).first;
+      it->second.id = next_id_++;
+    }
+    return &it->second;
   }
 
+  Rule* GetRule(const std::string& name) {
+    auto it = rules_.find(name);
+    if (it == rules_.end()) {
+      std::cerr << "No such rule: " << name << "\n";
+      exit(1);
+    }
+    return &it->second;
+  }
+
+  void ReadMapFile(const std::string& filename) {
+    std::ifstream input(filename);
+    for (std::string line, part1, part2; std::getline(input, line); ) {
+      if (line == "") {
+        break;
+      }
+      Split(line, &part1, &part2);
+      GetOrCreateRule(part2)->refs.insert(GetOrCreateRule(part1));
+    }
+
+    for (std::string line, part1, part2; std::getline(input, line); ) {
+      Split(line, &part1, &part2);
+      //source_files_[part1] = GetRule(part2);
+      source_files_[part1] = GetOrCreateRule(part2);
+    }
+  }
+
+  void AddFilesToRuleSizes(Program* program) {
+    for (auto& pair : program->files_) {
+      File* file = &pair.second;
+      auto it = source_files_.find(file->name);
+      if (it == source_files_.end()) {
+        std::string fallback;
+        if (TryGetFallbackFilename(file->name, &fallback)) {
+          it = source_files_.find(fallback);
+          if (it == source_files_.end()) {
+            std::cerr << "No fallback source file in map: " << file->name << ", " << file->object_size << "\n";
+            continue;
+          }
+        } else {
+          std::cerr << "No source file in map: " << file->name << ", " << file->object_size << "\n";
+          continue;
+        }
+      }
+      Rule* rule = it->second;
+      rule->size += file->object_size;
+      file->rule = rule;
+    }
+  }
+
+  size_t count() { return rules_.size(); }
+
+  void PrintDepGraph() {
+    std::ofstream out("deps.dot");
+    out << "digraph deps {\n";
+    for (const auto& pair : rules_) {
+      const Rule* rule = &pair.second;
+      for (auto ref : rule->refs) {
+        out << "  \"" << rule->name << "\" -> \"" << ref->name << "\";\n";
+      }
+    }
+    out << "}\n";
+  }
+
+  void PrintDomTree() {
+    std::ofstream out("dom.dot");
+    out << "digraph dom {\n";
+    for (const auto& pair : rules_) {
+      const Rule* rule = &pair.second;
+      if (rule->dominator) {
+        out << "  \"" << rule->dominator->name << "\" -> \"" << rule->name << "\";\n";
+      }
+    }
+    out << "}\n";
+  }
+
+  void PrintWeightGraph(Rule* entry) {
+    WeightGraphPrinter<Rule> printer;
+    printer.Print(entry, next_id_);
+  }
+
+  void ParseLineInfo(const std::string& filename) {
+    ParseELFLineInfo(filename, source_files_);
+  }
+
+ private:
+  std::unordered_map<std::string, Rule> rules_;
+  std::unordered_map<std::string, Rule*> source_files_;
+  uint32_t next_id_;
+};
+
+void DoSymbolAnalysis(const std::string& filename) {
   Program program;
   ProgramDataSink sink(&program);
 
@@ -995,7 +1232,7 @@ int main(int argc, char *argv[]) {
   if (!found_cache) {
     ReadObjectData(filename, &sink);
     ParseVTables(filename, &program);
-    program.CalculateWeights();
+    program.PrintWeightGraph();
     if (!program.HasFiles()) {
       std::cerr << "Warning: no debug information present.\n";
     }
@@ -1007,4 +1244,52 @@ int main(int argc, char *argv[]) {
 
   program.PrintGarbage();
   program.PrintSymbolsByTransitiveWeight();
+}
+
+int main(int argc, char *argv[]) {
+  if (argc < 3) {
+    std::cerr << "Usage: bloaty <binary file> <rule map>\n";
+    exit(1);
+  }
+
+  const std::string bin_file = argv[1];
+  const std::string rule_map = argv[2];
+
+  RuleMap map;
+  map.ReadMapFile(rule_map);
+
+  Program program;
+  ProgramDataSink sink(&program);
+
+  ParseELFSymbols(bin_file, &sink);
+  ParseELFSections(bin_file, &sink);
+  //ParseELFDebugInfo(bin_file, &sink);
+  bloaty::GetFunctionFilePairs(bin_file, &sink);
+  ParseELFFileMapping(bin_file, &sink);
+
+  Rule* entry = nullptr;
+  if (program.entry()) {
+    Object* obj_entry = program.entry();
+    std::cerr << "Program entry point function: " << obj_entry->name << "\n";
+    if (obj_entry->file) {
+      File* file_entry = obj_entry->file;
+      std::cerr << "Program entry point file: " << file_entry->name << "\n";
+      if (file_entry->rule) {
+        entry = file_entry->rule;
+        std::cerr << "Rule entry point: " << entry->name << "\n";
+      }
+    }
+  }
+
+  if (!entry) {
+    std::cerr << "Couldn't figure out entry.\n";
+   // entry = map.GetRule("//superroot/servers:sr_www");
+    entry = map.GetRule("//net/proto2/compiler/public:protocol_compiler");
+  }
+  //map.ParseLineInfo(bin_file);
+  map.AddFilesToRuleSizes(&program);
+  map.PrintWeightGraph(entry);
+  map.PrintDepGraph();
+  map.PrintDomTree();
+  program.PrintNoFile();
 }

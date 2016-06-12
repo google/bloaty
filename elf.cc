@@ -14,7 +14,7 @@
 // - nm: display symbols
 // - size: display binary size
 
-static void ParseELFSymbols(const std::string& filename,
+void ParseELFSymbols(const std::string& filename,
                             ProgramDataSink* sink) {
   std::string cmd = std::string("readelf -s --wide ") + filename;
   // Symbol table '.symtab' contains 879 entries:
@@ -82,7 +82,7 @@ static void ParseELFSymbols(const std::string& filename,
 }
 
 extern bool verbose;
-static void ParseELFSections(const std::string& filename,
+void ParseELFSections(const std::string& filename,
                              ProgramDataSink* sink) {
   std::string cmd = std::string("readelf -S --wide ") + filename;
   // We use the section headers to patch up the symbol table a little.
@@ -115,12 +115,138 @@ static void ParseELFSections(const std::string& filename,
     if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size))) {
       Object* obj = sink->FindObjectByAddr(addr);
       if (obj && obj->size == 0) {
-        std::cerr << "Updating size of " << obj->name << " to: " << size << "\n";
         obj->size = size;
       }
     }
   }
 
+}
+
+std::string GetBasename(std::string filename) {
+  size_t last = filename.rfind("/");
+  return last == std::string::npos ? filename : filename.substr(last + 1);
+}
+
+void ParseELFDebugInfo(const std::string& filename, ProgramDataSink* sink) {
+  std::string cmd =
+      std::string("dwarfdump ") + filename;
+  // < 3><0x00000482>        DW_TAG_subprogram
+  //                           DW_AT_external              yes(1)
+  //                           DW_AT_name                  "assign"
+  //                           DW_AT_decl_file             0x00000004 third_party/crosstool/v18/stable/toolchain/x86_64-grtev4-linux-gnu/include/c++/4.9.x-google/bits/char_traits.h
+  //                           DW_AT_decl_line             0x00000116
+  //                           DW_AT_linkage_name          "_ZNSt11char_traitsIcE6assignEPcmc"
+  //                           DW_AT_type                  <0x000025c4>
+  //                           DW_AT_declaration           yes(1)
+
+  Object* obj = nullptr;
+  File* file = nullptr;
+
+  RE2 linkage_name_pattern(R"x(DW_AT_linkage_name\s*"(.*)")x");
+  RE2 decl_file_pattern(R"(DW_AT_decl_file\s*0x[0-9a-f]+ (?:\.\/)?(.*))");
+
+  std::string name;
+
+  for (auto& line : ReadLinesFromPipe(cmd)) {
+    if (line.find("DW_TAG_subprogram") != std::string::npos) {
+      file = nullptr;
+      obj = nullptr;
+    } else if (RE2::PartialMatch(line, linkage_name_pattern, &name)) {
+      obj = sink->FindObjectByName(name);
+    } else if (RE2::PartialMatch(line, decl_file_pattern, &name)) {
+      file = sink->GetOrCreateFile(name);
+    }
+
+    if (obj && file) {
+      obj->file = file;
+      file->object_size += obj->size;
+      std::cerr << obj->name << ": " << file->name << "\n";
+      obj = nullptr;
+      file = nullptr;
+    }
+  }
+}
+
+void ParseELFLineInfo(
+    const std::string& filename,
+    const std::unordered_map<std::string, Rule*>& source_files) {
+  std::string cmd =
+      std::string("readelf --debug-dump=decodedline --wide ") + filename;
+
+  // Decoded dump of debug contents of section .debug_line:
+  //
+  // CU: ../sysdeps/x86_64/start.S:
+  // File name                            Line number    Starting address
+  // start.S                                       63             0x343a0
+  //
+  // start.S                                       79             0x343a2
+  // start.S                                       85             0x343a5
+  // start.S                                       88             0x343a6
+  // start.S                                       90             0x343a9
+  // start.S                                       93             0x343ad
+  //
+  // net/proto2/compiler/internal/parser.cc:
+  // parser.cc                                    385             0x481ba
+  RE2 full_name_pattern(R"((?:CU: )?(?:\.\/)?(.*):\s*)");
+  RE2 entry_pattern(R"((\S+)\s+\d+\s+(?:0x)?([0-9a-f]+))");
+
+  uintptr_t last_addr = 0;
+  uintptr_t addr = 0;
+  std::string name;
+
+  // Most recent long name we have seen for each short name.
+  std::unordered_map<std::string, std::string> name_map;
+  std::unordered_set<std::string> complained_about;
+
+  Rule* last_rule = nullptr;
+  std::string last_name;
+
+  for (auto& line : ReadLinesFromPipe(cmd)) {
+    if (RE2::FullMatch(line, full_name_pattern, &name)) {
+      name_map[GetBasename(name)] = name;
+    } else if (RE2::FullMatch(line, entry_pattern, &name, RE2::Hex(&addr))) {
+      if (last_addr == 0) {
+        // We don't trust a new address until it is in a region that seems like
+        // it could plausibly be mapped.  We could use actual load instructions
+        // to make this heuristic more robust.
+        if (addr > 0x10000) {
+          last_addr = addr;
+        }
+      } else {
+        if (addr != 0) {
+          if (!(last_rule && name == last_name)) { // Optimization: avoid the double hashtable lookup.
+            std::string long_name = name_map[name];
+            auto it = source_files.find(long_name);
+            if (it == source_files.end()) {
+              std::string fallback;
+              if (TryGetFallbackFilename(long_name, &fallback)) {
+                last_rule = source_files.find(fallback)->second;
+              } else {
+                if (complained_about.insert(long_name).second) {
+                  std::cerr << "Warning: couldn't find source file for: " << long_name << "\n";
+                }
+                continue;
+              }
+            } else {
+              last_rule = it->second;
+            }
+          }
+          if (!last_rule) {
+            std::cerr << "No last rule!\n";
+            exit(1);
+          }
+          size_t size = addr - last_addr;
+          if (size < 0x10000) {
+            last_rule->size += size;
+            if (last_rule->name == "//net/proto2/io/internal:io_lite") {
+              std::cerr << "Adding to io_lite: " << std::hex << size << " (" << std::hex << last_addr << ", " << std::hex << addr << ") -> " << last_rule->size << "\n";
+            }
+          }
+        }
+        last_addr = addr;
+      }
+    }
+  }
 }
 
 // This is a relatively complicated state machine designed to do something that
@@ -129,7 +255,6 @@ static void ParseELFSections(const std::string& filename,
 class RefAdder {
  public:
   RefAdder(ProgramDataSink* sink) : sink_(sink) {}
-
   void OnFunction(const std::string& name) {
     for (auto it = scanned_refs_.begin(); it != scanned_refs_.end() ; ) {
       if (it->second) {
@@ -146,39 +271,31 @@ class RefAdder {
         }
       }
     }
-
     scanned_refs_.clear();
     branch_targets_.clear();
     scanning_ = false;
-
     // Needed?
     // if (!current_function && current_function_name[0] == '_') {
     //   current_function_name = current_function_name.substr(1);
     // }
-
     // current_function = sink->FindObjectByName(current_function_name);
-
     current_function_ = sink_->FindObjectByName(name);
-
     if (!current_function_) {
       std::cerr << "Couldn't find function for name: " << name << "\n";
     }
   }
-
   void OnAddrRef(uintptr_t current_addr, uintptr_t dest_addr) {
     Object* to = sink_->FindObjectContainingAddr(dest_addr);
     if (to) {
       AddOrStore(current_addr, to);
     }
   }
-
   void OnNameRef(uintptr_t current_addr, const std::string& dest_name) {
     Object* to = sink_->FindObjectByName(dest_name);
     if (to) {
       AddOrStore(current_addr, to);
     }
   }
-
   void OnUnconditionalBranch(uintptr_t current_addr, uintptr_t dest_addr) {
     if (verbose) {
       fprintf(stderr, "Unconditional branch at: %lx -> %lx\n", current_addr, dest_addr);
@@ -191,25 +308,20 @@ class RefAdder {
       scanned_refs_.emplace(std::make_pair(current_addr, nullptr));
     }
   }
-
   void OnConditionalBranch(uintptr_t current_addr, uintptr_t dest_addr) {
     if (verbose) {
       fprintf(stderr, "Conditional branch at: %lx -> %lx\n", current_addr, dest_addr);
     }
     AddBranchTarget(current_addr, dest_addr);
   }
-
  private:
-
   void AddRef(Object* to) {
     sink_->AddRef(current_function_, to);
   }
-
   void AddOrStore(uintptr_t current_addr, Object* dest) {
     if (!current_function_) {
       return;
     }
-
     MaybeStopScanning(current_addr);
     if (scanning_) {
       scanned_refs_.emplace(std::make_pair(current_addr, dest));
@@ -217,7 +329,6 @@ class RefAdder {
       AddRef(dest);
     }
   }
-
   void AddBranchTarget(uintptr_t current_addr, uintptr_t dest_addr) {
     MaybeStopScanning(current_addr);
     if (dest_addr > current_addr) {
@@ -228,7 +339,6 @@ class RefAdder {
       // Backward branch.  Add any scanned-but-unadded refs (if any) starting at
       // this dest.
       auto r = &scanned_refs_;
-
       for (auto it = r->lower_bound(dest_addr); it != r->end() ; ) {
         if (it->second == NULL) {
           break;
@@ -239,7 +349,6 @@ class RefAdder {
       }
     }
   }
-
   void MaybeStopScanning(uintptr_t current_addr) {
     auto it = branch_targets_.begin();
     if (it != branch_targets_.end() && current_addr >= *it) {
@@ -247,7 +356,6 @@ class RefAdder {
       scanning_ = false;
     }
   }
-
   // While we are scanning through code we think is unreachable, we accumulate
   // the addresses we find here, in case we find out later that the code is
   // actually reachable.  The pairs are:
@@ -255,19 +363,15 @@ class RefAdder {
   //
   // A NULL Object* represents an unconditional branch.
   std::map<uintptr_t, Object*> scanned_refs_;
-
   // When we think we are in unreachable code and we are just scanning, this is
   // ture.
   bool scanning_ = false;
-
   // The function we are inside. 
   Object* current_function_ = NULL;
-
   // Track a list of jump targets we have seen.  If we see an unconditional
   // branch (jmp or ret) we start putting addresses in scanned_addresses instead
   // of adding them directly until we hit the next jump target.
   std::set<uintptr_t> branch_targets_;
-
   ProgramDataSink* sink_;
 };
 
@@ -337,8 +441,7 @@ static void ParseELFDisassembly(const std::string& filename,
   }
 }
 
-static void ParseELFFileMapping(const std::string& filename,
-                                ProgramDataSink* sink) {
+void ParseELFFileMapping(const std::string& filename, ProgramDataSink* sink) {
   //   Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
   //   LOAD           0x000000 0x0000000000400000 0x0000000000400000 0x19a8a9 0x19a8a9 R E 0x200000
   //
@@ -357,7 +460,6 @@ static void ParseELFFileMapping(const std::string& filename,
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
     if (RE2::PartialMatch(line, load_pattern, RE2::Hex(&fileoff),
                           RE2::Hex(&vmaddr), RE2::Hex(&filesize))) {
-      fprintf(stderr, "Adding mapping %lx, %lx, %lx\n", vmaddr, vmaddr + filesize, fileoff);
       sink->AddFileMapping(vmaddr, fileoff, filesize);
     } else if (RE2::PartialMatch(line, entry_pattern, RE2::Hex(&entry_addr))) {
       // We've captured the entry point.
