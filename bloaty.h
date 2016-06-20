@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <set>
 #include <stdlib.h>
+#include <iostream>
 #include <stdint.h>
 
 #include "re2/re2.h"
@@ -41,6 +42,8 @@ struct File {
 
   // Files we reference, ie. through a function call or variable reference.
   std::set<File*> refs;
+
+  bool is_unknown = false;
 };
 
 struct Object {
@@ -103,6 +106,13 @@ class ProgramDataSink {
   void AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff, size_t filesize);
   File* GetOrCreateFile(const std::string& filename);
 
+  // These calls are thread-safe.
+  void AddSymSourcefilePairs(
+      const std::vector<std::pair<std::string, std::string>>&
+          sym_srcfile_pairs);
+  void AddAddrSourcefilePairs(
+  const std::vector<std::pair<uintptr_t, std::string>>& addr_srcfile_pairs);
+
  private:
   Program* program_;
 };
@@ -116,15 +126,19 @@ class LineIterator;
 
 class LineReader {
  public:
-  LineReader(FILE* file, bool pclose)
-      : file_(file), eof_(false), pclose_(pclose) {}
-  ~LineReader() {
-    if (pclose_) {
-      pclose(file_);
-    } else {
-      fclose(file_);
-    }
+  LineReader(FILE* file, bool pclose) : file_(file), pclose_(pclose) {}
+
+  LineReader(LineReader&& other) {
+    Close();
+
+    file_ = other.file_;
+    pclose_ = other.pclose_;
+
+    other.file_ = nullptr;
   }
+
+  ~LineReader() { Close(); }
+
   LineIterator begin();
   LineIterator end();
 
@@ -134,9 +148,21 @@ class LineReader {
   bool eof() { return eof_; }
 
  private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(LineReader);
+
+  void Close() {
+    if (!file_) return;
+
+    if (pclose_) {
+      pclose(file_);
+    } else {
+      fclose(file_);
+    }
+  }
+
   FILE* file_;
   std::string line_;
-  bool eof_;
+  bool eof_ = false;
   bool pclose_;
 };
 
@@ -182,25 +208,36 @@ void GetFunctionFilePairs(const std::string& filename, ProgramDataSink* sink);
 }
 
 inline bool TryGetFallbackFilename(const std::string& name, std::string* fallback) {
-  // blaze-out/gcc-4.X.Y-crosstool-v18-hybrid-grtev4-k8-opt/genfiles/translating/lib/proto/styled_word.proto.h
-  if (RE2::FullMatch(name, "blaze-out.*genfiles\\/(.*).proto.h", fallback)) {
-    std::cerr << "YoTrying: " << *fallback << "\n";
-    *fallback += ".pb.h";
-    return true;
-  } else if (RE2::FullMatch(name, "blaze-out.*genfiles\\/(.*)", fallback)) {
-    std::cerr << "Trying: " << *fallback << "\n";
-    return true;
-  } else if (name.find("third_party/crosstool/v18/stable/toolchain") == 0 ||
-             name.find("/usr/crosstool") == 0 ||
-             name.find("blaze-out/gcc-4.X.Y-crosstool-v18-hybrid-grtev4-k8-opt/"
-                       "genfiles/"
-                       "third_party/libunwind") == 0 ||
-             name.find("third_party/grte") == 0) {
+  bool found = false;
+
+  *fallback = name;
+
+  // /proc/self/cwd/./strings/case.h
+  if (RE2::FullMatch(*fallback, "\\/proc\\/self\\/cwd\\/(?:\\.\\/)?(.*)", fallback)) {
+    found = true;
+  }
+
+  if (RE2::FullMatch(*fallback, "blaze-out\\/.*\\/genfiles\\/(.*)", fallback)) {
+    found = true;
+  }
+
+  if (fallback->find("third_party/crosstool/v18/stable/toolchain") !=
+          std::string::npos ||
+      fallback->find("/usr/crosstool") != std::string::npos ||
+      fallback->find("third_party/grte") != std::string::npos ||
+      fallback->find("third_party/libunwind") != std::string::npos) {
     *fallback = "third_party/crosstool/v18/stable/toolchain";
     return true;
   }
 
-  return false;
+  if (RE2::FullMatch(*fallback, "(.*).proto.h", fallback)) {
+    *fallback += ".pb.h";
+    found = true;
+  }
+
+  // blaze-out/gcc-4.X.Y-crosstool-v18-hybrid-grtev4-k8-opt/genfiles/translating/lib/proto/styled_word.proto.h
+
+  return found;
 }
 
 #endif

@@ -32,6 +32,7 @@
 #include <assert.h>
 
 #include "bloaty.h"
+//#include "base/init_google.h"
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -51,15 +52,29 @@ std::string ClampSize(const std::string& input, size_t size) {
   }
 }
 
+std::string DoubleStringPrintf(const char *fmt, double d) {
+  char buf[1024];
+  snprintf(buf, sizeof(buf), fmt, d);
+  return std::string(buf);
+}
+
 std::string SiPrint(size_t size) {
   const char *prefixes[] = {"", "k", "M", "G", "T"};
   int n = 0;
-  while (size > 1024) {
-    size /= 1024;
+  double size_d = size;
+  while (size_d > 1024) {
+    size_d /= 1024;
     n++;
   }
 
-  return std::to_string(size) + prefixes[n];
+  if (size_d > 100 || n == 0) {
+    return std::to_string(static_cast<size_t>(size_d)) + prefixes[n];
+  } else if (size_d > 10) {
+    return DoubleStringPrintf("%0.1f", size_d) + prefixes[n];
+  } else {
+    return DoubleStringPrintf("%0.2f", size_d) + prefixes[n];
+  }
+
 }
 
 void LineReader::Next() {
@@ -69,6 +84,7 @@ void LineReader::Next() {
     if (!fgets(buf, sizeof(buf), file_)) {
       if (feof(file_)) {
         eof_ = true;
+        break;
       } else {
         std::cerr << "Error reading from file.\n";
         exit(1);
@@ -122,36 +138,38 @@ bool verbose;
 template <class T>
 class RangeMap {
  public:
-  void Add(uintptr_t addr, size_t size, T val) {
-    mappings_[addr] = std::make_pair(val, size);
+  bool Add(uintptr_t addr, size_t size, T val) {
+    if (TryGet(addr) || TryGet(addr + size)) {
+      return false;
+    }
+    mappings_[addr] = std::make_pair(std::move(val), size);
+    return true;
   }
 
-  T Get(uintptr_t addr) {
-    T ret;
-    if (!TryGet(addr, &ret)) {
+  T* Get(uintptr_t addr) {
+    T* ret = TryGet(addr);
+    if (!ret) {
       fprintf(stderr, "No fileoff for: %lx\n", addr);
       exit(1);
     }
     return ret;
   }
 
-  bool TryGet(uintptr_t addr, T* val) {
+  T* TryGet(uintptr_t addr) {
     auto it = mappings_.upper_bound(addr);
     if (it == mappings_.begin() || (--it, it->first + it->second.second <= addr)) {
-      return false;
+      return nullptr;
     }
     assert(addr >= it->first && addr < it->first + it->second.second);
-    *val = it->second.first;
-    return true;
+    return &it->second.first;
   }
 
-  bool TryGetExactly(uintptr_t addr, T* val) {
+  T* TryGetExactly(uintptr_t addr) {
     auto it = mappings_.find(addr);
     if (it == mappings_.end()) {
-      return false;
+      return nullptr;
     }
-    *val = it->second.first;
-    return true;
+    return &it->second.first;
   }
 
  private:
@@ -519,7 +537,13 @@ class WeightGraphPrinter {
 
 class Program {
  public:
-  Program() : no_file_("[couldn't resolve source filename]") {}
+  Program() : no_file_("[couldn't resolve source filename]") {
+    no_file_.is_unknown = true;
+  }
+
+  ~Program() {
+  }
+
   Object* entry() { return entry_; }
 
   Object* AddObject(const std::string& name, uintptr_t vmaddr, size_t size, bool data) {
@@ -538,7 +562,7 @@ class Program {
     ret->file = &no_file_;
     no_file_.object_size += ret->size;
     total_size_ += size;
-    objects_by_addr_.Add(vmaddr, size, ret);
+    objects_by_addr_.Add(vmaddr, size, std::unique_ptr<Object>(ret));
 
     return ret;
   }
@@ -588,9 +612,9 @@ class Program {
   }
 
   bool TryGetFileOffset(uintptr_t vmaddr, uintptr_t *ofs) {
-    uintptr_t diff;
-    if (file_offsets_.TryGet(vmaddr, &diff)) {
-      *ofs = vmaddr - diff;
+    uintptr_t* diff = file_offsets_.TryGet(vmaddr);
+    if (diff) {
+      *ofs = vmaddr - *diff;
       return true;
     } else {
       return false;
@@ -644,10 +668,12 @@ class Program {
       return;
     }
 
-    Object* to;
-    if (objects_by_addr_.TryGet(vmaddr, &to)) {
+    std::unique_ptr<Object>* to_unique = objects_by_addr_.TryGet(vmaddr);
+    if (to_unique) {
+      Object* to = to_unique->get();
       if (verbose) {
-        fprintf(stderr, "Added ref! %s -> %s\n", from->pretty_name.c_str(), to->pretty_name.c_str());
+        fprintf(stderr, "Added ref! %s -> %s\n", from->pretty_name.c_str(),
+                to->pretty_name.c_str());
       }
       from->refs.insert(to);
       //if (to) {
@@ -675,18 +701,18 @@ class Program {
   }
 
   Object* FindObjectByAddr(uintptr_t addr) {
-    Object* ret;
-    if (objects_by_addr_.TryGetExactly(addr, &ret)) {
-      return ret;
+    std::unique_ptr<Object>* ret = objects_by_addr_.TryGetExactly(addr);
+    if (ret) {
+      return ret->get();
     } else {
       return NULL;
     }
   }
 
   Object* FindObjectContainingAddr(uintptr_t addr) {
-    Object* ret;
-    if (objects_by_addr_.TryGet(addr, &ret)) {
-      return ret;
+    std::unique_ptr<Object>* ret = objects_by_addr_.TryGet(addr);
+    if (ret) {
+      return ret->get();
     } else {
       return NULL;
     }
@@ -847,6 +873,44 @@ class Program {
     printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
   }
 
+  void AddSymSourcefilePairs(
+      const std::vector<std::pair<std::string, std::string>>&
+          sym_srcfile_pairs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (const auto& pair : sym_srcfile_pairs) {
+      auto obj = FindObjectByName(pair.first);
+
+      if (obj) {
+        auto file = GetOrCreateFile(pair.second);
+        obj->file->object_size -= obj->size;  // Should be the "no file".
+        obj->file = file;
+        file->object_size += obj->size;
+        // We were successful at assigning a file.
+        continue;
+      } else {
+        // std::cerr << "Didn't find object for linkage name: " << symname
+        //          << "\n";
+      }
+    }
+  }
+
+  void AddAddrSourcefilePairs(
+  const std::vector<std::pair<uintptr_t, std::string>>& addr_srcfile_pairs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (const auto& pair : addr_srcfile_pairs) {
+      auto obj = FindObjectByAddr(pair.first);
+
+      if (obj) {
+        auto file = GetOrCreateFile(pair.second);
+        obj->file->object_size -= obj->size;  // Should be the "no file".
+        obj->file = file;
+        file->object_size += obj->size;
+      }
+    }
+  }
+
   void PrintWeightGraph() {
     WeightGraphPrinter<Object> printer;
     printer.Print(entry_, next_id_);
@@ -862,7 +926,7 @@ class Program {
   // Objects, indexed by name.
   std::unordered_map<std::string, Object*> objects_;
   std::unordered_map<std::string, Object*> stripped_pretty_names_;
-  RangeMap<Object*> objects_by_addr_;
+  RangeMap<std::unique_ptr<Object>> objects_by_addr_;
   RangeMap<uintptr_t> file_offsets_;
   Object* entry_ = nullptr;
   bool pretty_names_calculated_ = false;
@@ -870,6 +934,7 @@ class Program {
   NameStripper stripper_;
   Demangler demangler_;
   File no_file_;
+  std::mutex mutex_;
 };
 
 Object* ProgramDataSink::AddObject(const std::string& name, uintptr_t vmaddr,
@@ -912,6 +977,16 @@ void ProgramDataSink::SetEntryPoint(Object* obj) {
 void ProgramDataSink::AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff,
                                      size_t filesize) {
   program_->AddFileMapping(vmaddr, fileoff, filesize);
+}
+
+void ProgramDataSink::AddSymSourcefilePairs(
+    const std::vector<std::pair<std::string, std::string>>& sym_srcfile_pairs) {
+  return program_->AddSymSourcefilePairs(sym_srcfile_pairs);
+}
+
+void ProgramDataSink::AddAddrSourcefilePairs(
+    const std::vector<std::pair<uintptr_t, std::string>>& addr_srcfile_pairs) {
+  return program_->AddAddrSourcefilePairs(addr_srcfile_pairs);
 }
 
 void ParseVTables(const std::string& filename, Program* program) {
@@ -1171,7 +1246,7 @@ class RuleMap {
         if (TryGetFallbackFilename(file->name, &fallback)) {
           it = source_files_.find(fallback);
           if (it == source_files_.end()) {
-            std::cerr << "No fallback source file in map: " << file->name << ", " << file->object_size << "\n";
+            std::cerr << "No fallback source file in map: " << file->name << ", " << file->object_size << ", tried: " << fallback << "\n";
             continue;
           }
         } else {
@@ -1251,24 +1326,16 @@ void DoSymbolAnalysis(const std::string& filename) {
 }
 
 int main(int argc, char *argv[]) {
-  /*
+  //InitGoogle("bloaty", &argc, &argv, false);
   if (argc < 3) {
     std::cerr << "Usage: bloaty <binary file> <rule map>\n";
-    exit(1);
-  }
-  */
-
-  if (argc < 2) {
-    std::cerr << "Usage: bloaty <binary file>\n";
     exit(1);
   }
 
   const std::string bin_file = argv[1];
 
-  /*
   RuleMap map;
-  map.ReadMapFile(rule_map);
-  */
+  map.ReadMapFile(argv[2]);
 
   Program program;
   ProgramDataSink sink(&program);
@@ -1278,8 +1345,8 @@ int main(int argc, char *argv[]) {
   //ParseELFDebugInfo(bin_file, &sink);
   bloaty::GetFunctionFilePairs(bin_file, &sink);
   ParseELFFileMapping(bin_file, &sink);
+  program.PrintNoFile();
 
-  /*
   Rule* entry = nullptr;
   if (program.entry()) {
     Object* obj_entry = program.entry();
@@ -1296,14 +1363,12 @@ int main(int argc, char *argv[]) {
 
   if (!entry) {
     std::cerr << "Couldn't figure out entry.\n";
-   // entry = map.GetRule("//superroot/servers:sr_www");
-    entry = map.GetRule("//net/proto2/compiler/public:protocol_compiler");
+    entry = map.GetRule("//superroot/servers:sr_www");
+    //entry = map.GetRule("//net/proto2/compiler/public:protocol_compiler");
   }
   //map.ParseLineInfo(bin_file);
   map.AddFilesToRuleSizes(&program);
   map.PrintWeightGraph(entry);
   map.PrintDepGraph();
   map.PrintDomTree();
-  */
-  program.PrintNoFile();
 }
