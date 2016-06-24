@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -41,6 +42,8 @@
     perror(#call " " __FILE__ ":" TOSTRING(__LINE__)); \
     exit(1); \
   }
+
+namespace bloaty {
 
 std::string* name_path;
 
@@ -75,6 +78,29 @@ std::string SiPrint(size_t size) {
     return DoubleStringPrintf("%0.2f", size_d) + prefixes[n];
   }
 
+}
+
+// LineReader / LineIterator ///////////////////////////////////////////////////
+
+// Convenience code for iterating over lines of a pipe.
+
+LineReader::LineReader(LineReader&& other) {
+  Close();
+
+  file_ = other.file_;
+  pclose_ = other.pclose_;
+
+  other.file_ = nullptr;
+}
+
+void LineReader::Close() {
+  if (!file_) return;
+
+  if (pclose_) {
+    pclose(file_);
+  } else {
+    fclose(file_);
+  }
 }
 
 void LineReader::Next() {
@@ -112,9 +138,23 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
   return LineReader(pipe, true);
 }
 
+
+// NameStripper ////////////////////////////////////////////////////////////////
+
+// C++ Symbol names can get really long because they include all the parameter
+// types.  For example:
+//
+// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
+//
+// In most cases, we can strip all of the parameter info.  We only need to keep
+// it in the case of overloaded functions.  This class can do the stripping, but
+// the caller needs to verify that the stripped name is still unique within the
+// binary, otherwise the full name should be used.
+
 class NameStripper {
  public:
   bool StripName(const std::string& name) {
+    // XXX: bloaty::(anonymous namespace)::ReadELFSegments(std::basic_string
     size_t paren = name.find_first_of('(');
     if (paren == std::string::npos) {
       stripped_ = &name;
@@ -133,128 +173,23 @@ class NameStripper {
   std::string storage_;
 };
 
-bool verbose;
 
-template <class T>
-class RangeMap {
- public:
-  bool Add(uintptr_t addr, size_t size, T val) {
-    if (TryGet(addr) || TryGet(addr + size)) {
-      return false;
-    }
-    mappings_[addr] = std::make_pair(std::move(val), size);
-    return true;
-  }
+// Demangler ///////////////////////////////////////////////////////////////////
 
-  T* Get(uintptr_t addr) {
-    T* ret = TryGet(addr);
-    if (!ret) {
-      fprintf(stderr, "No fileoff for: %lx\n", addr);
-      exit(1);
-    }
-    return ret;
-  }
-
-  T* TryGet(uintptr_t addr) {
-    auto it = mappings_.upper_bound(addr);
-    if (it == mappings_.begin() || (--it, it->first + it->second.second <= addr)) {
-      return nullptr;
-    }
-    assert(addr >= it->first && addr < it->first + it->second.second);
-    return &it->second.first;
-  }
-
-  T* TryGetExactly(uintptr_t addr) {
-    auto it = mappings_.find(addr);
-    if (it == mappings_.end()) {
-      return nullptr;
-    }
-    return &it->second.first;
-  }
-
- private:
-  std::map<uintptr_t, std::pair<T, size_t>> mappings_;
-};
+// Demangles C++ symbols.
+//
+// There is no library we can (easily) link against for this, we have to shell
+// out to the "c++filt" program
+//
+// We can't use LineReader or popen() because we need to both read and write to
+// the subprocess.  So we need to roll our own.
 
 class Demangler {
  public:
-  Demangler() {
-    int toproc_pipe_fd[2];
-    int fromproc_pipe_fd[2];
-    if (pipe(toproc_pipe_fd) < 0 || pipe(fromproc_pipe_fd) < 0) {
-      perror("pipe");
-      exit(1);
-    }
+  Demangler();
+  ~Demangler();
 
-    pid_t pid = fork();
-    if (pid < 0) {
-      perror("fork");
-      exit(1);
-    }
-
-    if (pid) {
-      // Parent.
-      CHECK_SYSCALL(close(toproc_pipe_fd[0]));
-      CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-      int write_fd = toproc_pipe_fd[1];
-      int read_fd = fromproc_pipe_fd[0];
-      write_file_ = fdopen(write_fd, "w");
-      FILE* read_file = fdopen(read_fd, "r");
-      if (write_file_ == NULL || read_file == NULL) {
-        perror("fdopen");
-        exit(1);
-      }
-      reader_.reset(new LineReader(read_file, false));
-      child_pid_ = pid;
-    } else {
-      // Child.
-      CHECK_SYSCALL(close(STDIN_FILENO));
-      CHECK_SYSCALL(close(STDOUT_FILENO));
-      CHECK_SYSCALL(dup2(toproc_pipe_fd[0], STDIN_FILENO));
-      CHECK_SYSCALL(dup2(fromproc_pipe_fd[1], STDOUT_FILENO));
-
-      CHECK_SYSCALL(close(toproc_pipe_fd[0]));
-      CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-      CHECK_SYSCALL(close(toproc_pipe_fd[1]));
-      CHECK_SYSCALL(close(fromproc_pipe_fd[0]));
-
-      char prog[] = "c++filt";
-      char *const argv[] = {prog, NULL};
-      CHECK_SYSCALL(execvp("c++filt", argv));
-    }
-  }
-
-  ~Demangler() {
-    int status;
-    kill(child_pid_, SIGTERM);
-    waitpid(child_pid_, &status, WEXITED);
-    fclose(write_file_);
-  }
-
-  std::string Demangle(const std::string& symbol) {
-    const char *writeptr = symbol.c_str();
-    const char *writeend = writeptr + symbol.size();
-
-    while (writeptr < writeend) {
-      size_t bytes = fwrite(writeptr, 1, writeend - writeptr, write_file_);
-      if (bytes == 0) {
-        perror("fread");
-        exit(1);
-      }
-      writeptr += bytes;
-    }
-    if (fwrite("\n", 1, 1, write_file_) != 1) {
-      perror("fwrite");
-      exit(1);
-    }
-    if (fflush(write_file_) != 0) {
-      perror("fflush");
-      exit(1);
-    }
-
-    reader_->Next();
-    return reader_->line();
-  }
+  std::string Demangle(const std::string& symbol);
 
  private:
   FILE* write_file_;
@@ -262,311 +197,437 @@ class Demangler {
   pid_t child_pid_;
 };
 
+Demangler::Demangler() {
+  int toproc_pipe_fd[2];
+  int fromproc_pipe_fd[2];
+  if (pipe(toproc_pipe_fd) < 0 || pipe(fromproc_pipe_fd) < 0) {
+    perror("pipe");
+    exit(1);
+  }
 
-/** Program data structures ***************************************************/
+  pid_t pid = fork();
+  if (pid < 0) {
+    perror("fork");
+    exit(1);
+  }
 
-// Uses the simpler of the two algorithms described here:
-//   https://www.cs.princeton.edu/courses/archive/fall03/cs528/handouts/a%20fast%20algorithm%20for%20finding.pdf
-template <class T>
-class DominatorCalculator {
- public:
-  static void Calculate(T* root, uint32_t total) {
-    DominatorCalculator calculator;
-    calculator.CalculateDominators(root, total);
-    for (const auto& info : calculator.node_info_) {
-      if (!info.node) {
-        // Unreachable nodes won't have this.
-        continue;
-      }
-      if (info.dom == 0) {
-        // Main won't have this.  But make sure no node can have id 0.
-        continue;
-      }
-      info.node->dominator = calculator.node_info_[info.dom].node;
+  if (pid) {
+    // Parent.
+    CHECK_SYSCALL(close(toproc_pipe_fd[0]));
+    CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
+    int write_fd = toproc_pipe_fd[1];
+    int read_fd = fromproc_pipe_fd[0];
+    write_file_ = fdopen(write_fd, "w");
+    FILE* read_file = fdopen(read_fd, "r");
+    if (write_file_ == NULL || read_file == NULL) {
+      perror("fdopen");
+      exit(1);
     }
+    reader_.reset(new LineReader(read_file, false));
+    child_pid_ = pid;
+  } else {
+    // Child.
+    CHECK_SYSCALL(close(STDIN_FILENO));
+    CHECK_SYSCALL(close(STDOUT_FILENO));
+    CHECK_SYSCALL(dup2(toproc_pipe_fd[0], STDIN_FILENO));
+    CHECK_SYSCALL(dup2(fromproc_pipe_fd[1], STDOUT_FILENO));
+
+    CHECK_SYSCALL(close(toproc_pipe_fd[0]));
+    CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
+    CHECK_SYSCALL(close(toproc_pipe_fd[1]));
+    CHECK_SYSCALL(close(fromproc_pipe_fd[0]));
+
+    char prog[] = "c++filt";
+    char *const argv[] = {prog, NULL};
+    CHECK_SYSCALL(execvp("c++filt", argv));
+  }
+}
+
+Demangler::~Demangler() {
+  int status;
+  kill(child_pid_, SIGTERM);
+  waitpid(child_pid_, &status, WEXITED);
+  fclose(write_file_);
+}
+
+std::string Demangler::Demangle(const std::string& symbol) {
+  const char *writeptr = symbol.c_str();
+  const char *writeend = writeptr + symbol.size();
+
+  while (writeptr < writeend) {
+    size_t bytes = fwrite(writeptr, 1, writeend - writeptr, write_file_);
+    if (bytes == 0) {
+      perror("fread");
+      exit(1);
+    }
+    writeptr += bytes;
+  }
+  if (fwrite("\n", 1, 1, write_file_) != 1) {
+    perror("fwrite");
+    exit(1);
+  }
+  if (fflush(write_file_) != 0) {
+    perror("fflush");
+    exit(1);
+  }
+
+  reader_->Next();
+  return reader_->line();
+}
+
+// Rollup //////////////////////////////////////////////////////////////////////
+
+// A Rollup is a hierarchical tally of sizes.  Its graphical representation is
+// something like this:
+//
+//  93.3%  93.3%   3.02M Unmapped
+//      38.2%  38.2%   1.16M .debug_info
+//      23.9%  62.1%    740k .debug_str
+//      12.1%  74.2%    374k .debug_pubnames
+//      11.7%  86.0%    363k .debug_loc
+//       8.9%  94.9%    275k [Other]
+//       5.1% 100.0%    158k .debug_ranges
+//   6.7% 100.0%    222k LOAD [R E]
+//      61.0%  61.0%    135k .text
+//      21.4%  82.3%   47.5k .rodata
+//       6.2%  88.5%   13.8k .gcc_except_table
+//       5.9%  94.4%   13.2k .eh_frame
+//       5.6% 100.0%   12.4k [Other]
+//   0.0% 100.0%   1.40k [Other]
+// 100.0%   3.24M TOTAL
+//
+// There is a string -> size map of sizes (the meaning of the string labels
+// depends on context; it can by symbols, sections, source filenames, etc.) Each
+// map entry can have its own sub-Rollup.
+
+class Rollup {
+ public:
+  // Adds "size" bytes to the rollup under the label names[i].
+  // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
+  void Add(const std::vector<std::string> names, size_t i, size_t size) {
+    total_ += size;
+    if (i < names.size()) {
+      auto& child = children_[names[i]];
+      if (child.get() == nullptr) {
+        child.reset(new Rollup());
+      }
+      child->Add(names, i + 1, size);
+    }
+  }
+
+  // Prints a graphical representation of the rollup.
+  void Print() const {
+    PrintInternal("");
   }
 
  private:
-  void Initialize(T* pv) {
-    uint32_t v = pv->id;
-    node_info_[v].node = pv;
-    Semi(v) = ++n_;
-    Vertex(n_) = v;
-    Label(v) = v;
-    Ancestor(v) = 0;
-    for (const auto& target : pv->refs) {
-      uint32_t w = target->id;
-      if (Semi(w) == 0) {
-        Parent(w) = v;
-        Initialize(target);
-      }
-      Pred(w).insert(v);
-    }
-  }
+  void PrintInternal(const std::string& indent) const;
+  size_t total_ = 0;
 
-  void Link(uint32_t v, uint32_t w) {
-    Ancestor(w) = v;
-  }
-
-  void Compress(uint32_t v) {
-    if (Ancestor(Ancestor(v)) != 0) {
-      Compress(Ancestor(v));
-      if (Semi(Label(Ancestor(v))) < Semi(Label(v))) {
-        Label(v) = Label(Ancestor(v));
-      }
-      Ancestor(v) = Ancestor(Ancestor(v));
-    }
-  }
-
-  uint32_t Eval(uint32_t v) {
-    if (Ancestor(v) == 0) {
-      return v;
-    } else {
-      Compress(v);
-      return Label(v);
-    }
-  }
-
-  void CalculateDominators(T* pr, uint32_t total) {
-    uint32_t r = pr->id;
-    n_ = 0;
-    node_info_.resize(total);
-    ordering_.resize(total);
-
-    Initialize(pr);
-
-    for (uint32_t i = n_ - 1; i > 0; --i) {
-      uint32_t w = Vertex(i);
-
-      for (uint32_t v : Pred(w)) {
-        uint32_t u = Eval(v);
-        if (Semi(u) < Semi(w)) {
-          Semi(w) = Semi(u);
-        }
-      }
-      Bucket(Vertex(Semi(w))).insert(w);
-      Link(Parent(w), w);
-
-      for (uint32_t v : Bucket(Parent(w))) {
-        uint32_t u = Eval(v);
-        Dom(v) = Semi(u) < Semi(v) ? u : Parent(w);
-      }
-    }
-
-    for (uint32_t i = 1; i < n_; i++) {
-      uint32_t w = Vertex(i);
-      if (Dom(w) != Vertex(Semi(w))) {
-        Dom(w) = Dom(Dom(w));
-      }
-    }
-
-    Dom(r) = 0;
-  }
-
-  uint32_t& Parent(uint32_t v) {
-    return node_info_[v].parent;
-  }
-
-  uint32_t& Ancestor(uint32_t v) {
-    return node_info_[v].ancestor;
-  }
-
-  uint32_t& Semi(uint32_t v) {
-    return node_info_[v].semi;
-  }
-
-  uint32_t& Label(uint32_t v) {
-    return node_info_[v].label;
-  }
-
-  uint32_t& Dom(uint32_t v) {
-    return node_info_[v].dom;
-  }
-
-  uint32_t& Vertex(uint32_t v) {
-    return ordering_[v];
-  }
-
-  std::set<uint32_t>& Pred(uint32_t v) {
-    return node_info_[v].pred;
-  }
-
-  std::set<uint32_t>& Bucket(uint32_t v) {
-    return node_info_[v].bucket;
-  }
-
-  uint32_t n_;
-
-  struct NodeInfo {
-    T* node;
-    uint32_t parent;
-    uint32_t ancestor;
-    uint32_t label;
-    uint32_t semi;
-    uint32_t dom;
-    std::set<uint32_t> pred;
-    std::set<uint32_t> bucket;
-  };
-  std::vector<NodeInfo> node_info_;
-  std::vector<uint32_t> ordering_;  // i -> (node_info_ index)
+  // Putting Rollup by value seems to work on some compilers/libs but not
+  // others.
+  typedef std::unordered_map<std::string, std::unique_ptr<Rollup>> ChildMap;
+  ChildMap children_;
 };
 
-template <class T>
-class WeightGraphPrinter {
- public:
-  void Print(T* entry, uint32_t maxid) {
-    DominatorCalculator<T>::Calculate(entry, maxid);
-    std::set<T*> seen;
-    CalculateWeightsRecursive(entry, &seen);
-    std::ofstream out("/tmp/graph.dot");
-    out << "digraph weights {\n";
-    out << "  rankdir=LR;\n";
-    /*
-    for ( auto object : object_list) {
-      out << "  \"" << object->name << "\"\n";
-    }
-    */
-    {
-      std::unordered_map<T*, std::unordered_set<T*>> dominating;
-      for (auto obj : seen) {
-        total_size_ += obj->size;
-        if (obj->dominator) {
-          //if (name_path && obj->dominator->name == *name_path) {
-            //std::cerr << "Adding dominator: " << obj->name << " -> " << *name_path << "\n";
-          //  std::cerr << "Adding dominator: " << obj->dominator->name << " -> " << obj->name << "\n";
-          //}
-          dominating[obj->dominator].insert(obj);
-        }
-      }
-
-      PrintDotGraph(entry, &out, dominating);
-    }
-    out << "}\n";
+void Rollup::PrintInternal(const std::string& indent) const {
+  if (children_.empty() ||
+      (children_.size() == 1 && children_.begin()->first == "[None]")) {
+    return;
   }
+
+  double total = 0;
+
+  typedef std::tuple<const std::string*, size_t, const Rollup*> ChildTuple;
+  std::vector<ChildTuple> sorted_children;
+  sorted_children.reserve(children_.size());
+  size_t others = 0;
+  size_t others_max = 0;
+  for (const auto& value : children_) {
+    sorted_children.push_back(
+        std::make_tuple(&value.first, value.second->total_, value.second.get()));
+    total += value.second->total_;
+  }
+
+  assert(total == total_);
+
+  std::sort(sorted_children.begin(), sorted_children.end(),
+            [](const ChildTuple& a, const ChildTuple& b) {
+              return std::get<1>(a) > std::get<1>(b);
+            });
+
+  size_t i = sorted_children.size() - 1;
+  while (i >= 20) {
+    if (*std::get<0>(sorted_children[i]) == "[None]") {
+      std::swap(sorted_children[i], sorted_children[19]);
+    } else {
+      size_t size = std::get<1>(sorted_children[i]);
+      others += size;
+      others_max = std::max(others_max, size);
+      sorted_children.resize(i);
+      i--;
+    }
+  }
+
+  std::string others_label = "[Other]";
+  if (others > 0) {
+    sorted_children.push_back(std::make_tuple(&others_label, others, nullptr));
+  }
+
+  std::sort(sorted_children.begin(), sorted_children.end(),
+            [](const ChildTuple& a, const ChildTuple& b) {
+              return std::get<1>(a) > std::get<1>(b);
+            });
+
+  size_t cumulative = 0;
+  NameStripper stripper;
+  Demangler demangler;
+
+  for (const auto& child : sorted_children) {
+    size_t size = std::get<1>(child);
+    cumulative += size;
+    //const std::string& name = object->pretty_name;
+    //printf("%s %5.1f%% %5.1f%%  %6d %s\n", indent.c_str(), size / total * 100,
+    //       cumulative / total * 100, (int)size, child->first.c_str());
+    auto demangled = demangler.Demangle(*std::get<0>(child));
+    stripper.StripName(demangled);
+    printf("%s %5.1f%%  %6s %s\n", indent.c_str(), size / total * 100,
+           SiPrint(size).c_str(), stripper.stripped().c_str());
+    auto child_rollup = std::get<2>(child);
+    if (child_rollup) {
+      child_rollup->PrintInternal(indent + "    ");
+    }
+  }
+
+  if (indent == "") {
+    //printf("%s %5.1f%%  %6d %s\n", indent.c_str(), 100.0, (int)total, "TOTAL");
+    printf("%s %5.1f%%  %6s %s\n", indent.c_str(), 100.0, SiPrint(total).c_str(), "TOTAL");
+  }
+}
+
+// RangeMap ////////////////////////////////////////////////////////////////////
+
+// Maps
+//
+//   [uintptr_t, uintptr_t) -> std::string
+//
+// where ranges must be non-overlapping.
+//
+// This is used to map the address space (either pointer offsets or file
+// offsets).
+
+class RangeMap {
+ public:
+  bool Add(uintptr_t addr, size_t size, const std::string& val);
+  std::string* Get(uintptr_t addr, uintptr_t* start, size_t* size);
+  std::string* TryGet(uintptr_t addr, uintptr_t* start, size_t* size);
+  std::string* TryGetExactly(uintptr_t addr, size_t* size);
+
+  void Fill(uintptr_t max, const std::string& val);
+
+  static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
+                            Rollup* rollup);
 
  private:
-  size_t total_size_ = 0;
+  typedef std::map<uintptr_t, std::pair<std::string, size_t>> Map;
+  Map mappings_;
 
-  uint32_t FontSize(size_t size) {
-    return 9 + pow(size * 200.0 / total_size_, 0.7);
+  static size_t RangeEnd(Map::const_iterator iter) {
+    return iter->first + iter->second.second;
   }
 
-  void PrintDotGraph(T* obj, std::ofstream* out,
-      const std::unordered_map<T*, std::unordered_set<T*>>& dominating) {
-    size_t other_size = 0;
-    size_t max_other = 0;
-    size_t other_count = 0;
-    size_t unsummarized = 0;
-    auto it = dominating.find(obj);
-    if (it != dominating.end()) {
-      const std::unordered_set<T*> direct = it->second;
-      std::vector<T*> sorted;
-      std::copy(direct.begin(), direct.end(),
-                std::back_inserter(sorted));
-      std::sort(sorted.begin(), sorted.end(), [&](T* a, T* b) {
-        auto it_a = dominating.find(a);
-        auto it_b = dominating.find(b);
-        size_t children_a = (it_a == dominating.end()) ? 0 : it_a->second.size();
-        size_t children_b = (it_b == dominating.end()) ? 0 : it_b->second.size();
-        if (children_a != children_b) {
-          return children_a > children_b;
+  bool IterIsEnd(Map::const_iterator iter) const {
+    return iter == mappings_.end();
+  }
+};
+
+std::string* RangeMap::TryGet(uintptr_t addr, uintptr_t* start, size_t* size) {
+  auto it = mappings_.upper_bound(addr);
+  if (it == mappings_.begin() || (--it, it->first + it->second.second <= addr)) {
+    return nullptr;
+  }
+  assert(addr >= it->first && addr < it->first + it->second.second);
+  return &it->second.first;
+}
+
+std::string* RangeMap::TryGetExactly(uintptr_t addr, size_t* size) {
+  auto it = mappings_.find(addr);
+  if (it == mappings_.end()) {
+    return nullptr;
+  }
+  return &it->second.first;
+}
+
+bool RangeMap::Add(uintptr_t addr, size_t size, const std::string& val) {
+  if (TryGet(addr, nullptr, nullptr) ||
+      TryGet(addr + size, nullptr, nullptr)) {
+    return false;
+  }
+  mappings_[addr] = std::make_pair(std::move(val), size);
+  return true;
+}
+
+void RangeMap::Fill(uintptr_t max, const std::string& val) {
+  uintptr_t last = 0;
+
+  for (const auto& pair : mappings_) {
+    if (pair.first > last) {
+      mappings_[last] = std::make_pair(val, pair.first - last);
+    }
+
+    last = pair.first + pair.second.second;
+  }
+
+  if (last < max) {
+    mappings_[last] = std::make_pair(val, max - last);
+  }
+}
+
+void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
+                             Rollup* rollup) {
+  assert(range_maps.size() > 0);
+
+  std::vector<Map::const_iterator> iters;
+  std::vector<std::string> keys;
+  uintptr_t current = UINTPTR_MAX;
+
+  for (auto range_map : range_maps) {
+    iters.push_back(range_map->mappings_.begin());
+    current = std::min(current, iters.back()->first);
+  }
+
+  assert(current != UINTPTR_MAX);
+
+  while (true) {
+    uintptr_t next_break = UINTPTR_MAX;
+    bool have_data = false;
+    keys.clear();
+
+    for (size_t i = 0; i < iters.size(); i++) {
+      auto& iter = iters[i];
+
+      // Advance the iterators if its range is behind the current point.
+      while (!range_maps[i]->IterIsEnd(iter) && RangeEnd(iter) <= current) {
+        ++iter;
+        //assert(range_maps[i]->IterIsEnd(iter) || RangeEnd(iter) > current);
+      }
+
+      // Push a label and help calculate the next break.
+      bool is_end = range_maps[i]->IterIsEnd(iter);
+      if (is_end || iter->first > current) {
+        keys.push_back("[None]");
+        if (!is_end) {
+          next_break = std::min(next_break, iter->first);
         }
-        return a->size > b->size;
-      });
-      for (size_t i = 0; i < sorted.size(); i++) {
-        T* target = sorted[i];
-        if ((static_cast<double>(target->weight) / total_size_) > 0.001) {
-          unsummarized++;
-          *out << "  \"" << obj->name << "\" -> \"" << target->name << "\";\n"; // [penwidth=" << (pow(obj->weight * 100.0 / max_weight_, 0.6)) << "];\n";
-          PrintDotGraph(target, out, dominating);
-        } else {
-          other_count++;
-          other_size += target->weight;
-          max_other = std::max(target->weight, max_other);
+      } else {
+        have_data = true;
+        keys.push_back(iter->second.first);
+        next_break = std::min(next_break, RangeEnd(iter));
+      }
+    }
+
+    if (next_break == UINTPTR_MAX) {
+      break;
+    }
+
+    if (false) {
+      for (auto& key : keys) {
+        if (key == "[None]") {
+          std::stringstream stream;
+          stream << " [0x" << std::hex << current << ", 0x" << std::hex
+                 << next_break << "]";
+          key += stream.str();
         }
       }
     }
 
-    if (unsummarized > 0) {
-      if (other_size) {
-        std::string other_name = obj->name + " OTHER";
-        *out << "  \"" << obj->name << "\" -> \"" << other_name
-             << "\";\n";  // [penwidth=" << (pow(obj->weight * 100.0 /
-                          // max_weight_, 0.6)) << "];\n";
-        *out << "  \"" << other_name << "\" [shape=box, label=\"["
-             << other_count << " others under " << SiPrint(max_other)
-             << "]\\nsize: " << SiPrint(other_size)
-             << "\", fontsize=" << FontSize(other_size) << "];\n";
-      }
-      *out << "  \"" << obj->name << "\" [shape=box, label=\""
-           << ClampSize(obj->pretty_name, 80)
-           << "\\nsize: " << SiPrint(obj->size)
-           << "\\nweight: " << SiPrint(obj->weight)
-           << "\", fontsize=" << FontSize(obj->size) << "];\n";
-    } else {
-      size_t size = obj->size + other_size;
-      std::string label = ClampSize(obj->pretty_name, 80);
-      if (other_count > 0 && max_other > 0) {
-        label += "\\nand " + std::to_string(other_count) + " children under " +
-                 SiPrint(max_other);
-      }
-      *out << "  \"" << obj->name << "\" [shape=box, label=\"" << label
-           << "\\nsize: " << SiPrint(size)
-           << "\", fontsize=" << FontSize(obj->weight) << "];\n";
+    if (have_data) {
+      rollup->Add(keys, 0, next_break - current);
     }
-  }
 
-  void CalculateWeightsRecursive(T* obj, std::set<T*>* seen) {
-    if (!seen->insert(obj).second) {
+    current = next_break;
+  }
+}
+
+
+// MemoryFileMap ///////////////////////////////////////////////////////////////
+
+MemoryFileMap::MemoryFileMap()
+    : vm_map_(new RangeMap()), file_map_(new RangeMap()) {}
+MemoryFileMap::~MemoryFileMap() {}
+
+void MemoryFileMap::FillInUnmapped(long filesize) {
+  file_map_->Fill(filesize, "Unmapped");
+}
+
+void MemoryFileMap::Add(const std::string& name, uintptr_t vmaddr,
+                        size_t vmsize, long fileoff, long filesize) {
+  if (base_) {
+    if (!base_->CoversVMAddresses(vmaddr, vmsize) ||
+        !base_->CoversFileOffsets(fileoff, filesize)) {
+      std::cerr << "bloaty: section " << name << " lies outside any segment.\n";
       return;
     }
+  }
 
-    obj->weight = obj->size;
-    obj->max_weight = obj->weight;
+  bool overlapped = false;
 
-    for (auto target : obj->refs) {
-      CalculateWeightsRecursive(target, seen);
-      obj->max_weight = std::max(obj->max_weight, target->max_weight);
-    }
-
-    if (obj->dominator) {
-      obj->dominator->weight += obj->weight;
+  if (vmsize) {
+    if (!vm_map_->Add(vmaddr, vmsize, name)) {
+      overlapped = true;
     }
   }
-};
 
+  if (filesize) {
+    if (!file_map_->Add(fileoff, filesize, name)) {
+      overlapped = true;
+    }
+  }
+
+  if (overlapped) {
+    std::cerr << "Unexpected overlap in base memory map adding: " << name
+              << "\n";
+  }
+}
+
+bool MemoryFileMap::CoversVMAddresses(uintptr_t vmaddr, size_t vmsize) {
+  // XXX: not correct, need to test the whole range.
+  return vm_map_->TryGet(vmaddr, nullptr, nullptr) &&
+         vm_map_->TryGet(vmaddr + vmsize, nullptr, nullptr);
+}
+
+bool MemoryFileMap::CoversFileOffsets(uintptr_t fileoff, size_t filesize) {
+  // XXX: not correct, need to test the whole range.
+  return file_map_->TryGet(fileoff, nullptr, nullptr) &&
+         file_map_->TryGet(fileoff + filesize, nullptr, nullptr);
+}
+
+
+// MemoryMap ///////////////////////////////////////////////////////////////////
+
+MemoryMap::MemoryMap(const MemoryFileMap* base)
+    : base_(base), map_(new RangeMap()) {}
+
+MemoryMap::~MemoryMap() {}
+
+void MemoryMap::Add(uintptr_t vmaddr, size_t size, const std::string& name) {
+  map_->Add(vmaddr, size, name);
+}
+
+void MemoryMap::AddAllowAlias(uintptr_t vmaddr, size_t size,
+                              const std::string& name) {
+  map_->Add(vmaddr, size, name);
+}
+
+/*
+bool FindAtAddr(uintptr_t vmaddr, std::string* name) const;
+bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
+                        std::string* name) const;
+                        */
+
+#if 0
 class Program {
  public:
-  Program() : no_file_("[couldn't resolve source filename]") {
-    no_file_.is_unknown = true;
-  }
-
-  ~Program() {
-  }
-
-  Object* entry() { return entry_; }
-
-  Object* AddObject(const std::string& name, uintptr_t vmaddr, size_t size, bool data) {
-
-    if (name_path && name == *name_path) {
-      fprintf(stderr, "Adding object %s addr=%lx, size=%lx\n", name.c_str(), vmaddr, size);
-    }
-
-    Object* ret = new Object(name);
-    objects_[name] = ret;
-    ret->id = next_id_++;
-    ret->vmaddr = vmaddr;
-    ret->SetSize(size);
-    ret->data = data;
-    ret->name = name;
-    ret->file = &no_file_;
-    no_file_.object_size += ret->size;
-    total_size_ += size;
-    objects_by_addr_.Add(vmaddr, size, std::unique_ptr<Object>(ret));
-
-    return ret;
-  }
-
   void CalculatePrettyNames() {
     if (pretty_names_calculated_) {
       return;
@@ -594,781 +655,45 @@ class Program {
 
     pretty_names_calculated_ = true;
   }
+#endif
 
-  void AddObjectAlias(Object* obj, const std::string& name) {
-    objects_[name] = obj;
 
-    // Keep the lexicographcally-first name as the canonical one.
-    if (name < obj->name) {
-      obj->aliases.insert(obj->name);
-      obj->name = name;
-    } else {
-      obj->aliases.insert(name);
-    }
-  }
-
-  void AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff, size_t filesize) {
-    file_offsets_.Add(vmaddr, filesize, vmaddr - fileoff);
-  }
-
-  bool TryGetFileOffset(uintptr_t vmaddr, uintptr_t *ofs) {
-    uintptr_t* diff = file_offsets_.TryGet(vmaddr);
-    if (diff) {
-      *ofs = vmaddr - *diff;
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-  void SetEntryPoint(Object* obj) {
-    entry_ = obj;
-  }
-
-  void PrintNoFile() {
-    double total = 0;
-
-    CalculatePrettyNames();
-    size_t could_be_mapped = 0;
-
-    std::vector<Object*> object_list;
-    object_list.reserve(objects_.size());
-    // XXX: should uniquify objects, can have dupes because of aliases.
-    for ( auto& pair : objects_ ) {
-      auto obj = pair.second;
-      if (obj->file != &no_file_) {
-        could_be_mapped += obj->size;
-        continue;
-      }
-      object_list.push_back(pair.second);
-      //assert(pair.first == pair.second->name);
-      total += pair.second->size;
-    }
-
-    std::sort(object_list.begin(), object_list.end(), [](Object* a, Object* b) {
-      return a->size > b->size;
-    });
-
-    size_t cumulative = 0;
-
-    for ( auto object : object_list) {
-      size_t size = object->size;
-      cumulative += size;
-      const std::string& name = object->name + " (" + object->pretty_name + ")";
-      printf("%5.1f%% %5.1f%%  %6d %s\n", size / total * 100, cumulative / total * 100, (int)size, name.c_str());
-    }
-
-    printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL could NOT be mapped to source files");
-    double real_total = total + could_be_mapped;
-    printf("%d / %d could not be mapped to source files (%0.1f%%)\n", (int)total, (int)real_total, (total * 100) / real_total);
-  }
-
-  void TryAddRef(Object* from, uintptr_t vmaddr) {
-    if (!from) {
-      return;
-    }
-
-    std::unique_ptr<Object>* to_unique = objects_by_addr_.TryGet(vmaddr);
-    if (to_unique) {
-      Object* to = to_unique->get();
-      if (verbose) {
-        fprintf(stderr, "Added ref! %s -> %s\n", from->pretty_name.c_str(),
-                to->pretty_name.c_str());
-      }
-      from->refs.insert(to);
-      //if (to) {
-        if (from->file && to->file) {
-          from->file->refs.insert(to->file);
-        }
-      //}
-    }
-  }
-
-  File* GetOrCreateFile(const std::string& filename) {
-    // C++17: auto pair = files_.try_emplace(filename, filename);
-    auto it = files_.find(filename);
-    if (it == files_.end()) {
-      it = files_.emplace(filename, filename).first;
-    }
-    return &it->second;
-  }
-
-  bool HasFiles() { return files_.size() > 0; }
-
-  Object* FindObjectByName(const std::string& name) {
-    auto it = objects_.find(name);
-    return it == objects_.end() ? NULL : it->second;
-  }
-
-  Object* FindObjectByAddr(uintptr_t addr) {
-    std::unique_ptr<Object>* ret = objects_by_addr_.TryGetExactly(addr);
-    if (ret) {
-      return ret->get();
-    } else {
-      return NULL;
-    }
-  }
-
-  Object* FindObjectContainingAddr(uintptr_t addr) {
-    std::unique_ptr<Object>* ret = objects_by_addr_.TryGet(addr);
-    if (ret) {
-      return ret->get();
-    } else {
-      return NULL;
-    }
-  }
-
-
-  void PrintSymbolsByTransitiveWeight() {
-    std::vector<Object*> object_list;
-    object_list.reserve(objects_.size());
-    for ( auto& pair : objects_ ) {
-      object_list.push_back(pair.second);
-    }
-
-    std::sort(object_list.begin(), object_list.end(), [](Object* a, Object* b) {
-      return a->weight > b->weight;
-    });
-
-    int i = 0;
-    for (auto object : object_list) {
-      if (++i > 40) break;
-      printf(" %7d %s\n", (int)object->weight, object->pretty_name.c_str());
-    }
-
-  }
-
-  void GC(Object* obj, std::unordered_set<Object*>* garbage,
-          std::vector<Object*>* stack) {
-    if (garbage->erase(obj) != 1) {
-      return;
-    }
-
-    stack->push_back(obj);
-
-    if (name_path && obj->name == *name_path) {
-      std::string indent;
-      for (auto obj : *stack) {
-        indent += "  ";
-        std::cerr << indent << "-> " << obj->name << "\n";
-      }
-    }
-
-    for ( auto& child : obj->refs ) {
-      GC(child, garbage, stack);
-    }
-
-    stack->pop_back();
-  }
-
-  void GCFiles(File* file, std::set<File*>* garbage) {
-    if (garbage->erase(file) != 1) {
-      return;
-    }
-
-    for ( auto& child : file->refs ) {
-      GCFiles(child, garbage);
-    }
-  }
-
-  void PrintGarbage() {
-    std::unordered_set<Object*> garbage;
-    std::vector<Object*> stack;
-
-    for ( auto& pair : objects_ ) {
-      garbage.insert(pair.second);
-    }
-
-    if (!entry_) {
-      std::cerr << "Error: Can't calculate garbage without entry point.\n";
-      exit(1);
-    }
-
-    GC(entry_, &garbage, &stack);
-    std::vector<Object*> garbage_sorted;
-    std::copy(garbage.begin(), garbage.end(),
-              std::back_inserter(garbage_sorted));
-    std::sort(garbage_sorted.begin(), garbage_sorted.end(), [](Object* a, Object* b) {
-      return a->pretty_name > b->pretty_name;
-    });
-
-    //for (auto& obj : garbage_sorted) {
-      //if (name_path && obj->name == *name_path) {
-      //if (obj->size > 0) {
-      //  fprintf(stderr, "Garbage obj: %s (%s %lx)\n", obj->pretty_name.c_str(), obj->name.c_str(), obj->vmaddr);
-      //}
-      //}
-    //}
-
-    if (entry_->file) {
-      std::set<File*> garbage_files;
-      for ( auto& pair : files_ ) {
-        garbage_files.insert(&pair.second);
-      }
-
-      GCFiles(entry_->file, &garbage_files);
-
-      std::cerr << "Total files: " << files_.size() << "\n";
-      std::cerr << "Garbage files: " << garbage_files.size() << "\n";
-
-      //for ( auto& file : garbage_files ) {
-        //std::cerr << "Garbage file: " << file->name << "\n";
-      //}
-    }
-
-    std::cerr << "Total objects: " << objects_.size() << "\n";
-    std::cerr << "Garbage objects: " << garbage.size() << "\n";
-  }
-
-  void PrintSymbols() {
-    double total = 0;
-
-    std::vector<Object*> object_list;
-    object_list.reserve(objects_.size());
-    for ( auto& pair : objects_ ) {
-      object_list.push_back(pair.second);
-      assert(pair.first == pair.second->name);
-      total += pair.second->size;
-    }
-
-    std::sort(object_list.begin(), object_list.end(), [](Object* a, Object* b) {
-      return a->size > b->size;
-    });
-
-    size_t cumulative = 0;
-
-    for ( auto object : object_list) {
-      size_t size = object->size;
-      cumulative += size;
-      const std::string& name = object->pretty_name;
-      printf("%5.1f%% %5.1f%%  %6d %s\n", size / total * 100, cumulative / total * 100, (int)size, name.c_str());
-    }
-
-    printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
-  }
-
-  void PrintFiles() {
-    double total = 0;
-
-    std::vector<File*> file_list;
-    file_list.reserve(files_.size());
-    for ( auto& pair : files_ ) {
-      file_list.push_back(&pair.second);
-      total += pair.second.source_line_weight;
-    }
-
-    std::sort(file_list.begin(), file_list.end(), [](File* a, File* b) {
-      return a->source_line_weight > b->source_line_weight;
-    });
-
-    size_t cumulative = 0;
-
-    for ( auto file : file_list) {
-      size_t size = file->source_line_weight;
-      cumulative += size;
-      const std::string& name = file->name;
-      printf("%5.1f%% %5.1f%%  %6d %s\n", size / total * 100, cumulative / total * 100, (int)size, name.c_str());
-    }
-
-    printf("%5.1f%%  %6d %s\n", 100.0, (int)total, "TOTAL");
-  }
-
-  void AddSymSourcefilePairs(
-      const std::vector<std::pair<std::string, std::string>>&
-          sym_srcfile_pairs) {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    for (const auto& pair : sym_srcfile_pairs) {
-      auto obj = FindObjectByName(pair.first);
-
-      if (obj) {
-        auto file = GetOrCreateFile(pair.second);
-        obj->file->object_size -= obj->size;  // Should be the "no file".
-        obj->file = file;
-        file->object_size += obj->size;
-        // We were successful at assigning a file.
-        continue;
-      } else {
-        // std::cerr << "Didn't find object for linkage name: " << symname
-        //          << "\n";
-      }
-    }
-  }
-
-  void AddAddrSourcefilePairs(
-  const std::vector<std::pair<uintptr_t, std::string>>& addr_srcfile_pairs) {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    for (const auto& pair : addr_srcfile_pairs) {
-      auto obj = FindObjectByAddr(pair.first);
-
-      if (obj) {
-        auto file = GetOrCreateFile(pair.second);
-        obj->file->object_size -= obj->size;  // Should be the "no file".
-        obj->file = file;
-        file->object_size += obj->size;
-      }
-    }
-  }
-
-  void PrintWeightGraph() {
-    WeightGraphPrinter<Object> printer;
-    printer.Print(entry_, next_id_);
-  }
-
-  uint32_t next_id_ = 1;
-  size_t total_size_ = 0;
-  size_t max_weight_ = 0;
-
-  // Files, indexed by filename.
-  std::unordered_map<std::string, File> files_;
-
-  // Objects, indexed by name.
-  std::unordered_map<std::string, Object*> objects_;
-  std::unordered_map<std::string, Object*> stripped_pretty_names_;
-  RangeMap<std::unique_ptr<Object>> objects_by_addr_;
-  RangeMap<uintptr_t> file_offsets_;
-  Object* entry_ = nullptr;
-  bool pretty_names_calculated_ = false;
-
-  NameStripper stripper_;
-  Demangler demangler_;
-  File no_file_;
-  std::mutex mutex_;
-};
-
-Object* ProgramDataSink::AddObject(const std::string& name, uintptr_t vmaddr,
-                                   size_t size, bool data) {
-  return program_->AddObject(name, vmaddr, size, data);
-}
-
-Object* ProgramDataSink::FindObjectByName(const std::string& name) {
-  return program_->FindObjectByName(name);
-}
-
-Object* ProgramDataSink::FindObjectByAddr(uintptr_t addr) {
-  return program_->FindObjectByAddr(addr);
-}
-
-Object* ProgramDataSink::FindObjectContainingAddr(uintptr_t addr) {
-  return program_->FindObjectContainingAddr(addr);
-}
-
-File* ProgramDataSink::GetOrCreateFile(const std::string& filename) {
-  return program_->GetOrCreateFile(filename);
-}
-
-void ProgramDataSink::AddObjectAlias(Object* obj, const std::string& name) {
-  program_->AddObjectAlias(obj, name);
-}
-
-void ProgramDataSink::AddRef(Object* from, Object* to) {
-  if (name_path &&
-      (from->name == *name_path || to->name == *name_path)) {
-    std::cerr << "  Add ref from " << from->pretty_name << " to " << to->pretty_name << "\n";
-  }
-  from->refs.insert(to);
-}
-
-void ProgramDataSink::SetEntryPoint(Object* obj) {
-  program_->SetEntryPoint(obj);
-}
-
-void ProgramDataSink::AddFileMapping(uintptr_t vmaddr, uintptr_t fileoff,
-                                     size_t filesize) {
-  program_->AddFileMapping(vmaddr, fileoff, filesize);
-}
-
-void ProgramDataSink::AddSymSourcefilePairs(
-    const std::vector<std::pair<std::string, std::string>>& sym_srcfile_pairs) {
-  return program_->AddSymSourcefilePairs(sym_srcfile_pairs);
-}
-
-void ProgramDataSink::AddAddrSourcefilePairs(
-    const std::vector<std::pair<uintptr_t, std::string>>& addr_srcfile_pairs) {
-  return program_->AddAddrSourcefilePairs(addr_srcfile_pairs);
-}
-
-void ParseVTables(const std::string& filename, Program* program) {
-  FILE* f = fopen(filename.c_str(), "rb");
-
-  for (auto& pair : program->objects_) {
-    Object* obj = pair.second;
-
-    if (!obj->data) {
-      continue;
-    }
-
-    if (name_path && obj->name == *name_path) {
-      std::cerr << "VTable scanning " << obj->name << "\n";
-      verbose = true;
-    } else {
-      verbose = false;
-    }
-
-    uintptr_t base;
-    if (!program->TryGetFileOffset(obj->vmaddr, &base)) {
-      continue;
-    }
-    fseek(f, base, SEEK_SET);
-
-    for (size_t i = 0; i < obj->size; i += sizeof(uintptr_t)) {
-      uintptr_t addr;
-      if (fread(&addr, sizeof(uintptr_t), 1, f) != 1) {
-        perror("fread");
-        exit(1);
-      }
-
-      if (verbose) {
-        fprintf(stderr, "  Try add ref to: %x\n", (int)addr);
-      }
-      program->TryAddRef(obj, addr);
-    }
-  }
-
-  fclose(f);
-}
-
-std::string GetCacheFilename(std::string filename,
-                             const std::string& build_id) {
-  return std::string("/tmp/blc.") + basename(&filename[0]) + "." + build_id;
-}
-
-bool TryOpenCacheFile(const std::string& filename, const std::string& build_id,
-                      Program* program) {
-  const std::string cache_filename = GetCacheFilename(filename, build_id);
-  std::ifstream input(cache_filename);
-  if (!input.is_open()) {
-    return false;
-  }
-  std::cerr << "Found cache file: " << cache_filename << "\n";
-
-#define FIELD R"(([^\t]+)\t)"
-  RE2 pattern(FIELD FIELD FIELD FIELD FIELD R"(([^\t]+))");
-  RE2 pattern2(R"(([^, ]+))");
-  RE2 refs_pattern(R"(([^ ]+) -> {([^}]*)})");
-  RE2 entry_pattern(R"(ENTRY: ([^ \n]+))");
-  std::string line;
-  uintptr_t vmaddr;
-  uintptr_t size;
-  uintptr_t weight;
-  uintptr_t max_weight;
-  std::string name;
-  std::string refs;
-  std::string from;
-  std::string aliases;
-  while (std::getline(input, line)) {
-    if (RE2::FullMatch(line, pattern, RE2::Hex(&vmaddr), RE2::Hex(&size),
-                       RE2::Hex(&weight), RE2::Hex(&max_weight),
-                       &name, &aliases)) {
-      Object* obj = program->AddObject(name, vmaddr, size, false);
-      obj->weight = weight;
-      obj->max_weight = max_weight;
-
-      std::string alias;
-      re2::StringPiece piece(aliases);
-      while (RE2::FindAndConsume(&piece, pattern2, &alias)) {
-        obj->aliases.insert(alias);
-      }
-    } else if (RE2::FullMatch(line, refs_pattern, &from, &refs)) {
-      Object* obj = program->FindObjectByName(from);
-      if (!obj) {
-        std::cerr << "Ref from undefined object? " << name << "\n";
-      }
-
-      re2::StringPiece piece(refs);
-      std::string ref;
-      while (RE2::FindAndConsume(&piece, pattern2, &ref)) {
-        Object* target = program->FindObjectByName(ref);
-        if (!target) {
-          std::cerr << "Ref to undefined object? " << name << ", " << ref << "\n";
-          exit(1);
-        }
-        obj->refs.insert(target);
-      }
-
-    } else if (RE2::FullMatch(line, entry_pattern, &name)) {
-      Object* obj = program->FindObjectByName(name);
-      if (!obj) {
-        std::cerr << "Unknown entry point? " << name << "\n";
-      }
-      program->SetEntryPoint(obj);
-    } else {
-      std::cerr << "Bad line: " << line << "\n";
-      exit(1);
-    }
-  }
-
-  return true;
-}
-
-void WriteCacheFile(Program* program, const std::string& filename,
-                    const std::string& build_id) {
-  const std::string cache_filename = GetCacheFilename(filename, build_id);
-  std::ofstream output(cache_filename);
-  if (!output.is_open()) {
-    std::cerr << "Couldn't open for writing: " << cache_filename << "\n";
+long GetFileSize(const std::string& filename) {
+  FILE* file = fopen(filename.c_str(), "rb");
+  if (!file) {
+    std::cerr << "Couldn't get file size for: " << filename << "\n";
     exit(1);
   }
-
-  const auto& object_map = program->objects_;
-
-  // Create an ordered list of canonical names.
-  std::set<std::string> names;
-  for (const auto& pair : object_map) {
-    names.insert(pair.second->name);  // Might be a duplicate.
-  }
-
-  for (const auto& name : names) {
-    Object* obj = program->FindObjectByName(name);
-    output << std::hex << obj->vmaddr << "\t";
-    output << std::hex << obj->size << "\t";
-    output << std::hex << obj->weight << "\t";
-    output << std::hex << obj->max_weight << "\t";
-    output << obj->name << "\t";
-
-    output << "{";
-    bool first = true;
-    for (const auto& alias : obj->aliases) {
-      if (first) {
-        first = false;
-      } else {
-        output << ", ";
-      }
-      // Could output IDs instead of names for significant size reduction.
-      output << alias;
-    }
-    output << "}";
-    output << "\n";
-  }
-
-  for (const auto& name : names) {
-    Object* obj = program->FindObjectByName(name);
-    if (obj->refs.empty()) {
-      continue;
-    }
-
-    output << obj->name << " -> ";
-    output << "{";
-    bool first = true;
-    for (const auto& target : obj->refs) {
-      if (first) {
-        first = false;
-      } else {
-        output << ", ";
-      }
-      // Could output IDs instead of names for significant size reduction.
-      output << target->name;
-    }
-    output << "}";
-    output << "\n";
-  }
-
-  if (program->entry_) {
-    output << "ENTRY: " << program->entry_->name << "\n";
-  }
-
-  std::cerr << "Wrote cache file: " << cache_filename << "\n";
+  fseek(file, 0L, SEEK_END);
+  long ret = ftell(file);
+  fclose(file);
+  return ret;
 }
 
-void ReadObjectData(const std::string& filename, ProgramDataSink* sink) {
-#ifdef __APPLE__
-  ReadMachOObjectData(filename, sink);
-#else
-  ReadELFObjectData(filename, sink);
-#endif
-}
+}  // namespace bloaty
 
-std::string ReadBuildId(const std::string& filename) {
-#ifdef __APPLE__
-  return ReadMachOBuildId(filename);
-#else
-  return ReadELFBuildId(filename);
-#endif
-}
-
-class RuleMap {
- public:
-  RuleMap() : next_id_(1) {}
-
-  void Split(const std::string& str, std::string* part1, std::string* part2) {
-    size_t n = str.find(": ");
-    if (n == std::string::npos) {
-      std::cout << "No separator?\n";
-      exit(1);
-    }
-    part1->assign(str, 0, n);
-    part2->assign(str, n + 2, std::string::npos);
-  }
-
-  Rule* GetOrCreateRule(const std::string& name) {
-    // C++17: auto pair = rules_.try_emplace(filename, filename);
-    auto it = rules_.find(name);
-    if (it == rules_.end()) {
-      it = rules_.emplace(name, name).first;
-      it->second.id = next_id_++;
-    }
-    return &it->second;
-  }
-
-  Rule* GetRule(const std::string& name) {
-    auto it = rules_.find(name);
-    if (it == rules_.end()) {
-      std::cerr << "No such rule: " << name << "\n";
-      exit(1);
-    }
-    return &it->second;
-  }
-
-  void ReadMapFile(const std::string& filename) {
-    std::ifstream input(filename);
-    for (std::string line, part1, part2; std::getline(input, line); ) {
-      if (line == "") {
-        break;
-      }
-      Split(line, &part1, &part2);
-      GetOrCreateRule(part2)->refs.insert(GetOrCreateRule(part1));
-    }
-
-    for (std::string line, part1, part2; std::getline(input, line); ) {
-      Split(line, &part1, &part2);
-      //source_files_[part1] = GetRule(part2);
-      source_files_[part1] = GetOrCreateRule(part2);
-    }
-  }
-
-  void AddFilesToRuleSizes(Program* program) {
-    for (auto& pair : program->files_) {
-      File* file = &pair.second;
-      auto it = source_files_.find(file->name);
-      if (it == source_files_.end()) {
-        std::string fallback;
-        if (TryGetFallbackFilename(file->name, &fallback)) {
-          it = source_files_.find(fallback);
-          if (it == source_files_.end()) {
-            std::cerr << "No fallback source file in map: " << file->name << ", " << file->object_size << ", tried: " << fallback << "\n";
-            continue;
-          }
-        } else {
-          std::cerr << "No source file in map: " << file->name << ", " << file->object_size << "\n";
-          continue;
-        }
-      }
-      Rule* rule = it->second;
-      rule->size += file->object_size;
-      file->rule = rule;
-    }
-  }
-
-  size_t count() { return rules_.size(); }
-
-  void PrintDepGraph() {
-    std::ofstream out("deps.dot");
-    out << "digraph deps {\n";
-    for (const auto& pair : rules_) {
-      const Rule* rule = &pair.second;
-      for (auto ref : rule->refs) {
-        out << "  \"" << rule->name << "\" -> \"" << ref->name << "\";\n";
-      }
-    }
-    out << "}\n";
-  }
-
-  void PrintDomTree() {
-    std::ofstream out("dom.dot");
-    out << "digraph dom {\n";
-    for (const auto& pair : rules_) {
-      const Rule* rule = &pair.second;
-      if (rule->dominator) {
-        out << "  \"" << rule->dominator->name << "\" -> \"" << rule->name << "\";\n";
-      }
-    }
-    out << "}\n";
-  }
-
-  void PrintWeightGraph(Rule* entry) {
-    WeightGraphPrinter<Rule> printer;
-    printer.Print(entry, next_id_);
-  }
-
-  void ParseLineInfo(const std::string& filename) {
-    ParseELFLineInfo(filename, source_files_);
-  }
-
- private:
-  std::unordered_map<std::string, Rule> rules_;
-  std::unordered_map<std::string, Rule*> source_files_;
-  uint32_t next_id_;
-};
-
-void DoSymbolAnalysis(const std::string& filename) {
-  Program program;
-  ProgramDataSink sink(&program);
-
-  const std::string build_id = ReadBuildId(filename);
-  bool found_cache = TryOpenCacheFile(filename, build_id, &program);
-
-  if (!found_cache) {
-    ReadObjectData(filename, &sink);
-    ParseVTables(filename, &program);
-    program.PrintWeightGraph();
-    if (!program.HasFiles()) {
-      std::cerr << "Warning: no debug information present.\n";
-    }
-  }
-
-  if (!found_cache) {
-    WriteCacheFile(&program, filename, build_id);
-  }
-
-  program.PrintGarbage();
-  program.PrintSymbolsByTransitiveWeight();
-}
+using namespace bloaty;
 
 int main(int argc, char *argv[]) {
-  //InitGoogle("bloaty", &argc, &argv, false);
-  if (argc < 3) {
-    std::cerr << "Usage: bloaty <binary file> <rule map>\n";
-    exit(1);
-  }
+  const std::string filename(argv[1]);
+  MemoryFileMap segments, sections;
+  MemoryMap symbols(&segments);
+  ReadSegments(filename, &segments);
+  ReadSections(filename, &sections);
+  //ReadSymbols(filename, &symbols);
+  //ReadDWARFSourceFiles(filename, &symbols);
+  ReadDWARFLineInfo(filename, &symbols);
+  segments.FillInUnmapped(GetFileSize(filename));
+  Rollup rollup;
+  std::vector<const RangeMap*> range_maps;
+  //range_maps.push_back(segments.vm_map());
+  range_maps.push_back(sections.vm_map());
+  range_maps.push_back(symbols.map());
 
-  const std::string bin_file = argv[1];
-
-  RuleMap map;
-  map.ReadMapFile(argv[2]);
-
-  Program program;
-  ProgramDataSink sink(&program);
-
-  ParseELFSymbols(bin_file, &sink);
-  ParseELFSections(bin_file, &sink);
-  //ParseELFDebugInfo(bin_file, &sink);
-  bloaty::GetFunctionFilePairs(bin_file, &sink);
-  ParseELFFileMapping(bin_file, &sink);
-  program.PrintNoFile();
-
-  Rule* entry = nullptr;
-  if (program.entry()) {
-    Object* obj_entry = program.entry();
-    std::cerr << "Program entry point function: " << obj_entry->name << "\n";
-    if (obj_entry->file) {
-      File* file_entry = obj_entry->file;
-      std::cerr << "Program entry point file: " << file_entry->name << "\n";
-      if (file_entry->rule) {
-        entry = file_entry->rule;
-        std::cerr << "Rule entry point: " << entry->name << "\n";
-      }
-    }
-  }
-
-  if (!entry) {
-    std::cerr << "Couldn't figure out entry.\n";
-    entry = map.GetRule("//superroot/servers:sr_www");
-    //entry = map.GetRule("//net/proto2/compiler/public:protocol_compiler");
-  }
-  //map.ParseLineInfo(bin_file);
-  map.AddFilesToRuleSizes(&program);
-  map.PrintWeightGraph(entry);
-  map.PrintDepGraph();
-  map.PrintDomTree();
+  //range_maps.push_back(segments.file_map());
+  //range_maps.push_back(sections.file_map());
+  //
+  RangeMap::ComputeRollup(range_maps, &rollup);
+  rollup.Print();
+  return 0;
 }

@@ -1,3 +1,16 @@
+// Copyright 2016 Google Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <assert.h>
 #include <stdio.h>
@@ -12,6 +25,13 @@
 #include <libelf.h>
 
 #include "bloaty.h"
+#include "re2/re2.h"
+
+static size_t align_up_to(size_t offset, size_t granularity) {
+  // Granularity must be a power of two.
+  return (offset + granularity - 1) & ~(granularity - 1);
+}
+
 
 namespace bloaty {
 namespace dwarf {
@@ -503,6 +523,53 @@ DIEFlatIterator DIE::end() const {
 
 class CompilationUnitIterator;
 
+class AddressRange {
+ public:
+  AddressRange(Dwarf_Debug dwarf, Dwarf_Arange arange) : dwarf_(dwarf), arange_(arange) {}
+
+  AddressRange(AddressRange&& other)
+      : dwarf_(other.dwarf_), arange_(other.arange_) {
+    other.arange_ = nullptr;
+  }
+
+  AddressRange& operator=(AddressRange&& other) {
+    if (arange_) {
+      dwarf_dealloc(dwarf_, arange_, DW_DLA_DIE);
+    }
+
+    dwarf_ = other.dwarf_;
+    arange_ = other.arange_;
+    other.arange_ = nullptr;
+
+    return *this;
+  }
+
+  ~AddressRange() {
+    if (arange_) {
+      dwarf_dealloc(dwarf_, arange_, DW_DLA_ARANGE);
+    }
+  }
+
+  static AddressRange Null() { return AddressRange(); }
+
+  void GetInfo(Dwarf_Addr* start, Dwarf_Unsigned* length, Dwarf_Off *cu_die_offset) const {
+    Dwarf_Error err;
+
+    if (dwarf_get_arange_info(arange_, start, length, cu_die_offset, &err) !=
+        DW_DLV_OK) {
+      DieWithDwarfError(err);
+      exit(1);
+    }
+  }
+
+ protected:
+  AddressRange() : arange_(NULL) {}
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(AddressRange);
+
+  Dwarf_Debug dwarf_;
+  Dwarf_Arange arange_;
+};
+
 // Type for reading all DWARF entries out of a file.
 class Reader {
  public:
@@ -591,6 +658,23 @@ class Reader {
     }
   }
 
+  void GetAddressRanges(std::vector<AddressRange>* out) const {
+    Dwarf_Arange *aranges;
+    Dwarf_Signed arange_count;
+    Dwarf_Error err;
+
+    int result = dwarf_get_aranges(dwarf_, &aranges, &arange_count, &err);
+
+    if (result == DW_DLV_ERROR) {
+      DieWithDwarfError(err);
+    } else if (result == DW_DLV_OK) {
+      for (Dwarf_Signed i = 0; i < arange_count; i++) {
+        out->push_back(std::move(AddressRange(dwarf_, aranges[i])));
+      }
+      dwarf_dealloc(dwarf_, aranges, DW_DLA_LIST);
+    }
+  }
+
   bool eof() { return eof_; }
 
  private:
@@ -669,7 +753,7 @@ bool TryGetAddress(const std::string& str, uintptr_t* addr) {
 
 } // namespace dwarf
 
-void GetFunctionFilePairs(const std::string& filename, ProgramDataSink* sink) {
+void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map) {
   dwarf::Reader reader;
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
@@ -682,130 +766,77 @@ void GetFunctionFilePairs(const std::string& filename, ProgramDataSink* sink) {
     exit(1);
   }
 
-  std::map<Dwarf_Off, std::vector<std::string>> all_srcfiles;
+  RE2 pattern(R"(\.pb\.cc$)");
+
+  // Maps compilation unit offset -> source filename
+  std::map<Dwarf_Off, std::string> source_files;
 
   for (auto& compilation_unit : reader) {
-    std::vector<std::string>& srcfiles = all_srcfiles[compilation_unit.GetOffset()];
-    compilation_unit.GetSrcfiles(&srcfiles);
-
-    for (auto& die : compilation_unit) {
-      Dwarf_Half tag = die.GetTag();
-
-      if (tag == DW_TAG_subprogram || tag == DW_TAG_variable) {
-        dwarf::Attribute linkage_name = die.GetAttribute(DW_AT_linkage_name);
-        dwarf::Attribute decl_file = die.GetAttribute(DW_AT_decl_file);
-
-        // For unknown reasons, the toolchain seems to sometimes emit this
-        // older, non-standard attribute instead.
-        if (linkage_name.is_null()) {
-          linkage_name = die.GetAttribute(DW_AT_MIPS_linkage_name);
-        }
-
-        if (!linkage_name.is_null() && !decl_file.is_null()) {
-          Dwarf_Unsigned u = decl_file.GetUnsigned();
-          const auto& filename = srcfiles[u - 1];
-          const auto symname = linkage_name.GetString();
-
-          auto obj = sink->FindObjectByName(symname);
-
-          if (obj) {
-            auto file = sink->GetOrCreateFile(filename);
-            obj->file->object_size -= obj->size;  // Should be the "no file".
-            obj->file = file;
-            file->object_size += obj->size;
-            // We were successful at assigning a file.
-            continue;
-          } else {
-            //std::cerr << "Didn't find object for linkage name: " << symname
-            //          << "\n";
-          }
-        }
+    std::vector<std::string> srcfiles;
+    dwarf::Attribute name = compilation_unit.GetAttribute(DW_AT_name);
+    if (!name.is_null()) {
+      std::string name_str = name.GetString();
+      if (RE2::PartialMatch(name_str, pattern)) {
+        name_str = "Protobuf generated code";
       }
-
-      if (tag == DW_TAG_variable) {
-        dwarf::Attribute location = die.GetAttribute(DW_AT_location);
-        uintptr_t addr;
-        if (location.is_null() ||
-            location.GetForm() != DW_FORM_exprloc ||
-            !dwarf::TryGetAddress(location.GetExpression(), &addr)) {
-          continue;
-        }
-        auto obj = sink->FindObjectByAddr(addr);
-        if (!obj) {
-          continue;
-        }
-        dwarf::Attribute decl_file = die.GetAttribute(DW_AT_decl_file);
-        dwarf::Attribute specification = die.GetAttribute(DW_AT_specification);
-        const std::string* filename;
-
-        if (!specification.is_null()) {
-          Dwarf_Off off = specification.GetRef() + reader.GetCurrentCompilationUnitOffset();
-          //std::cerr << "Looking up offset " << off << " from offset " << die.GetOffset() << " for symbol " << obj->name << " at address: " << obj->vmaddr << "\n";
-          auto spec_die = reader.GetDIEAtOffset(off);
-          if (spec_die.is_null()) {
-            continue;
-          }
-          if (spec_die.GetTag() != DW_TAG_variable &&
-              spec_die.GetTag() != DW_TAG_member) {
-            std::cerr << "Tag was actually: " << spec_die.GetTag() << "\n";
-          }
-          assert(spec_die.GetTag() == DW_TAG_variable ||
-                 spec_die.GetTag() == DW_TAG_member);
-          decl_file = spec_die.GetAttribute(DW_AT_decl_file);
-
-          if (decl_file.is_null()) {
-            std::cerr << "Hmm, no file declared.\n";
-            continue;
-          }
-
-          auto it = all_srcfiles.upper_bound(off);
-          assert(it != all_srcfiles.begin());
-          --it;
-          std::vector<std::string>& cu_srcfiles = it->second;
-          Dwarf_Unsigned idx = decl_file.GetUnsigned() - 1;
-          if (idx >= cu_srcfiles.size()) {
-            std::cerr << "(1) idx > size?  weird. " << idx << ", " << cu_srcfiles.size() << ", " << obj->name << "\n";
-            continue;
-          }
-          filename = &cu_srcfiles[idx];
-          //std::cerr << "Yay! Filename for " << obj->name << " is: " << *filename << "\n";
-        } else {
-          if (decl_file.is_null()) {
-            continue;
-          }
-          Dwarf_Unsigned idx = decl_file.GetUnsigned() - 1;
-          if (idx >= srcfiles.size()) {
-            std::cerr << "(2) idx > size?  weird. " << idx << ", " << srcfiles.size() << ", " << obj->name << "\n";
-            continue;
-          }
-          filename = &srcfiles[idx];
-        }
-
-        assert(filename);
-        auto file = sink->GetOrCreateFile(*filename);
-        obj->file->object_size -= obj->size;  // Should be the "no file".
-        obj->file = file;
-        file->object_size += obj->size;
-      }
-
+      source_files[compilation_unit.GetOffset()] = name_str;
     }
   }
 
-  reader.Reset();
+  std::vector<dwarf::AddressRange> ranges;
+  reader.GetAddressRanges(&ranges);
 
-  // Use line info to find files for any symbols we couldn't find DIEs for.
-  // We use this as a last resort because it's less reliable.  If the first
-  // instruction of a function was inlined from somewhere else, we'll report the
-  // wrong filename for the function.
+  for (const auto& range : ranges) {
+    Dwarf_Addr start;
+    Dwarf_Unsigned length;
+    Dwarf_Off cu_die_offset;
+    range.GetInfo(&start, &length, &cu_die_offset);
+    map->Add(start, align_up_to(length, 16), source_files[cu_die_offset]);
+  }
+}
+
+void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map) {
+  dwarf::Reader reader;
+  FILE* file = fopen(filename.c_str(), "rb");
+  if (!file) {
+    std::cerr << "Can't open: " << filename << "\n";
+    exit(1);
+  }
+
+  if (!reader.Open(fileno(file))) {
+    std::cerr << "No debug information: " << filename << "\n";
+    exit(1);
+  }
+
+  uintptr_t begin_addr = 0;
+  uintptr_t last_addr = 0;
+  std::string last_source;
+
   for (auto& compilation_unit : reader) {
-    dwarf::LineList lines = compilation_unit.GetLineList();
+    auto lines = compilation_unit.GetLineList();
+
     for (size_t i = 0; i < lines.size(); i++) {
-      auto obj = sink->FindObjectByAddr(lines.GetAddress(i));
-      if (obj && obj->file->is_unknown) {
-        auto file = sink->GetOrCreateFile(lines.GetSourceFilename(i));
-        obj->file->object_size -= obj->size;  // Should be the "no file".
-        obj->file = file;
-        file->object_size += obj->size;
+      uintptr_t addr = lines.GetAddress(i);
+      std::string name = lines.GetSourceFilename(i);
+      if (last_addr == 0) {
+        // We don't trust a new address until it is in a region that seems like
+        // it could plausibly be mapped.  We could use actual load instructions
+        // to make this heuristic more robust.
+        if (addr > 0x10000) {
+          begin_addr = addr;
+          last_addr = addr;
+          last_source = name;
+        }
+      } else {
+        if (addr - last_addr > 0x10000) {
+          map->Add(begin_addr, last_addr - begin_addr, last_source);
+          begin_addr = addr;
+        } else if (name != last_source) {
+          map->Add(begin_addr, addr - begin_addr, last_source);
+          begin_addr = addr;
+        }
+        last_source = name;
+        last_addr = addr;
       }
     }
   }
