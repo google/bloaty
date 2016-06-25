@@ -125,7 +125,7 @@ void LineReader::Next() {
 }
 
 LineIterator LineReader::begin() { return LineIterator(this); }
-LineIterator LineReader::end() { return LineIterator(NULL); }
+LineIterator LineReader::end() { return LineIterator(nullptr); }
 
 LineReader ReadLinesFromPipe(const std::string& cmd) {
   FILE* pipe = popen(cmd.c_str(), "r");
@@ -219,7 +219,7 @@ Demangler::Demangler() {
     int read_fd = fromproc_pipe_fd[0];
     write_file_ = fdopen(write_fd, "w");
     FILE* read_file = fdopen(read_fd, "r");
-    if (write_file_ == NULL || read_file == NULL) {
+    if (write_file_ == nullptr || read_file == nullptr) {
       perror("fdopen");
       exit(1);
     }
@@ -238,7 +238,7 @@ Demangler::Demangler() {
     CHECK_SYSCALL(close(fromproc_pipe_fd[0]));
 
     char prog[] = "c++filt";
-    char *const argv[] = {prog, NULL};
+    char *const argv[] = {prog, nullptr};
     CHECK_SYSCALL(execvp("c++filt", argv));
   }
 }
@@ -550,21 +550,65 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 }
 
 
+// MemoryMap ///////////////////////////////////////////////////////////////////
+
+MemoryMap::MemoryMap(const MemoryFileMap* base)
+    : base_(base), vm_map_(new RangeMap()) {}
+
+MemoryMap::~MemoryMap() {}
+
+void MemoryMap::AddRegex(const std::string& regex, const std::string& replacement) {
+  std::unique_ptr<RE2> re2(new RE2(regex));
+  regexes_.push_back(std::make_pair(std::move(re2), replacement));
+}
+
+void MemoryMap::AddVMRange(uintptr_t vmaddr, size_t size,
+                           const std::string& name) {
+  std::string str = name;
+  std::string tmp;
+
+  for (const auto& pair : regexes_) {
+    if (RE2::Extract(str, *pair.first, pair.second, &tmp)) {
+      str.swap(tmp);
+    }
+  }
+
+  vm_map_->Add(vmaddr, size, str);
+}
+
+void MemoryMap::AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
+                                     const std::string& name) {
+  AddVMRange(vmaddr, size, name);
+}
+
+bool MemoryMap::CoversVMAddresses(uintptr_t vmaddr, size_t vmsize) const {
+  // XXX: not correct, need to test the whole range.
+  return vm_map_->TryGet(vmaddr, nullptr, nullptr) &&
+         vm_map_->TryGet(vmaddr + vmsize, nullptr, nullptr);
+}
+
+/*
+bool FindAtAddr(uintptr_t vmaddr, std::string* name) const;
+bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
+                        std::string* name) const;
+                        */
+
+
 // MemoryFileMap ///////////////////////////////////////////////////////////////
 
-MemoryFileMap::MemoryFileMap()
-    : vm_map_(new RangeMap()), file_map_(new RangeMap()) {}
+MemoryFileMap::MemoryFileMap(MemoryFileMap* base)
+    : MemoryMap(base), file_map_(new RangeMap()) {}
 MemoryFileMap::~MemoryFileMap() {}
 
 void MemoryFileMap::FillInUnmapped(long filesize) {
   file_map_->Fill(filesize, "Unmapped");
 }
 
-void MemoryFileMap::Add(const std::string& name, uintptr_t vmaddr,
-                        size_t vmsize, long fileoff, long filesize) {
-  if (base_) {
-    if (!base_->CoversVMAddresses(vmaddr, vmsize) ||
-        !base_->CoversFileOffsets(fileoff, filesize)) {
+void MemoryFileMap::AddFileRange(const std::string& name, uintptr_t vmaddr,
+                                 size_t vmsize, long fileoff, long filesize) {
+  if (base()) {
+    if (!base()->CoversVMAddresses(vmaddr, vmsize) ||
+        !base()->CoversFileOffsets(fileoff, filesize)) {
       std::cerr << "bloaty: section " << name << " lies outside any segment.\n";
       return;
     }
@@ -572,11 +616,7 @@ void MemoryFileMap::Add(const std::string& name, uintptr_t vmaddr,
 
   bool overlapped = false;
 
-  if (vmsize) {
-    if (!vm_map_->Add(vmaddr, vmsize, name)) {
-      overlapped = true;
-    }
-  }
+  AddVMRange(vmaddr, vmsize, name);
 
   if (filesize) {
     if (!file_map_->Add(fileoff, filesize, name)) {
@@ -590,40 +630,13 @@ void MemoryFileMap::Add(const std::string& name, uintptr_t vmaddr,
   }
 }
 
-bool MemoryFileMap::CoversVMAddresses(uintptr_t vmaddr, size_t vmsize) {
-  // XXX: not correct, need to test the whole range.
-  return vm_map_->TryGet(vmaddr, nullptr, nullptr) &&
-         vm_map_->TryGet(vmaddr + vmsize, nullptr, nullptr);
-}
-
-bool MemoryFileMap::CoversFileOffsets(uintptr_t fileoff, size_t filesize) {
+bool MemoryFileMap::CoversFileOffsets(uintptr_t fileoff,
+                                      size_t filesize) const {
   // XXX: not correct, need to test the whole range.
   return file_map_->TryGet(fileoff, nullptr, nullptr) &&
          file_map_->TryGet(fileoff + filesize, nullptr, nullptr);
 }
 
-
-// MemoryMap ///////////////////////////////////////////////////////////////////
-
-MemoryMap::MemoryMap(const MemoryFileMap* base)
-    : base_(base), map_(new RangeMap()) {}
-
-MemoryMap::~MemoryMap() {}
-
-void MemoryMap::Add(uintptr_t vmaddr, size_t size, const std::string& name) {
-  map_->Add(vmaddr, size, name);
-}
-
-void MemoryMap::AddAllowAlias(uintptr_t vmaddr, size_t size,
-                              const std::string& name) {
-  map_->Add(vmaddr, size, name);
-}
-
-/*
-bool FindAtAddr(uintptr_t vmaddr, std::string* name) const;
-bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
-                        std::string* name) const;
-                        */
 
 #if 0
 class Program {
@@ -676,18 +689,33 @@ using namespace bloaty;
 
 int main(int argc, char *argv[]) {
   const std::string filename(argv[1]);
+  /*
+  std::vector<const RangeMap*> range_maps;
+  std::vector<std::unique_ptr<MemoryFileMap>> mem_file_maps;
+  std::vector<std::unique_ptr<MemoryMap>> mem_maps;
+  const MemoryFileMap* base = nullptr;
+  */
+
+  for (int i = 1; i < argc; i++) {
+
+  }
+
   MemoryFileMap segments, sections;
   MemoryMap symbols(&segments);
+  MemoryMap symbols2(&segments);
+  symbols.AddRegex("MergePartialFromCodedStream", "Protobuf MergePartialFromCodedStream");
+  symbols.AddRegex("ByteSize", "Protobuf ByteSize");
+  symbols.AddRegex("SerializeWithCachedSizes", "Protobuf SerializeWithCachedSizes");
   ReadSegments(filename, &segments);
   ReadSections(filename, &sections);
-  //ReadSymbols(filename, &symbols);
-  //ReadDWARFSourceFiles(filename, &symbols);
+  ReadSymbols(filename, &symbols);
+  ReadDWARFSourceFiles(filename, &symbols2);
   ReadDWARFLineInfo(filename, &symbols);
-  segments.FillInUnmapped(GetFileSize(filename));
+  segments.FillInUnmapped(GetFeleSize(filename));
   Rollup rollup;
-  std::vector<const RangeMap*> range_maps;
   //range_maps.push_back(segments.vm_map());
   range_maps.push_back(sections.vm_map());
+  range_maps.push_back(symbols2.map());
   range_maps.push_back(symbols.map());
 
   //range_maps.push_back(segments.file_map());

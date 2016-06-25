@@ -18,9 +18,10 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
-#include <memory>
 
 #include "re2/re2.h"
 
@@ -31,53 +32,7 @@
 namespace bloaty {
 
 class RangeMap;
-
-// Contains [range] -> label maps for both VM space and file space.
-// This makes sense for Segments and Sections, which are defined in both spaces
-// (ie. object files specify both VM and file offsets for each segment/section).
-// This gives us information about sections/segments that live in one but not
-// the other (eg. .debug_info lives only in the file, .bss lives only in RAM),
-// and also lets us translate addresses between the two domains.
-class MemoryFileMap {
- public:
-  MemoryFileMap();
-  ~MemoryFileMap();
-
-  // If this is set, we will check that all Add() operations fully overlap
-  // ranges in the base.
-  //
-  // This is for checking that, for example, all ELF sections in a binary are
-  // covered by the ELF segment mapping.
-  void SetBaseMap(MemoryFileMap* base) { base_ = base; }
-
-  // If vmsize or filesize is zero, this mapping is presumed not to exist in
-  // that domain.  For example, .bss mappings don't exist in the file, and
-  // .debug_* mappings don't exist in memory.
-  void Add(const std::string& name, uintptr_t vmaddr, size_t vmsize,
-           long fileoff, long filesize);
-
-  // Fills in generic "Unmapped" sections for portions of the file that have no
-  // mapping.
-  void FillInUnmapped(long filesize);
-
-  // Returns true if the given VM or file ranges are completely covered by this
-  // map.
-  bool CoversVMAddresses(uintptr_t vmaddr, size_t vmsize);
-  bool CoversFileOffsets(uintptr_t fileoff, size_t filesize);
-
-  const RangeMap* vm_map() { return vm_map_.get(); }
-  const RangeMap* file_map() { return file_map_.get(); }
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryFileMap);
-
-  MemoryFileMap* base_ = nullptr;
-  // Maps each vm_map_ start address to a corresponding file_map_ start address.
-  // This will allow us to map VM addresses to file address if we choose to.
-  std::unordered_map<uintptr_t, uintptr_t> vm_to_file_;
-  std::unique_ptr<RangeMap> vm_map_;
-  std::unique_ptr<RangeMap> file_map_;
-};
+class MemoryFileMap;
 
 // Contains a [range] -> label map for VM space only.  This makes sense for
 // things defined only in terms of VM addresses (symbols, anything that comes
@@ -90,42 +45,118 @@ class MemoryMap {
   // is unusual/unexpected that a symbol would lie outside of any section, for
   // example).
   MemoryMap(const MemoryFileMap* base);
-  ~MemoryMap();
+  virtual ~MemoryMap();
+
+  // Adds a regex that will be applied to all labels prior to inserting them in
+  // the map.  All regexes will be applied in sequence.
+  void AddRegex(const std::string& regex, const std::string& replacement);
 
   // Adds a region to the memory map.  It should not overlap any previous
   // region added with Add(), but it should overlap the base memory map.
-  void Add(uintptr_t vmaddr, size_t size, const std::string& name);
+  void AddVMRange(uintptr_t vmaddr, size_t size, const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
   // already under a different name.  If so, this name becomes an alias of the
   // previous name.
-  void AddAllowAlias(uintptr_t vmaddr, size_t size, const std::string& name);
+  void AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
+                            const std::string& name);
 
   bool FindAtAddr(uintptr_t vmaddr, std::string* name) const;
   bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
                           std::string* name) const;
 
-  const RangeMap* map() { return map_.get(); }
+  // Returns true if the given vm addresses are completely covered by this map.
+  bool CoversVMAddresses(uintptr_t vmaddr, size_t vmsize) const;
+
+  const RangeMap* vm_map() const { return vm_map_.get(); }
+  const MemoryFileMap* base() const { return base_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
 
   const MemoryFileMap* base_;
-  std::unique_ptr<RangeMap> map_;
+  std::unique_ptr<RangeMap> vm_map_;
   std::unordered_map<std::string, std::string> aliases_;
+  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
 };
 
-// Provided by arch-specific platform module.
-void ReadSegments(const std::string& filename, MemoryFileMap* map);
-void ReadSections(const std::string& filename, MemoryFileMap* map);
+// Contains [range] -> label maps for both VM space and file space.
+// This makes sense for Segments and Sections, which are defined in both spaces
+// (ie. object files specify both VM and file offsets for each segment/section).
+// This gives us information about sections/segments that live in one but not
+// the other (eg. .debug_info lives only in the file, .bss lives only in RAM),
+// and also lets us translate addresses between the two domains.
+class MemoryFileMap : public MemoryMap {
+ public:
+  MemoryFileMap(MemoryFileMap* base);
+  virtual ~MemoryFileMap();
 
-void ReadSymbols(const std::string& filename, MemoryMap* map);
-void ReadCompilationUnits(const std::string& filename, MemoryMap* map);
-void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map);
-void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map);
+  // If vmsize or filesize is zero, this mapping is presumed not to exist in
+  // that domain.  For example, .bss mappings don't exist in the file, and
+  // .debug_* mappings don't exist in memory.
+  void AddFileRange(const std::string& name, uintptr_t vmaddr, size_t vmsize,
+                    long fileoff, long filesize);
 
-std::string ReadBuildId(const std::string& filename);
-uintptr_t ReadEntryPoint(const std::string& filename);
+  // Fills in generic "Unmapped" sections for portions of the file that have no
+  // mapping.
+  void FillInUnmapped(long filesize);
+
+  // Returns true if the given file ranges are completely covered by this map.
+  bool CoversFileOffsets(uintptr_t fileoff, size_t filesize) const;
+
+  const RangeMap* file_map() { return file_map_.get(); }
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryFileMap);
+
+  std::unique_ptr<RangeMap> file_map_;
+
+  // Maps each vm_map_ start address to a corresponding file_map_ start address.
+  // This will allow us to map VM addresses to file address if we choose to.
+  std::unordered_map<uintptr_t, uintptr_t> vm_to_file_;
+};
+
+// Contains a label -> label map specifying dependencies.
+// When X -> Y is in the map, X depends on Y.
+class DependencyMap {
+ public:
+  void Add(const std::string& name, const std::string& depends_on);
+
+  // Starting at the given memory map's entry point, trace out all dependencies
+  // and add unreachable symbols to garbage.
+  void FindGarbage(const MemoryMap& map, std::vector<std::string>* garbage);
+
+  // Writes a graph in .dot format showing the overall map of the binary and its
+  // size.
+  void WriteWeightTree(const MemoryMap& map, const std::string& filename);
+
+ private:
+  std::unordered_map<std::string, std::set<std::string>> deps_;
+};
+
+// Each function that can read a certain kind of info (segments, sections,
+// symbols, etc) registers itself as a data source.
+struct DataSourceInfo {
+  enum {
+    DATA_SOURCE_MAP,
+    DATA_SOURCE_FILEMAP
+  } type;
+
+  // The name, as specified on the command-line
+  std::string name;
+
+  // The function that will populate the data structure.
+  union {
+    class void (*map)(const std::string& filename, MemoryMap* map);
+    class void (*filemap)(const std::string& filename, MemoryFileMap* map);
+  } func;
+}
+
+// Provided by arch-specific platform modules.
+void RegisterELFDataSources(
+    std::vector<std::unique_ptr<DataSourceFactory>>* factories);
+void RegisterMachODataSources(
+    std::vector<std::unique_ptr<DataSourceFactory>>* factories);
 
 
 /** LineReader ****************************************************************/
