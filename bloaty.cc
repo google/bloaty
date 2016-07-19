@@ -77,7 +77,14 @@ std::string SiPrint(size_t size) {
   } else {
     return DoubleStringPrintf("%0.2f", size_d) + prefixes[n];
   }
+}
 
+void Split(const std::string& str, char delim, std::vector<std::string>* out) {
+  std::stringstream stream(str);
+  std::string item;
+  while (std::getline(stream, item, delim)) {
+    out->push_back(item);
+  }
 }
 
 // LineReader / LineIterator ///////////////////////////////////////////////////
@@ -596,7 +603,7 @@ bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
 
 // MemoryFileMap ///////////////////////////////////////////////////////////////
 
-MemoryFileMap::MemoryFileMap(MemoryFileMap* base)
+MemoryFileMap::MemoryFileMap(const MemoryFileMap* base)
     : MemoryMap(base), file_map_(new RangeMap()) {}
 MemoryFileMap::~MemoryFileMap() {}
 
@@ -638,6 +645,127 @@ bool MemoryFileMap::CoversFileOffsets(uintptr_t fileoff,
 }
 
 
+// Bloaty //////////////////////////////////////////////////////////////////////
+
+// Represents a program execution and associated state.
+
+class Bloaty {
+ public:
+  Bloaty();
+
+  void SetFilename(const std::string& filename);
+  void AddDataSource(const std::string& name);
+
+  void ScanDataSources();
+
+  const std::vector<const RangeMap*> range_maps() { return range_maps_; }
+
+  size_t GetSourceCount() const { return sources_.size(); }
+
+ private:
+  static long GetFileSize(const std::string& filename);
+
+  std::map<std::string, DataSource> sources_map_;
+  std::vector<std::unique_ptr<MemoryMap>> maps_;
+  std::vector<const RangeMap*> range_maps_;
+  std::vector<const DataSource*> sources_;
+  const MemoryFileMap* base_ = nullptr;
+  std::string filename_;
+};
+
+long Bloaty::GetFileSize(const std::string& filename) {
+  FILE* file = fopen(filename.c_str(), "rb");
+  if (!file) {
+    std::cerr << "Couldn't get file size for: " << filename << "\n";
+    exit(1);
+  }
+  fseek(file, 0L, SEEK_END);
+  long ret = ftell(file);
+  fclose(file);
+  return ret;
+}
+
+
+Bloaty::Bloaty() {
+  std::vector<DataSource> all_sources;
+#ifdef __APPLE__
+  RegisterMachODataSources(&all_sources);
+#else
+  RegisterELFDataSources(&all_sources);
+#endif
+
+  for (const auto& source : all_sources) {
+    if (!sources_map_.insert(std::make_pair(source.name, source)).second) {
+      std::cerr << "Two data sources registered for name: "
+                << source.name << "\n";
+      exit(1);
+    }
+  }
+}
+
+void Bloaty::SetFilename(const std::string& filename) {
+  if (!filename_.empty()) {
+    std::cerr << "Only one filename can be specified.\n";
+    exit(1);
+  }
+  filename_ = filename;
+}
+
+void Bloaty::AddDataSource(const std::string& name) {
+  auto it = sources_map_.find(name);
+  if (it == sources_map_.end()) {
+    std::cerr << "bloaty: no such data source: " << name << "\n";
+    exit(1);
+  }
+
+  sources_.push_back(&it->second);
+  switch (it->second.type) {
+    case DataSource::DATA_SOURCE_MAP: {
+      std::unique_ptr<MemoryMap> map(new MemoryMap(base_));
+      range_maps_.push_back(map->vm_map());
+      maps_.push_back(std::move(map));
+      break;
+    }
+
+    case DataSource::DATA_SOURCE_FILEMAP: {
+      std::unique_ptr<MemoryFileMap> map(new MemoryFileMap(base_));
+      if (sources_.size() == 1) {
+        base_ = map.get();
+      }
+      range_maps_.push_back(map->vm_map());
+      maps_.push_back(std::move(map));
+      break;
+    }
+
+    default:
+      std::cerr << "bloaty: unknown source type?\n";
+      exit(1);
+  }
+}
+
+void Bloaty::ScanDataSources() {
+  for (size_t i = 0; i < sources_.size(); i++) {
+    switch (sources_[i]->type) {
+      case DataSource::DATA_SOURCE_MAP:
+        sources_[i]->func.map(filename_, maps_[i].get());
+        break;
+
+      case DataSource::DATA_SOURCE_FILEMAP: {
+        auto map = static_cast<MemoryFileMap*>(maps_[i].get());
+        sources_[i]->func.filemap(filename_, map);
+        if (i == 0) {
+          map->FillInUnmapped(GetFileSize(filename_));
+        }
+        break;
+      }
+
+      default:
+        std::cerr << "bloaty: unknown source type?\n";
+        exit(1);
+    }
+  }
+}
+
 #if 0
 class Program {
  public:
@@ -671,57 +799,43 @@ class Program {
 #endif
 
 
-long GetFileSize(const std::string& filename) {
-  FILE* file = fopen(filename.c_str(), "rb");
-  if (!file) {
-    std::cerr << "Couldn't get file size for: " << filename << "\n";
-    exit(1);
-  }
-  fseek(file, 0L, SEEK_END);
-  long ret = ftell(file);
-  fclose(file);
-  return ret;
-}
-
 }  // namespace bloaty
 
 using namespace bloaty;
 
 int main(int argc, char *argv[]) {
-  const std::string filename(argv[1]);
-  /*
-  std::vector<const RangeMap*> range_maps;
-  std::vector<std::unique_ptr<MemoryFileMap>> mem_file_maps;
-  std::vector<std::unique_ptr<MemoryMap>> mem_maps;
-  const MemoryFileMap* base = nullptr;
-  */
+  bloaty::Bloaty bloaty;
 
   for (int i = 1; i < argc; i++) {
-
+    if (strcmp(argv[i], "-d") == 0) {
+      std::vector<std::string> names;
+      Split(argv[++i], ',', &names);
+      for (const auto& name : names) {
+        bloaty.AddDataSource(name);
+      }
+    } else if (argv[i][0] == '-') {
+      std::cerr << "Unknown option: " << argv[i] << "\n";
+      exit(1);
+    } else {
+      bloaty.SetFilename(argv[i]);
+    }
   }
 
-  MemoryFileMap segments, sections;
-  MemoryMap symbols(&segments);
-  MemoryMap symbols2(&segments);
+  if (bloaty.GetSourceCount() == 0) {
+    // Default when no sources are specified.
+    bloaty.AddDataSource("sections");
+  }
+
+  bloaty.ScanDataSources();
+
+#if 0
   symbols.AddRegex("MergePartialFromCodedStream", "Protobuf MergePartialFromCodedStream");
   symbols.AddRegex("ByteSize", "Protobuf ByteSize");
   symbols.AddRegex("SerializeWithCachedSizes", "Protobuf SerializeWithCachedSizes");
-  ReadSegments(filename, &segments);
-  ReadSections(filename, &sections);
-  ReadSymbols(filename, &symbols);
-  ReadDWARFSourceFiles(filename, &symbols2);
-  ReadDWARFLineInfo(filename, &symbols);
-  segments.FillInUnmapped(GetFeleSize(filename));
-  Rollup rollup;
-  //range_maps.push_back(segments.vm_map());
-  range_maps.push_back(sections.vm_map());
-  range_maps.push_back(symbols2.map());
-  range_maps.push_back(symbols.map());
+#endif
 
-  //range_maps.push_back(segments.file_map());
-  //range_maps.push_back(sections.file_map());
-  //
-  RangeMap::ComputeRollup(range_maps, &rollup);
+  Rollup rollup;
+  RangeMap::ComputeRollup(bloaty.range_maps(), &rollup);
   rollup.Print();
   return 0;
 }

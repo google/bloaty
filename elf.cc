@@ -86,7 +86,7 @@ static void ReadELFSymbols(
         continue;
       }
 
-      map->AddAllowAlias(addr, align_up_to(size, 16), name);
+      map->AddVMRangeAllowAlias(addr, align_up_to(size, 16), name);
     }
   }
 }
@@ -125,7 +125,7 @@ static void ReadELFSectionsRefineSymbols(
     if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size))) {
       auto it = zero_size_symbols->find(addr);
       if (it != zero_size_symbols->end()) {
-        map->AddAllowAlias(addr, size, it->second);
+        map->AddVMRangeAllowAlias(addr, size, it->second);
         zero_size_symbols->erase(it);
       }
     }
@@ -167,7 +167,7 @@ static void ReadELFSections(const std::string& filename, MemoryFileMap* map) {
         size = 0;
       }
 
-      map->Add(name, addr, vmsize, off, size);
+      map->AddFileRange(name, addr, vmsize, off, size);
       //std::cerr << "Section name=" << name << ", addr=" << addr
       //          << ", vmsize=" << vmsize << ", off=" << off << ", size=" << size
       //          << "\n";
@@ -175,8 +175,7 @@ static void ReadELFSections(const std::string& filename, MemoryFileMap* map) {
   }
 }
 
-static void ReadELFSegments(const std::string& filename,
-                                 MemoryFileMap* map) {
+static void ReadELFSegments(const std::string& filename, MemoryFileMap* map) {
   //   Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
   //   LOAD           0x000000 0x0000000000400000 0x0000000000400000 0x19a8a9 0x19a8a9 R E 0x200000
   //
@@ -196,7 +195,7 @@ static void ReadELFSegments(const std::string& filename,
     if (RE2::PartialMatch(line, load_pattern, RE2::Hex(&fileoff),
                           RE2::Hex(&vmaddr), RE2::Hex(&filesize),
                           RE2::Hex(&memsize), &flg)) {
-      map->Add("LOAD [" + flg + "]", vmaddr, memsize, fileoff, filesize);
+      map->AddFileRange("LOAD [" + flg + "]", vmaddr, memsize, fileoff, filesize);
     }
   }
 }
@@ -234,22 +233,16 @@ static uintptr_t ReadELFEntryPoint(const std::string& filename) {
 
 }  // namespace
 
-// Exported API ////////////////////////////////////////////////////////////////
+void RegisterELFDataSources(std::vector<DataSource>* sources) {
+  sources->push_back(MemoryFileMapDataSource("segments", ReadELFSegments));
+  sources->push_back(MemoryFileMapDataSource("sections", ReadELFSections));
+}
 
 void ReadSymbols(const std::string& filename, MemoryMap* map) {
   std::unordered_map<uintptr_t, std::string> zero_size_symbols;
 
   ReadELFSymbols(filename, map, &zero_size_symbols);
   ReadELFSectionsRefineSymbols(filename, map, &zero_size_symbols);
-}
-
-
-void ReadSegments(const std::string& filename, MemoryFileMap* map) {
-  ReadELFSegments(filename, map);
-}
-
-void ReadSections(const std::string& filename, MemoryFileMap* map) {
-  ReadELFSections(filename, map);
 }
 
 std::string ReadBuildId(const std::string& filename) {

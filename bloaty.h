@@ -22,6 +22,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "re2/re2.h"
 
@@ -88,7 +89,7 @@ class MemoryMap {
 // and also lets us translate addresses between the two domains.
 class MemoryFileMap : public MemoryMap {
  public:
-  MemoryFileMap(MemoryFileMap* base);
+  MemoryFileMap(const MemoryFileMap* base);
   virtual ~MemoryFileMap();
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
@@ -136,27 +137,47 @@ class DependencyMap {
 
 // Each function that can read a certain kind of info (segments, sections,
 // symbols, etc) registers itself as a data source.
-struct DataSourceInfo {
-  enum {
-    DATA_SOURCE_MAP,
-    DATA_SOURCE_FILEMAP
-  } type;
+struct DataSource {
+  enum Type {
+    DATA_SOURCE_MAP,     // Data source fills a MemoryMap.
+    DATA_SOURCE_FILEMAP  // Data source fills a MemoryFileMap.
+  };
+
+  DataSource(Type type_, const std::string& name_) : type(type_), name(name_) {}
+
+  Type type;
 
   // The name, as specified on the command-line
   std::string name;
 
+  typedef void MemoryMapFunc(const std::string& filename, MemoryMap* map);
+  typedef void MemoryFileMapFunc(
+      const std::string& filename, MemoryFileMap* map);
+
   // The function that will populate the data structure.
   union {
-    class void (*map)(const std::string& filename, MemoryMap* map);
-    class void (*filemap)(const std::string& filename, MemoryFileMap* map);
+    MemoryMapFunc *map;
+    MemoryFileMapFunc *filemap;
   } func;
+};
+
+inline DataSource MemoryMapDataSource(const std::string& name,
+                                      DataSource::MemoryMapFunc* func) {
+  DataSource ret(DataSource::DATA_SOURCE_MAP, name);
+  ret.func.map = func;
+  return ret;
+}
+
+inline DataSource MemoryFileMapDataSource(const std::string& name,
+                                          DataSource::MemoryFileMapFunc* func) {
+  DataSource ret(DataSource::DATA_SOURCE_FILEMAP, name);
+  ret.func.filemap = func;
+  return ret;
 }
 
 // Provided by arch-specific platform modules.
-void RegisterELFDataSources(
-    std::vector<std::unique_ptr<DataSourceFactory>>* factories);
-void RegisterMachODataSources(
-    std::vector<std::unique_ptr<DataSourceFactory>>* factories);
+void RegisterELFDataSources(std::vector<DataSource>* sources);
+void RegisterMachODataSources(std::vector<DataSource>* sources);
 
 
 /** LineReader ****************************************************************/
