@@ -31,7 +31,7 @@ namespace {
 // - nm: display symbols
 // - size: display binary size
 
-static size_t align_up_to(size_t offset, size_t granularity) {
+static size_t AlignUpTo(size_t offset, size_t granularity) {
   // Granularity must be a power of two.
   return (offset + granularity - 1) & ~(granularity - 1);
 }
@@ -86,7 +86,7 @@ static void ReadELFSymbols(
         continue;
       }
 
-      map->AddVMRangeAllowAlias(addr, align_up_to(size, 16), name);
+      map->AddVMRangeAllowAlias(addr, AlignUpTo(size, 16), name);
     }
   }
 }
@@ -130,7 +130,6 @@ static void ReadELFSectionsRefineSymbols(
       }
     }
   }
-
 }
 
 static void ReadELFSections(const std::string& filename, MemoryFileMap* map) {
@@ -168,9 +167,6 @@ static void ReadELFSections(const std::string& filename, MemoryFileMap* map) {
       }
 
       map->AddFileRange(name, addr, vmsize, off, size);
-      //std::cerr << "Section name=" << name << ", addr=" << addr
-      //          << ", vmsize=" << vmsize << ", off=" << off << ", size=" << size
-      //          << "\n";
     }
   }
 }
@@ -233,16 +229,17 @@ static uintptr_t ReadELFEntryPoint(const std::string& filename) {
 
 }  // namespace
 
-void RegisterELFDataSources(std::vector<DataSource>* sources) {
-  sources->push_back(MemoryFileMapDataSource("segments", ReadELFSegments));
-  sources->push_back(MemoryFileMapDataSource("sections", ReadELFSections));
-}
-
-void ReadSymbols(const std::string& filename, MemoryMap* map) {
+static void ReadELFSymbols(const std::string& filename, MemoryMap* map) {
   std::unordered_map<uintptr_t, std::string> zero_size_symbols;
 
   ReadELFSymbols(filename, map, &zero_size_symbols);
   ReadELFSectionsRefineSymbols(filename, map, &zero_size_symbols);
+}
+
+void RegisterELFDataSources(std::vector<DataSource>* sources) {
+  sources->push_back(MemoryFileMapDataSource("segments", ReadELFSegments));
+  sources->push_back(MemoryFileMapDataSource("sections", ReadELFSections));
+  sources->push_back(MemoryMapDataSource("symbols", ReadELFSymbols));
 }
 
 std::string ReadBuildId(const std::string& filename) {
