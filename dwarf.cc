@@ -27,7 +27,7 @@
 #include "bloaty.h"
 #include "re2/re2.h"
 
-static size_t align_up_to(size_t offset, size_t granularity) {
+static size_t AlignUpTo(size_t offset, size_t granularity) {
   // Granularity must be a power of two.
   return (offset + granularity - 1) & ~(granularity - 1);
 }
@@ -272,6 +272,20 @@ class LineList {
     std::string ret(filename);
     dwarf_dealloc(dwarf_, filename, DW_DLA_STRING);
     return ret;
+  }
+
+  Dwarf_Unsigned GetLineNumber(size_t i) {
+    assert(i < size());
+
+    Dwarf_Unsigned number;
+    Dwarf_Error err;
+
+    if (dwarf_lineno(lines_[i], &number, &err) != DW_DLV_OK) {
+       DieWithDwarfError(err);
+       exit(1);
+    }
+
+    return number;
   }
 
  protected:
@@ -791,11 +805,20 @@ void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map) {
     Dwarf_Unsigned length;
     Dwarf_Off cu_die_offset;
     range.GetInfo(&start, &length, &cu_die_offset);
-    map->Add(start, align_up_to(length, 16), source_files[cu_die_offset]);
+    map->AddVMRange(start, AlignUpTo(length, 16), source_files[cu_die_offset]);
   }
 }
 
-void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map) {
+static std::string LineInfoKey(const std::string& file, Dwarf_Unsigned line, bool include_line) {
+  if (include_line) {
+    return file + ":" + std::to_string(line);
+  } else {
+    return file;
+  }
+}
+
+void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map,
+                       bool include_line) {
   dwarf::Reader reader;
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
@@ -818,6 +841,7 @@ void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map) {
     for (size_t i = 0; i < lines.size(); i++) {
       uintptr_t addr = lines.GetAddress(i);
       std::string name = lines.GetSourceFilename(i);
+      Dwarf_Unsigned number = lines.GetLineNumber(i);
       if (last_addr == 0) {
         // We don't trust a new address until it is in a region that seems like
         // it could plausibly be mapped.  We could use actual load instructions
@@ -825,17 +849,17 @@ void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map) {
         if (addr > 0x10000) {
           begin_addr = addr;
           last_addr = addr;
-          last_source = name;
+          last_source = LineInfoKey(name, number, include_line);
         }
       } else {
         if (addr - last_addr > 0x10000) {
-          map->Add(begin_addr, last_addr - begin_addr, last_source);
+          map->AddVMRange(begin_addr, last_addr - begin_addr, last_source);
           begin_addr = addr;
         } else if (name != last_source) {
-          map->Add(begin_addr, addr - begin_addr, last_source);
+          map->AddVMRange(begin_addr, addr - begin_addr, last_source);
           begin_addr = addr;
         }
-        last_source = name;
+        last_source = LineInfoKey(name, number, include_line);
         last_addr = addr;
       }
     }

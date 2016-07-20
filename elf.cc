@@ -236,10 +236,28 @@ static void ReadELFSymbols(const std::string& filename, MemoryMap* map) {
   ReadELFSectionsRefineSymbols(filename, map, &zero_size_symbols);
 }
 
+// ELF files put debug info directly into the binary, so we call the DWARF
+// reader directly on them.
+
+static void ReadELFSourceFiles(const std::string& filename, MemoryMap* map) {
+  ReadDWARFSourceFiles(filename, map);
+}
+
+static void ReadELFLineInfo(const std::string& filename, MemoryMap* map) {
+  ReadDWARFLineInfo(filename, map, true);
+}
+
+static void ReadELFLineInfoFile(const std::string& filename, MemoryMap* map) {
+  ReadDWARFLineInfo(filename, map, false);
+}
+
 void RegisterELFDataSources(std::vector<DataSource>* sources) {
   sources->push_back(MemoryFileMapDataSource("segments", ReadELFSegments));
   sources->push_back(MemoryFileMapDataSource("sections", ReadELFSections));
   sources->push_back(MemoryMapDataSource("symbols", ReadELFSymbols));
+  sources->push_back(MemoryMapDataSource("sourcefiles", ReadELFSourceFiles));
+  sources->push_back(MemoryMapDataSource("lineinfo", ReadELFLineInfo));
+  sources->push_back(MemoryMapDataSource("lineinfo:file", ReadELFLineInfoFile));
 }
 
 std::string ReadBuildId(const std::string& filename) {

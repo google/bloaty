@@ -179,6 +179,11 @@ inline DataSource MemoryFileMapDataSource(const std::string& name,
 void RegisterELFDataSources(std::vector<DataSource>* sources);
 void RegisterMachODataSources(std::vector<DataSource>* sources);
 
+// Provided by dwarf.cc.
+void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map);
+void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map,
+                       bool include_line);
+
 
 /** LineReader ****************************************************************/
 
