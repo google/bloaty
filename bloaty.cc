@@ -572,11 +572,10 @@ void MemoryMap::AddRegex(const std::string& regex, const std::string& replacemen
 void MemoryMap::AddVMRange(uintptr_t vmaddr, size_t size,
                            const std::string& name) {
   std::string str = name;
-  std::string tmp;
 
   for (const auto& pair : regexes_) {
-    if (RE2::Extract(str, *pair.first, pair.second, &tmp)) {
-      str.swap(tmp);
+    if (RE2::Replace(&str, *pair.first, pair.second)) {
+      break;
     }
   }
 
@@ -655,6 +654,7 @@ class Bloaty {
 
   void SetFilename(const std::string& filename);
   void AddDataSource(const std::string& name);
+  MemoryMap* FindMap(const std::string& name) const;
 
   void ScanDataSources();
 
@@ -669,6 +669,7 @@ class Bloaty {
   std::vector<std::unique_ptr<MemoryMap>> maps_;
   std::vector<const RangeMap*> range_maps_;
   std::vector<const DataSource*> sources_;
+  std::map<std::string, MemoryMap*> maps_by_name_;
   const MemoryFileMap* base_ = nullptr;
   std::string filename_;
 };
@@ -723,6 +724,7 @@ void Bloaty::AddDataSource(const std::string& name) {
     case DataSource::DATA_SOURCE_MAP: {
       std::unique_ptr<MemoryMap> map(new MemoryMap(base_));
       range_maps_.push_back(map->vm_map());
+      maps_by_name_[name] = map.get();
       maps_.push_back(std::move(map));
       break;
     }
@@ -733,6 +735,7 @@ void Bloaty::AddDataSource(const std::string& name) {
         base_ = map.get();
       }
       range_maps_.push_back(map->vm_map());
+      maps_by_name_[name] = map.get();
       maps_.push_back(std::move(map));
       break;
     }
@@ -740,6 +743,15 @@ void Bloaty::AddDataSource(const std::string& name) {
     default:
       std::cerr << "bloaty: unknown source type?\n";
       exit(1);
+  }
+}
+
+MemoryMap* Bloaty::FindMap(const std::string& name) const {
+  auto it = maps_by_name_.find(name);
+  if (it != maps_by_name_.end()) {
+    return it->second;
+  } else {
+    return NULL;
   }
 }
 
@@ -806,6 +818,8 @@ using namespace bloaty;
 int main(int argc, char *argv[]) {
   bloaty::Bloaty bloaty;
 
+  RE2 regex_pattern("(\\w+)\\+=/(.*)/(.*)/");
+
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-d") == 0) {
       std::vector<std::string> names;
@@ -813,6 +827,23 @@ int main(int argc, char *argv[]) {
       for (const auto& name : names) {
         bloaty.AddDataSource(name);
       }
+    } else if (strcmp(argv[i], "-r") == 0) {
+      std::string source, regex, substitution;
+      if (!RE2::FullMatch(argv[++i], regex_pattern,
+                          &source, &regex, &substitution)) {
+        std::cerr << "Bad format for regex, should be: "
+                  << "source=~/pattern/replacement/\n";
+        exit(1);
+      }
+
+      auto map = bloaty.FindMap(source);
+      if (!map) {
+        std::cerr << "Data source '" << source << "' not found in previous "
+                  << "-d option\n";
+        exit(1);
+      }
+
+      map->AddRegex(regex, substitution);
     } else if (argv[i][0] == '-') {
       std::cerr << "Unknown option: " << argv[i] << "\n";
       exit(1);
@@ -827,12 +858,6 @@ int main(int argc, char *argv[]) {
   }
 
   bloaty.ScanDataSources();
-
-#if 0
-  symbols.AddRegex("MergePartialFromCodedStream", "Protobuf MergePartialFromCodedStream");
-  symbols.AddRegex("ByteSize", "Protobuf ByteSize");
-  symbols.AddRegex("SerializeWithCachedSizes", "Protobuf SerializeWithCachedSizes");
-#endif
 
   Rollup rollup;
   RangeMap::ComputeRollup(bloaty.range_maps(), &rollup);

@@ -780,8 +780,6 @@ void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map) {
     exit(1);
   }
 
-  RE2 pattern(R"(\.pb\.cc$)");
-
   // Maps compilation unit offset -> source filename
   std::map<Dwarf_Off, std::string> source_files;
 
@@ -790,9 +788,6 @@ void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map) {
     dwarf::Attribute name = compilation_unit.GetAttribute(DW_AT_name);
     if (!name.is_null()) {
       std::string name_str = name.GetString();
-      if (RE2::PartialMatch(name_str, pattern)) {
-        name_str = "Protobuf generated code";
-      }
       source_files[compilation_unit.GetOffset()] = name_str;
     }
   }
