@@ -196,6 +196,45 @@ static void ReadELFSegments(const std::string& filename, MemoryFileMap* map) {
   }
 }
 
+static void ParseELFDisassembly(const std::string& filename,
+                                AddressReferenceSink* sink) {
+  std::string cmd = std::string("objdump -d -r -M intel ") + filename;
+
+  //   43f806:       e8 a5 86 fd ff          call   417eb0 <_ZN3re26Regexp6WalkerIiED1Ev>
+  //   401b4f:       e8 cc 5c 00 00          call   407820 <_ZN7Program30PrintSymbolsByTransitiveWeightEv>
+  // Tail call:
+  //   43f80b:       eb ce                   jmp    43f7db <_ZN3re26Regexp8ToStringEv>
+  RE2 call_pattern(R"(([0-9a-f]+): [\s0-9a-f]+ (?:call|jmp)\s+([0-9a-f]+) <[\w.]+>)");
+
+  //   43f941:       4c 8d 25 70 44 21 00    lea    r12,[rip+0x214470]        # 653db8 <__frame_dummy_init_array_entry+0x10>
+  RE2 ref_pattern(R"(([0-9a-f]+): [\s0-9a-f]+ .* # [0-9a-f]+ <[\w.]+(?:\+0x[0-9a-f]+)?>)");
+
+  // Some references only show up like this. :(
+  // It's a guess whether this is really an address.
+  //
+  // If we get false positives We could be smarter here and try to analyze the
+  // assembly after this instruction to determine whether this value is used in
+  // a memory reference.
+  //   42fdc5:       41 bf e0 f2 51 00       mov    r15d,0x51f2e0
+  RE2 current_addr_pattern(R"(^\s*([0-9a-f]+):)");
+  RE2 const_pattern(R"(0x([0-9a-f]+))");
+
+  uintptr_t addr, ref_addr;
+  for ( auto& line : ReadLinesFromPipe(cmd) ) {
+    re2::StringPiece piece(line);
+    if (RE2::PartialMatch(line, call_pattern,
+                          RE2::Hex(&addr), RE2::Hex(&ref_addr)) ||
+        RE2::PartialMatch(line, ref_pattern,
+                          RE2::Hex(&addr), RE2::Hex(&ref_addr))) {
+      sink->Add(addr, ref_addr);
+    } else if (RE2::FindAndConsume(&piece, current_addr_pattern, RE2::Hex(&addr))) {
+      while (RE2::FindAndConsume(&piece, const_pattern, RE2::Hex(&ref_addr))) {
+        sink->Add(addr, ref_addr);
+      }
+    }
+  }
+}
+
 static std::string ReadELFBuildId(const std::string& filename) {
   // Build ID: 669eba985387d24f7d959e0f0e49d9209bcf975b
   RE2 pattern(R"(Build ID: (\w+))");

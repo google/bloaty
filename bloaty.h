@@ -117,6 +117,13 @@ class MemoryFileMap : public MemoryMap {
   std::unordered_map<uintptr_t, uintptr_t> vm_to_file_;
 };
 
+// An interface for adding address -> address references to a map.
+// Used by modules that know how to scan for these references.
+class AddressReferenceSink {
+ public:
+  void Add(uintptr_t from, uintptr_t to);
+};
+
 // Contains a label -> label map specifying dependencies.
 // When X -> Y is in the map, X depends on Y.
 class DependencyMap {
