@@ -46,10 +46,29 @@
 namespace bloaty {
 
 std::string* name_path;
+const size_t kMaxLabelLen = 80;
 
-std::string ClampSize(const std::string& input, size_t size) {
+void PrintSpaces(size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    printf(" ");
+  }
+}
+
+double Percent(size_t part, size_t whole) {
+  if (whole == 0) {
+    return 0;
+  } else {
+    return static_cast<double>(part) / whole * 100;
+  }
+}
+
+std::string FixedWidthString(const std::string& input, size_t size) {
   if (input.size() < size) {
-    return input;
+    std::string ret = input;
+    while (ret.size() < size) {
+      ret += " ";
+    }
+    return ret;
   } else {
     return input.substr(0, size);
   }
@@ -307,108 +326,173 @@ std::string Demangler::Demangle(const std::string& symbol) {
 // depends on context; it can by symbols, sections, source filenames, etc.) Each
 // map entry can have its own sub-Rollup.
 
+std::string others_label = "[Other]";
+
 class Rollup {
  public:
-  // Adds "size" bytes to the rollup under the label names[i].
-  // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
-  void Add(const std::vector<std::string> names, size_t i, size_t size) {
-    total_ += size;
-    if (i < names.size()) {
-      auto& child = children_[names[i]];
-      if (child.get() == nullptr) {
-        child.reset(new Rollup());
-      }
-      child->Add(names, i + 1, size);
-    }
+  Rollup() {}
+
+  void AddSizes(const std::vector<std::string> names,
+                size_t size, bool is_vmsize) {
+    AddInternal(names, 0, size, is_vmsize);
   }
 
   // Prints a graphical representation of the rollup.
   void Print() const {
-    PrintInternal("");
+    RollupRow row(nullptr);
+    row.vmsize = vm_total_;
+    row.filesize = file_total_;
+    size_t longest_label = 0;
+    ComputeRows(0, &row, &longest_label);
+    row.Print(0, longest_label);
   }
 
  private:
-  void PrintInternal(const std::string& indent) const;
-  size_t total_ = 0;
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(Rollup);
+
+  size_t vm_total_ = 0;
+  size_t file_total_ = 0;
 
   // Putting Rollup by value seems to work on some compilers/libs but not
   // others.
   typedef std::unordered_map<std::string, std::unique_ptr<Rollup>> ChildMap;
   ChildMap children_;
+
+  // Adds "size" bytes to the rollup under the label names[i].
+  // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
+  void AddInternal(const std::vector<std::string> names, size_t i,
+                   size_t size, bool is_vmsize) {
+    if (is_vmsize) {
+      vm_total_ += size;
+    } else {
+      file_total_ += size;
+    }
+    if (i < names.size()) {
+      auto& child = children_[names[i]];
+      if (child.get() == nullptr) {
+        child.reset(new Rollup());
+      }
+      child->AddInternal(names, i + 1, size, is_vmsize);
+    }
+  }
+
+  struct RollupRow {
+    RollupRow(const std::string* name_) : name(name_) {}
+    RollupRow(const ChildMap::value_type& value)
+        : name(&value.first),
+          vmsize(value.second->vm_total_),
+          filesize(value.second->file_total_) {}
+
+    const std::string* name;
+    size_t vmsize = 0;
+    size_t filesize = 0;
+    std::vector<RollupRow> sorted_children;
+
+    void Print(size_t indent, size_t longest_label) const;
+  };
+
+  void ComputeRows(size_t indent, RollupRow* row, size_t* longest_label) const;
 };
 
-void Rollup::PrintInternal(const std::string& indent) const {
+void Rollup::ComputeRows(size_t indent, RollupRow* row,
+                         size_t* longest_label) const {
+  auto& child_rows = row->sorted_children;
+  child_rows.reserve(children_.size());
+
   if (children_.empty() ||
-      (children_.size() == 1 && children_.begin()->first == "[None]")) {
+      (children_.size() == 1 &&
+       children_.begin()->first == "[None]")) {
     return;
   }
 
-  double total = 0;
-
-  typedef std::tuple<const std::string*, size_t, const Rollup*> ChildTuple;
-  std::vector<ChildTuple> sorted_children;
-  sorted_children.reserve(children_.size());
-  size_t others = 0;
-  size_t others_max = 0;
   for (const auto& value : children_) {
-    sorted_children.push_back(
-        std::make_tuple(&value.first, value.second->total_, value.second.get()));
-    total += value.second->total_;
+    child_rows.push_back(RollupRow(value));
   }
 
-  assert(total == total_);
+  std::sort(child_rows.begin(), child_rows.end(), [](const RollupRow& a,
+                                                     const RollupRow& b) {
+    return std::max(a.vmsize, a.filesize) > std::max(b.vmsize, b.filesize);
+  });
 
-  std::sort(sorted_children.begin(), sorted_children.end(),
-            [](const ChildTuple& a, const ChildTuple& b) {
-              return std::get<1>(a) > std::get<1>(b);
-            });
+  // Filter out everything but the top 20.
+  RollupRow others(&others_label);
 
-  size_t i = sorted_children.size() - 1;
+  size_t i = child_rows.size() - 1;
   while (i >= 20) {
-    if (*std::get<0>(sorted_children[i]) == "[None]") {
-      std::swap(sorted_children[i], sorted_children[19]);
+    if (*child_rows[i].name == "[None]") {
+      // Don't collapse [None] into [Other].
+      std::swap(child_rows[i], child_rows[19]);
     } else {
-      size_t size = std::get<1>(sorted_children[i]);
-      others += size;
-      others_max = std::max(others_max, size);
-      sorted_children.resize(i);
+      others.vmsize += child_rows[i].vmsize;
+      others.filesize += child_rows[i].filesize;
+      child_rows.erase(child_rows.end() - 1);
       i--;
     }
   }
 
-  std::string others_label = "[Other]";
-  if (others > 0) {
-    sorted_children.push_back(std::make_tuple(&others_label, others, nullptr));
+  if (others.vmsize > 0 || others.filesize > 0) {
+    child_rows.push_back(others);
   }
 
-  std::sort(sorted_children.begin(), sorted_children.end(),
-            [](const ChildTuple& a, const ChildTuple& b) {
-              return std::get<1>(a) > std::get<1>(b);
-            });
+  // Put [Other] in the right place.
+  std::sort(child_rows.begin(), child_rows.end(), [](const RollupRow& a,
+                                                     const RollupRow& b) {
+    return std::max(a.vmsize, a.filesize) > std::max(b.vmsize, b.filesize);
+  });
 
-  size_t cumulative = 0;
+  Demangler demangler;
+  NameStripper stripper;
+  for (auto& child_row : child_rows) {
+    if (*child_row.name == others_label) {
+      continue;
+    }
+
+    auto it = children_.find(*child_row.name);
+    if (it == children_.end()) {
+      std::cerr << "Should never happen, couldn't find name: "
+                << *child_row.name << "\n";
+      exit(1);
+    }
+
+
+    auto demangled = demangler.Demangle(*child_row.name);
+    stripper.StripName(demangled);
+    size_t allowed_label_len = std::min(stripper.stripped().size(), kMaxLabelLen);
+    *longest_label = std::max(*longest_label, allowed_label_len + indent);
+    it->second->ComputeRows(indent + 4, &child_row, longest_label);
+  }
+}
+
+void Rollup::RollupRow::Print(size_t indent, size_t longest_label) const {
   NameStripper stripper;
   Demangler demangler;
 
-  for (const auto& child : sorted_children) {
-    size_t size = std::get<1>(child);
-    cumulative += size;
-    //const std::string& name = object->pretty_name;
-    //printf("%s %5.1f%% %5.1f%%  %6d %s\n", indent.c_str(), size / total * 100,
-    //       cumulative / total * 100, (int)size, child->first.c_str());
-    auto demangled = demangler.Demangle(*std::get<0>(child));
-    stripper.StripName(demangled);
-    printf("%s %5.1f%%  %6s %s\n", indent.c_str(), size / total * 100,
-           SiPrint(size).c_str(), stripper.stripped().c_str());
-    auto child_rollup = std::get<2>(child);
-    if (child_rollup) {
-      child_rollup->PrintInternal(indent + "    ");
-    }
+  if (indent == 0) {
+    printf("     VM SIZE    ");
+    PrintSpaces(longest_label);
+    printf("    FILE SIZE   ");
+    printf("\n");
+    printf(" -------------- ");
+    PrintSpaces(longest_label);
+    printf(" -------------- ");
+    printf("\n");
   }
 
-  if (indent == "") {
-    //printf("%s %5.1f%%  %6d %s\n", indent.c_str(), 100.0, (int)total, "TOTAL");
-    printf("%s %5.1f%%  %6s %s\n", indent.c_str(), 100.0, SiPrint(total).c_str(), "TOTAL");
+  for (const auto& child : sorted_children) {
+    auto demangled = demangler.Demangle(*child.name);
+    stripper.StripName(demangled);
+    printf("%s %5.1f%%  %6s %s %6s  %5.1f%%\n", FixedWidthString("", indent).c_str(),
+           Percent(child.vmsize, vmsize), SiPrint(child.vmsize).c_str(),
+           FixedWidthString(stripper.stripped(), longest_label).c_str(),
+           SiPrint(child.filesize).c_str(), Percent(child.filesize, filesize));
+    child.Print(indent + 4, longest_label);
+  }
+
+  if (indent == 0) {
+    printf("%s %5.1f%%  %6s %s %6s  %5.1f%%\n",
+           FixedWidthString("", indent).c_str(), 100.0, SiPrint(vmsize).c_str(),
+           FixedWidthString("TOTAL", longest_label).c_str(),
+           SiPrint(filesize).c_str(), 100.0);
   }
 }
 
@@ -425,15 +509,16 @@ void Rollup::PrintInternal(const std::string& indent) const {
 
 class RangeMap {
  public:
-  bool Add(uintptr_t addr, size_t size, const std::string& val);
-  std::string* Get(uintptr_t addr, uintptr_t* start, size_t* size);
-  std::string* TryGet(uintptr_t addr, uintptr_t* start, size_t* size);
-  std::string* TryGetExactly(uintptr_t addr, size_t* size);
+  bool AddRange(uintptr_t addr, size_t size, const std::string& val);
+  const std::string* Get(uintptr_t addr, uintptr_t* start, size_t* size) const;
+  const std::string* TryGet(uintptr_t addr, uintptr_t* start,
+                            size_t* size) const;
+  const std::string* TryGetExactly(uintptr_t addr, size_t* size) const;
 
   void Fill(uintptr_t max, const std::string& val);
 
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                            Rollup* rollup);
+                            bool is_vmsize, Rollup* rollup);
 
  private:
   typedef std::map<uintptr_t, std::pair<std::string, size_t>> Map;
@@ -448,26 +533,32 @@ class RangeMap {
   }
 };
 
-std::string* RangeMap::TryGet(uintptr_t addr, uintptr_t* start, size_t* size) {
+const std::string* RangeMap::TryGet(uintptr_t addr, uintptr_t* start,
+                                    size_t* size) const {
   auto it = mappings_.upper_bound(addr);
-  if (it == mappings_.begin() || (--it, it->first + it->second.second <= addr)) {
+  if (it == mappings_.begin() ||
+      (--it, it->first + it->second.second <= addr)) {
     return nullptr;
   }
   assert(addr >= it->first && addr < it->first + it->second.second);
+  if (start) *start = it->first;
+  if (size) *size = it->second.second;
   return &it->second.first;
 }
 
-std::string* RangeMap::TryGetExactly(uintptr_t addr, size_t* size) {
+const std::string* RangeMap::TryGetExactly(uintptr_t addr, size_t* size) const {
   auto it = mappings_.find(addr);
   if (it == mappings_.end()) {
     return nullptr;
   }
+  if (size) *size = it->second.second;
   return &it->second.first;
 }
 
-bool RangeMap::Add(uintptr_t addr, size_t size, const std::string& val) {
+bool RangeMap::AddRange(uintptr_t addr, size_t size, const std::string& val) {
+  // XXX: properly test the whole range, not just the two endpoints.
   if (TryGet(addr, nullptr, nullptr) ||
-      TryGet(addr + size, nullptr, nullptr)) {
+      TryGet(addr + size - 1, nullptr, nullptr)) {
     return false;
   }
   mappings_[addr] = std::make_pair(std::move(val), size);
@@ -491,7 +582,7 @@ void RangeMap::Fill(uintptr_t max, const std::string& val) {
 }
 
 void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                             Rollup* rollup) {
+                             bool is_vmsize, Rollup* rollup) {
   assert(range_maps.size() > 0);
 
   std::vector<Map::const_iterator> iters;
@@ -505,6 +596,22 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 
   assert(current != UINTPTR_MAX);
 
+  // Iterate over all ranges in parallel to perform this transformation:
+  //
+  //   -----  -----  -----             ---------------
+  //     |      |      1                    A,X,1
+  //     |      X    -----             ---------------
+  //     |      |      |                    A,X,2
+  //     A    -----    |               ---------------
+  //     |      |      |                      |
+  //     |      |      2      ----->          |
+  //     |      Y      |                    A,Y,2
+  //     |      |      |                      |
+  //   -----    |      |               ---------------
+  //     B      |      |                    B,Y,2
+  //   -----    |    -----             ---------------
+  //            |                      [None],Y,[None]
+  //          -----
   while (true) {
     uintptr_t next_break = UINTPTR_MAX;
     bool have_data = false;
@@ -549,7 +656,7 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
     }
 
     if (have_data) {
-      rollup->Add(keys, 0, next_break - current);
+      rollup->AddSizes(keys, next_break - current, is_vmsize);
     }
 
     current = next_break;
@@ -559,38 +666,30 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 
 // MemoryMap ///////////////////////////////////////////////////////////////////
 
-MemoryMap::MemoryMap(const MemoryFileMap* base)
-    : base_(base), vm_map_(new RangeMap()) {}
+MemoryMap::MemoryMap()
+    : vm_map_(new RangeMap()), file_map_(new RangeMap()) {}
 
 MemoryMap::~MemoryMap() {}
+
+void MemoryMap::FillInUnmapped(long filesize) {
+  file_map_->Fill(filesize, "[Unmapped]");
+}
 
 void MemoryMap::AddRegex(const std::string& regex, const std::string& replacement) {
   std::unique_ptr<RE2> re2(new RE2(regex));
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
-void MemoryMap::AddVMRange(uintptr_t vmaddr, size_t size,
-                           const std::string& name) {
-  std::string str = name;
+std::string MemoryMap::ApplyNameRegexes(const std::string& name) {
+  std::string ret = name;
 
   for (const auto& pair : regexes_) {
-    if (RE2::Replace(&str, *pair.first, pair.second)) {
+    if (RE2::Replace(&ret, *pair.first, pair.second)) {
       break;
     }
   }
 
-  vm_map_->Add(vmaddr, size, str);
-}
-
-void MemoryMap::AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
-                                     const std::string& name) {
-  AddVMRange(vmaddr, size, name);
-}
-
-bool MemoryMap::CoversVMAddresses(uintptr_t vmaddr, size_t vmsize) const {
-  // XXX: not correct, need to test the whole range.
-  return vm_map_->TryGet(vmaddr, nullptr, nullptr) &&
-         vm_map_->TryGet(vmaddr + vmsize, nullptr, nullptr);
+  return ret;
 }
 
 /*
@@ -602,45 +701,148 @@ bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
 
 // MemoryFileMap ///////////////////////////////////////////////////////////////
 
-MemoryFileMap::MemoryFileMap(const MemoryFileMap* base)
-    : MemoryMap(base), file_map_(new RangeMap()) {}
+MemoryFileMap::MemoryFileMap() {}
 MemoryFileMap::~MemoryFileMap() {}
 
-void MemoryFileMap::FillInUnmapped(long filesize) {
-  file_map_->Fill(filesize, "Unmapped");
-}
-
-void MemoryFileMap::AddFileRange(const std::string& name, uintptr_t vmaddr,
-                                 size_t vmsize, long fileoff, long filesize) {
-  if (base()) {
-    if (!base()->CoversVMAddresses(vmaddr, vmsize) ||
-        !base()->CoversFileOffsets(fileoff, filesize)) {
-      std::cerr << "bloaty: section " << name << " lies outside any segment.\n";
-      return;
-    }
+void MemoryFileMap::AddRange(const std::string& name,
+                             uintptr_t vmaddr, size_t vmsize,
+                             long fileoff, long filesize) {
+  std::string label = ApplyNameRegexes(name);
+  if ((vmsize > 0 && !vm_map()->AddRange(vmaddr, vmsize, label)) ||
+      (filesize > 0 && !file_map()->AddRange(fileoff, filesize, label))) {
+    std::cerr << "bloaty: unexpected overlap adding name '" << name << "'\n";
+    return;
   }
 
-  bool overlapped = false;
-
-  AddVMRange(vmaddr, vmsize, name);
-
-  if (filesize) {
-    if (!file_map_->Add(fileoff, filesize, name)) {
-      overlapped = true;
-    }
-  }
-
-  if (overlapped) {
-    std::cerr << "Unexpected overlap in base memory map adding: " << name
-              << "\n";
+  if (vmsize > 0 && filesize > 0) {
+    vm_to_file_[vmaddr] = fileoff;
   }
 }
 
-bool MemoryFileMap::CoversFileOffsets(uintptr_t fileoff,
-                                      size_t filesize) const {
-  // XXX: not correct, need to test the whole range.
-  return file_map_->TryGet(fileoff, nullptr, nullptr) &&
-         file_map_->TryGet(fileoff + filesize, nullptr, nullptr);
+bool MemoryFileMap::TranslateVMAddress(uintptr_t vmaddr,
+                                       uintptr_t* fileoff) const {
+  uintptr_t vmstart;
+  if (!vm_map()->TryGet(vmaddr, &vmstart, nullptr)) {
+    return false;
+  }
+
+  auto it = vm_to_file_.find(vmstart);
+  if (it == vm_to_file_.end()) {
+    return false;
+  }
+
+  uintptr_t filestart = it->second;
+  uintptr_t filesize;
+  if (!file_map()->TryGetExactly(filestart, &filesize)) {
+    std::cerr << "Fatal error, should never happen.\n";
+    exit(1);
+  }
+
+  if (vmaddr - vmstart > filesize) {
+    // File mapping is shorter than VM mapping and doesn't actually contain our
+    // address.
+    return false;
+  }
+
+  *fileoff = (vmaddr - vmstart) + filestart;
+  return true;
+}
+
+bool MemoryFileMap::TranslateVMRange(uintptr_t vmaddr, size_t vmsize,
+                                     uintptr_t* fileoff,
+                                     uintptr_t* filesize) const {
+  uintptr_t vm_range_start, vm_range_size;
+  if (!vm_map()->TryGet(vmaddr, &vm_range_start, &vm_range_size)) {
+    return false;
+  }
+
+  if (vmaddr + vmsize > vm_range_start + vm_range_size) {
+    std::cerr << "Tried to translate range that spanned regions of of our "
+              << "mapping.  This shouldn't happen.\n";
+    exit(1);
+  }
+
+  auto it = vm_to_file_.find(vm_range_start);
+  if (it == vm_to_file_.end()) {
+    return false;
+  }
+
+  uintptr_t file_range_start = it->second;
+  uintptr_t file_range_size;
+  if (!file_map()->TryGetExactly(file_range_start, &file_range_size)) {
+    std::cerr << "Fatal error, should never happen.\n";
+    exit(1);
+  }
+
+  if (vmaddr - vm_range_start > file_range_size) {
+    // File mapping is shorter than VM mapping and doesn't actually contain our
+    // address.
+    return false;
+  }
+
+  *fileoff = (vmaddr - vm_range_start) + file_range_start;
+  *filesize = std::min(vmsize, file_range_size - (vmsize - vm_range_start));
+  return true;
+}
+
+
+// VMRangeAdder ////////////////////////////////////////////////////////////////
+
+// Adds a region to the memory map.  It should not overlap any previous
+// region added with Add(), but it should overlap the base memory map.
+void VMRangeAdder::AddVMRange(uintptr_t vmaddr, size_t vmsize, const std::string& name) {
+  if (vmsize == 0) {
+    return;
+  }
+  const std::string label = map_->ApplyNameRegexes(name);
+  uintptr_t fileoff, filesize;
+  if (!map_->vm_map()->AddRange(vmaddr, vmsize, label)) {
+    std::cerr << "Error adding range to VM map for name: " << name << "=["
+              << std::hex << vmaddr << ", " << std::hex << vmsize << "]\n";
+    uintptr_t vmstart, vm_region_size;
+    auto existing = map_->vm_map()->TryGet(vmaddr, &vmstart, &vm_region_size);
+    if (!existing) {
+      existing = map_->vm_map()->TryGet(vmaddr + vmsize - 1, &vmstart, &vm_region_size);
+    }
+    if (!existing) {
+      std::cerr << "WTF?????????????????????????\n";
+    }
+    std::cerr << "Existing mapping: " << *existing << "=[" << vmstart << ", " << vm_region_size<< "]\n";
+  }
+  if (translator_->TranslateVMRange(vmaddr, vmsize, &fileoff, &filesize)) {
+    if (!map_->file_map()->AddRange(fileoff, filesize, label)) {
+      std::cerr << "Error adding range to file map for name: " << name << "\n";
+    }
+  }
+}
+
+void VMRangeAdder::AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
+                                        const std::string& name) {
+  size_t existing_size;
+  const auto existing = map_->vm_map()->TryGetExactly(vmaddr, &existing_size);
+  if (existing) {
+    if (size != existing_size) {
+      std::cerr << "bloaty: Warning: inexact alias for name: " << name
+                << ", aliases=" << *existing << "\n";
+    }
+    map_->aliases_.insert(std::make_pair(name, *existing));
+  } else {
+    AddVMRange(vmaddr, size, name);
+  }
+}
+
+void VMRangeAdder::AddVMRangeIgnoreDuplicate(uintptr_t vmaddr, size_t vmsize,
+                                             const std::string& name) {
+  if (vmsize == 0) {
+    return;
+  }
+
+  const std::string label = map_->ApplyNameRegexes(name);
+  uintptr_t fileoff, filesize;
+  map_->vm_map()->AddRange(vmaddr, vmsize, label);
+  if (translator_->TranslateVMRange(vmaddr, vmsize, &fileoff, &filesize)) {
+    map_->file_map()->AddRange(fileoff, filesize, label);
+  }
 }
 
 
@@ -658,21 +860,30 @@ class Bloaty {
 
   void ScanDataSources();
 
-  const std::vector<const RangeMap*> range_maps() { return range_maps_; }
-
+  void GetRangeMaps(std::vector<const RangeMap*>* maps, bool is_vm);
   size_t GetSourceCount() const { return sources_.size(); }
 
  private:
   static long GetFileSize(const std::string& filename);
 
   std::map<std::string, DataSource> sources_map_;
+  MemoryFileMap segment_map_;
   std::vector<std::unique_ptr<MemoryMap>> maps_;
-  std::vector<const RangeMap*> range_maps_;
   std::vector<const DataSource*> sources_;
   std::map<std::string, MemoryMap*> maps_by_name_;
-  const MemoryFileMap* base_ = nullptr;
   std::string filename_;
 };
+
+void Bloaty::GetRangeMaps(std::vector<const RangeMap*>* maps, bool is_vm) {
+  maps->clear();
+  for (const auto& map : maps_) {
+    if (is_vm) {
+      maps->push_back(map->vm_map());
+    } else {
+      maps->push_back(map->file_map());
+    }
+  }
+}
 
 long Bloaty::GetFileSize(const std::string& filename) {
   FILE* file = fopen(filename.c_str(), "rb");
@@ -722,19 +933,14 @@ void Bloaty::AddDataSource(const std::string& name) {
   sources_.push_back(&it->second);
   switch (it->second.type) {
     case DataSource::DATA_SOURCE_MAP: {
-      std::unique_ptr<MemoryMap> map(new MemoryMap(base_));
-      range_maps_.push_back(map->vm_map());
+      std::unique_ptr<MemoryMap> map(new MemoryMap());
       maps_by_name_[name] = map.get();
       maps_.push_back(std::move(map));
       break;
     }
 
     case DataSource::DATA_SOURCE_FILEMAP: {
-      std::unique_ptr<MemoryFileMap> map(new MemoryFileMap(base_));
-      if (sources_.size() == 1) {
-        base_ = map.get();
-      }
-      range_maps_.push_back(map->vm_map());
+      std::unique_ptr<MemoryFileMap> map(new MemoryFileMap());
       maps_by_name_[name] = map.get();
       maps_.push_back(std::move(map));
       break;
@@ -756,11 +962,22 @@ MemoryMap* Bloaty::FindMap(const std::string& name) const {
 }
 
 void Bloaty::ScanDataSources() {
+  // Always scan segments first (even if we're not displaying it) because we use
+  // it for VM -> File address translation.
+  auto it = sources_map_.find("segments");
+  if (it == sources_map_.end()) {
+    std::cerr << "bloaty: no segments data source, can't translate VM->File.\n";
+    exit(1);
+  }
+  it->second.func.filemap(filename_, &segment_map_);
+
   for (size_t i = 0; i < sources_.size(); i++) {
     switch (sources_[i]->type) {
-      case DataSource::DATA_SOURCE_MAP:
-        sources_[i]->func.map(filename_, maps_[i].get());
+      case DataSource::DATA_SOURCE_MAP: {
+        VMRangeAdder adder(maps_[i].get(), &segment_map_);
+        sources_[i]->func.map(filename_, &adder);
         break;
+      }
 
       case DataSource::DATA_SOURCE_FILEMAP: {
         auto map = static_cast<MemoryFileMap*>(maps_[i].get());
@@ -860,7 +1077,11 @@ int main(int argc, char *argv[]) {
   bloaty.ScanDataSources();
 
   Rollup rollup;
-  RangeMap::ComputeRollup(bloaty.range_maps(), &rollup);
+  std::vector<const RangeMap*> range_maps;
+  bloaty.GetRangeMaps(&range_maps, true);
+  RangeMap::ComputeRollup(range_maps, true, &rollup);
+  bloaty.GetRangeMaps(&range_maps, false);
+  RangeMap::ComputeRollup(range_maps, false, &rollup);
   rollup.Print();
   return 0;
 }

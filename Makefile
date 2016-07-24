@@ -13,9 +13,9 @@ endif
 bloaty: bloaty.o macho.o elf.o $(EXTRA) third_party/re2/obj/libre2.a third_party/leveldb/out-static/libleveldb.a
 	$(CXX) $(GC_SECTIONS) -o bloaty bloaty.o macho.o elf.o $(EXTRA) $(EXTRA_LDFLAGS) third_party/re2/obj/libre2.a third_party/leveldb/out-static/libleveldb.a -lpthread
 
-elf.o: elf.cc
-bloaty.o: bloaty.cc
-dwarf.o: dwarf.cc
+elf.o: elf.cc bloaty.h
+bloaty.o: bloaty.cc bloaty.h
+dwarf.o: dwarf.cc bloaty.h
 
 third_party/re2/obj/libre2.a: third_party/re2/Makefile
 	make -j8 -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"

@@ -28,6 +28,7 @@
 #include "re2/re2.h"
 
 static size_t AlignUpTo(size_t offset, size_t granularity) {
+  return offset;
   // Granularity must be a power of two.
   return (offset + granularity - 1) & ~(granularity - 1);
 }
@@ -767,7 +768,7 @@ bool TryGetAddress(const std::string& str, uintptr_t* addr) {
 
 } // namespace dwarf
 
-void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map) {
+void ReadDWARFSourceFiles(const std::string& filename, VMRangeAdder* adder) {
   dwarf::Reader reader;
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
@@ -800,7 +801,8 @@ void ReadDWARFSourceFiles(const std::string& filename, MemoryMap* map) {
     Dwarf_Unsigned length;
     Dwarf_Off cu_die_offset;
     range.GetInfo(&start, &length, &cu_die_offset);
-    map->AddVMRange(start, AlignUpTo(length, 16), source_files[cu_die_offset]);
+    adder->AddVMRangeIgnoreDuplicate(start, AlignUpTo(length, 16),
+                                     source_files[cu_die_offset]);
   }
 }
 
@@ -812,7 +814,7 @@ static std::string LineInfoKey(const std::string& file, Dwarf_Unsigned line, boo
   }
 }
 
-void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map,
+void ReadDWARFLineInfo(const std::string& filename, VMRangeAdder* adder,
                        bool include_line) {
   dwarf::Reader reader;
   FILE* file = fopen(filename.c_str(), "rb");
@@ -848,10 +850,10 @@ void ReadDWARFLineInfo(const std::string& filename, MemoryMap* map,
         }
       } else {
         if (addr - last_addr > 0x10000) {
-          map->AddVMRange(begin_addr, last_addr - begin_addr, last_source);
+          adder->AddVMRange(begin_addr, last_addr - begin_addr, last_source);
           begin_addr = addr;
         } else if (name != last_source) {
-          map->AddVMRange(begin_addr, addr - begin_addr, last_source);
+          adder->AddVMRange(begin_addr, addr - begin_addr, last_source);
           begin_addr = addr;
         }
         last_source = LineInfoKey(name, number, include_line);
