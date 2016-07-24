@@ -38,7 +38,7 @@ static size_t AlignUpTo(size_t offset, size_t granularity) {
 }
 
 static void ReadELFSymbols(
-    const std::string& filename, VMRangeAdder* adder,
+    const std::string& filename, VMRangeSink* sink,
     std::unordered_map<uintptr_t, std::string>* zero_size_symbols) {
   std::string cmd = std::string("readelf -s --wide ") + filename;
   // Symbol table '.symtab' contains 879 entries:
@@ -87,13 +87,13 @@ static void ReadELFSymbols(
         continue;
       }
 
-      adder->AddVMRangeAllowAlias(addr, AlignUpTo(size, 16), name);
+      sink->AddVMRangeAllowAlias(addr, AlignUpTo(size, 16), name);
     }
   }
 }
 
 static void ReadELFSectionsRefineSymbols(
-    const std::string& filename, VMRangeAdder* adder,
+    const std::string& filename, VMRangeSink* sink,
     std::unordered_map<uintptr_t, std::string>* zero_size_symbols) {
   std::string cmd = std::string("readelf -S --wide ") + filename;
   // We use the section headers to patch up the symbol table a little.
@@ -126,14 +126,14 @@ static void ReadELFSectionsRefineSymbols(
     if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size))) {
       auto it = zero_size_symbols->find(addr);
       if (it != zero_size_symbols->end() && size > 0) {
-        adder->AddVMRangeAllowAlias(addr, size, it->second);
+        sink->AddVMRangeAllowAlias(addr, size, it->second);
         zero_size_symbols->erase(it);
       }
     }
   }
 }
 
-static void ReadELFSections(const std::string& filename, MemoryFileMap* map) {
+static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) {
   std::string cmd = std::string("readelf -S --wide ") + filename;
   // $ readelf -S
   // Section Headers:
@@ -167,12 +167,12 @@ static void ReadELFSections(const std::string& filename, MemoryFileMap* map) {
         size = 0;
       }
 
-      map->AddRange(name, addr, vmsize, off, size);
+      sink->AddRange(name, addr, vmsize, off, size);
     }
   }
 }
 
-static void ReadELFSegments(const std::string& filename, MemoryFileMap* map) {
+static void ReadELFSegments(const std::string& filename, VMFileRangeSink* sink) {
   //   Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
   //   LOAD           0x000000 0x0000000000400000 0x0000000000400000 0x19a8a9 0x19a8a9 R E 0x200000
   //
@@ -192,7 +192,7 @@ static void ReadELFSegments(const std::string& filename, MemoryFileMap* map) {
     if (RE2::PartialMatch(line, load_pattern, RE2::Hex(&fileoff),
                           RE2::Hex(&vmaddr), RE2::Hex(&filesize),
                           RE2::Hex(&memsize), &flg)) {
-      map->AddRange("LOAD [" + flg + "]", vmaddr, memsize, fileoff, filesize);
+      sink->AddRange("LOAD [" + flg + "]", vmaddr, memsize, fileoff, filesize);
     }
   }
 }
@@ -269,38 +269,37 @@ static uintptr_t ReadELFEntryPoint(const std::string& filename) {
 
 }  // namespace
 
-static void ReadELFSymbols(const std::string& filename, VMRangeAdder* adder) {
+static void ReadELFSymbols(const std::string& filename, VMRangeSink* sink) {
   std::unordered_map<uintptr_t, std::string> zero_size_symbols;
 
-  ReadELFSymbols(filename, adder, &zero_size_symbols);
-  ReadELFSectionsRefineSymbols(filename, adder, &zero_size_symbols);
+  ReadELFSymbols(filename, sink, &zero_size_symbols);
+  ReadELFSectionsRefineSymbols(filename, sink, &zero_size_symbols);
 }
 
 // ELF files put debug info directly into the binary, so we call the DWARF
 // reader directly on them.
 
 static void ReadELFSourceFiles(const std::string& filename,
-                               VMRangeAdder* adder) {
-  ReadDWARFSourceFiles(filename, adder);
+                               VMRangeSink* sink) {
+  ReadDWARFSourceFiles(filename, sink);
 }
 
-static void ReadELFLineInfo(const std::string& filename, VMRangeAdder* adder) {
-  ReadDWARFLineInfo(filename, adder, true);
+static void ReadELFLineInfo(const std::string& filename, VMRangeSink* sink) {
+  ReadDWARFLineInfo(filename, sink, true);
 }
 
 static void ReadELFLineInfoFile(const std::string& filename,
-                                VMRangeAdder* adder) {
-  ReadDWARFLineInfo(filename, adder, false);
+                                VMRangeSink* sink) {
+  ReadDWARFLineInfo(filename, sink, false);
 }
 
 void RegisterELFDataSources(std::vector<DataSource>* sources) {
-  sources->push_back(MemoryFileMapDataSource("segments", ReadELFSegments));
-  sources->push_back(MemoryFileMapDataSource("sections", ReadELFSections));
-  sources->push_back(VMRangeAdderDataSource("symbols", ReadELFSymbols));
-  sources->push_back(VMRangeAdderDataSource("sourcefiles", ReadELFSourceFiles));
-  sources->push_back(VMRangeAdderDataSource("lineinfo", ReadELFLineInfo));
-  sources->push_back(
-      VMRangeAdderDataSource("lineinfo:file", ReadELFLineInfoFile));
+  sources->push_back(VMFileRangeDataSource("segments", ReadELFSegments));
+  sources->push_back(VMFileRangeDataSource("sections", ReadELFSections));
+  sources->push_back(VMRangeDataSource("symbols", ReadELFSymbols));
+  sources->push_back(VMRangeDataSource("sourcefiles", ReadELFSourceFiles));
+  sources->push_back(VMRangeDataSource("lineinfo", ReadELFLineInfo));
+  sources->push_back(VMRangeDataSource("lineinfo:file", ReadELFLineInfoFile));
 }
 
 std::string ReadBuildId(const std::string& filename) {

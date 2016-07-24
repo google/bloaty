@@ -597,7 +597,7 @@ class Reader {
 
     if (result == DW_DLV_OK) {
       NextCompilationUnit();
-      return true;
+      return !eof_;
     } else if (result == DW_DLV_NO_ENTRY) {
       // No DWARF debugging information present.
       return false;
@@ -768,7 +768,7 @@ bool TryGetAddress(const std::string& str, uintptr_t* addr) {
 
 } // namespace dwarf
 
-void ReadDWARFSourceFiles(const std::string& filename, VMRangeAdder* adder) {
+void ReadDWARFSourceFiles(const std::string& filename, VMRangeSink* sink) {
   dwarf::Reader reader;
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
@@ -777,7 +777,9 @@ void ReadDWARFSourceFiles(const std::string& filename, VMRangeAdder* adder) {
   }
 
   if (!reader.Open(fileno(file))) {
-    std::cerr << "No debug information: " << filename << "\n";
+    std::cerr
+        << "bloaty: can't read DWARF source file info, no debug info present: "
+        << filename << "\n";
     exit(1);
   }
 
@@ -801,8 +803,8 @@ void ReadDWARFSourceFiles(const std::string& filename, VMRangeAdder* adder) {
     Dwarf_Unsigned length;
     Dwarf_Off cu_die_offset;
     range.GetInfo(&start, &length, &cu_die_offset);
-    adder->AddVMRangeIgnoreDuplicate(start, AlignUpTo(length, 16),
-                                     source_files[cu_die_offset]);
+    sink->AddVMRangeIgnoreDuplicate(start, AlignUpTo(length, 16),
+                                    source_files[cu_die_offset]);
   }
 }
 
@@ -814,7 +816,7 @@ static std::string LineInfoKey(const std::string& file, Dwarf_Unsigned line, boo
   }
 }
 
-void ReadDWARFLineInfo(const std::string& filename, VMRangeAdder* adder,
+void ReadDWARFLineInfo(const std::string& filename, VMRangeSink* sink,
                        bool include_line) {
   dwarf::Reader reader;
   FILE* file = fopen(filename.c_str(), "rb");
@@ -824,7 +826,8 @@ void ReadDWARFLineInfo(const std::string& filename, VMRangeAdder* adder,
   }
 
   if (!reader.Open(fileno(file))) {
-    std::cerr << "No debug information: " << filename << "\n";
+    std::cerr << "bloaty: can't read DWARF line info, no debug info present: "
+              << filename << "\n";
     exit(1);
   }
 
@@ -850,10 +853,10 @@ void ReadDWARFLineInfo(const std::string& filename, VMRangeAdder* adder,
         }
       } else {
         if (addr - last_addr > 0x10000) {
-          adder->AddVMRange(begin_addr, last_addr - begin_addr, last_source);
+          sink->AddVMRange(begin_addr, last_addr - begin_addr, last_source);
           begin_addr = addr;
         } else if (name != last_source) {
-          adder->AddVMRange(begin_addr, addr - begin_addr, last_source);
+          sink->AddVMRange(begin_addr, addr - begin_addr, last_source);
           begin_addr = addr;
         }
         last_source = LineInfoKey(name, number, include_line);

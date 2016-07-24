@@ -666,13 +666,44 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 
 // MemoryMap ///////////////////////////////////////////////////////////////////
 
-MemoryMap::MemoryMap()
-    : vm_map_(new RangeMap()), file_map_(new RangeMap()) {}
+// Contains a [range] -> label map for VM space and file space.
+class MemoryMap {
+ public:
+  MemoryMap() {}
+  virtual ~MemoryMap() {}
 
-MemoryMap::~MemoryMap() {}
+  // For the file space mapping, Fills in generic "Unmapped" sections for
+  // portions of the file that have no mapping.
+  void FillInUnmapped(long filesize);
+
+  // Adds a regex that will be applied to all labels prior to inserting them in
+  // the map.  All regexes will be applied in sequence.
+  void AddRegex(const std::string& regex, const std::string& replacement);
+
+  bool FindAtAddr(uintptr_t vmaddr, std::string* name) const;
+  bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
+                          std::string* name) const;
+
+  const RangeMap* file_map() const { return &file_map_; }
+  const RangeMap* vm_map() const { return &vm_map_; }
+  RangeMap* file_map() { return &file_map_; }
+  RangeMap* vm_map() { return &vm_map_; }
+
+ protected:
+  std::string ApplyNameRegexes(const std::string& name);
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
+  friend class VMRangeSink;
+
+  RangeMap vm_map_;
+  RangeMap file_map_;
+  std::unordered_map<std::string, std::string> aliases_;
+  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
+};
 
 void MemoryMap::FillInUnmapped(long filesize) {
-  file_map_->Fill(filesize, "[Unmapped]");
+  file_map_.Fill(filesize, "[Unmapped]");
 }
 
 void MemoryMap::AddRegex(const std::string& regex, const std::string& replacement) {
@@ -701,8 +732,35 @@ bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
 
 // MemoryFileMap ///////////////////////////////////////////////////////////////
 
-MemoryFileMap::MemoryFileMap() {}
-MemoryFileMap::~MemoryFileMap() {}
+// A MemoryMap for things like segments and sections, where every range exists
+// in both VM space and file space.  We can use MemoryFileMaps to translate VM
+// addresses into file offsets.
+class MemoryFileMap : public MemoryMap {
+ public:
+  MemoryFileMap() {}
+  virtual ~MemoryFileMap() {}
+
+  void AddRange(const std::string& name, uintptr_t vmaddr, size_t vmsize,
+                long fileoff, long filesize);
+
+  // Translates a VM address to a file offset.  Returns false if this VM address
+  // is not mapped from the file.
+  bool TranslateVMAddress(uintptr_t vmaddr, uintptr_t* fileoff) const;
+
+  // Translates a VM address range to a file offset range.  Returns false if
+  // nothing in this VM address range is mapped into a file.
+  //
+  // This VM address range may not translate to multiple discrete file ranges.
+  // We generally would never expect this to happen.
+  bool TranslateVMRange(uintptr_t vmaddr, size_t vmsize,
+                        uintptr_t* fileoff, uintptr_t* filesize) const;
+
+ private:
+  // Maps each vm_map_ start address to a corresponding file_map_ start address.
+  // If a given vm_map_ start address is missing from the map, it does not come
+  // from the file.
+  std::unordered_map<uintptr_t, uintptr_t> vm_to_file_;
+};
 
 void MemoryFileMap::AddRange(const std::string& name,
                              uintptr_t vmaddr, size_t vmsize,
@@ -786,11 +844,12 @@ bool MemoryFileMap::TranslateVMRange(uintptr_t vmaddr, size_t vmsize,
 }
 
 
-// VMRangeAdder ////////////////////////////////////////////////////////////////
+// VMRangeSink ////////////////////////////////////////////////////////////////
 
 // Adds a region to the memory map.  It should not overlap any previous
 // region added with Add(), but it should overlap the base memory map.
-void VMRangeAdder::AddVMRange(uintptr_t vmaddr, size_t vmsize, const std::string& name) {
+void VMRangeSink::AddVMRange(uintptr_t vmaddr, size_t vmsize,
+                             const std::string& name) {
   if (vmsize == 0) {
     return;
   }
@@ -816,8 +875,8 @@ void VMRangeAdder::AddVMRange(uintptr_t vmaddr, size_t vmsize, const std::string
   }
 }
 
-void VMRangeAdder::AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
-                                        const std::string& name) {
+void VMRangeSink::AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
+                                       const std::string& name) {
   size_t existing_size;
   const auto existing = map_->vm_map()->TryGetExactly(vmaddr, &existing_size);
   if (existing) {
@@ -831,8 +890,8 @@ void VMRangeAdder::AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
   }
 }
 
-void VMRangeAdder::AddVMRangeIgnoreDuplicate(uintptr_t vmaddr, size_t vmsize,
-                                             const std::string& name) {
+void VMRangeSink::AddVMRangeIgnoreDuplicate(uintptr_t vmaddr, size_t vmsize,
+                                            const std::string& name) {
   if (vmsize == 0) {
     return;
   }
@@ -845,6 +904,13 @@ void VMRangeAdder::AddVMRangeIgnoreDuplicate(uintptr_t vmaddr, size_t vmsize,
   }
 }
 
+
+// VMFileRangeSink /////////////////////////////////////////////////////////////
+
+void VMFileRangeSink::AddRange(const std::string& name, uintptr_t vmaddr,
+                               size_t vmsize, long fileoff, long filesize) {
+  map_->AddRange(name, vmaddr, vmsize, fileoff, filesize);
+}
 
 // Bloaty //////////////////////////////////////////////////////////////////////
 
@@ -932,14 +998,14 @@ void Bloaty::AddDataSource(const std::string& name) {
 
   sources_.push_back(&it->second);
   switch (it->second.type) {
-    case DataSource::DATA_SOURCE_MAP: {
+    case DataSource::DATA_SOURCE_VM_RANGE: {
       std::unique_ptr<MemoryMap> map(new MemoryMap());
       maps_by_name_[name] = map.get();
       maps_.push_back(std::move(map));
       break;
     }
 
-    case DataSource::DATA_SOURCE_FILEMAP: {
+    case DataSource::DATA_SOURCE_VM_FILE_RANGE: {
       std::unique_ptr<MemoryFileMap> map(new MemoryFileMap());
       maps_by_name_[name] = map.get();
       maps_.push_back(std::move(map));
@@ -965,23 +1031,26 @@ void Bloaty::ScanDataSources() {
   // Always scan segments first (even if we're not displaying it) because we use
   // it for VM -> File address translation.
   auto it = sources_map_.find("segments");
-  if (it == sources_map_.end()) {
+  if (it == sources_map_.end() ||
+      it->second.type != DataSource::DATA_SOURCE_VM_FILE_RANGE) {
     std::cerr << "bloaty: no segments data source, can't translate VM->File.\n";
     exit(1);
   }
-  it->second.func.filemap(filename_, &segment_map_);
+  VMFileRangeSink segment_sink(&segment_map_);
+  it->second.func.vm_file_range(filename_, &segment_sink);
 
   for (size_t i = 0; i < sources_.size(); i++) {
     switch (sources_[i]->type) {
-      case DataSource::DATA_SOURCE_MAP: {
-        VMRangeAdder adder(maps_[i].get(), &segment_map_);
-        sources_[i]->func.map(filename_, &adder);
+      case DataSource::DATA_SOURCE_VM_RANGE: {
+        VMRangeSink sink(maps_[i].get(), &segment_map_);
+        sources_[i]->func.vm_range(filename_, &sink);
         break;
       }
 
-      case DataSource::DATA_SOURCE_FILEMAP: {
+      case DataSource::DATA_SOURCE_VM_FILE_RANGE: {
         auto map = static_cast<MemoryFileMap*>(maps_[i].get());
-        sources_[i]->func.filemap(filename_, map);
+        VMFileRangeSink sink(map);
+        sources_[i]->func.vm_file_range(filename_, &sink);
         if (i == 0) {
           map->FillInUnmapped(GetFileSize(filename_));
         }

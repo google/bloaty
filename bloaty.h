@@ -32,53 +32,14 @@
 
 namespace bloaty {
 
-class RangeMap;
 class MemoryFileMap;
-class VMRangeAdder;
+class MemoryMap;
 
-// Contains a [range] -> label map for VM space and file space.
-class MemoryMap {
+// A VMFileRangeSink allows data sources like "segments" or "sections" to add
+// ranges to our map that exist in *both* VM space and File space.
+class VMFileRangeSink {
  public:
-  MemoryMap();
-  virtual ~MemoryMap();
-
-  // For the file space mapping, Fills in generic "Unmapped" sections for
-  // portions of the file that have no mapping.
-  void FillInUnmapped(long filesize);
-
-  // Adds a regex that will be applied to all labels prior to inserting them in
-  // the map.  All regexes will be applied in sequence.
-  void AddRegex(const std::string& regex, const std::string& replacement);
-
-  bool FindAtAddr(uintptr_t vmaddr, std::string* name) const;
-  bool FindContainingAddr(uintptr_t vmaddr, uintptr_t* start,
-                          std::string* name) const;
-
-  const RangeMap* file_map() const { return file_map_.get(); }
-  const RangeMap* vm_map() const { return vm_map_.get(); }
-  RangeMap* file_map() { return file_map_.get(); }
-  RangeMap* vm_map() { return vm_map_.get(); }
-
- protected:
-  std::string ApplyNameRegexes(const std::string& name);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
-  friend class VMRangeAdder;
-
-  std::unique_ptr<RangeMap> vm_map_;
-  std::unique_ptr<RangeMap> file_map_;
-  std::unordered_map<std::string, std::string> aliases_;
-  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
-};
-
-// A MemoryMap for things like segments and sections, where every range exists
-// in both VM space and file space.  We can use MemoryFileMaps to translate VM
-// addresses into file offsets.
-class MemoryFileMap : public MemoryMap {
- public:
-  MemoryFileMap();
-  virtual ~MemoryFileMap();
+  VMFileRangeSink(MemoryFileMap* map) : map_(map) {}
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
@@ -86,30 +47,17 @@ class MemoryFileMap : public MemoryMap {
   void AddRange(const std::string& name, uintptr_t vmaddr, size_t vmsize,
                 long fileoff, long filesize);
 
-  // Translates a VM address to a file offset.  Returns false if this VM address
-  // is not mapped from the file.
-  bool TranslateVMAddress(uintptr_t vmaddr, uintptr_t* fileoff) const;
-
-  // Translates a VM address range to a file offset range.  Returns false if
-  // nothing in this VM address range is mapped into a file.
-  //
-  // This VM address range may not translate to multiple discrete file ranges.
-  // We generally would never expect this to happen.
-  bool TranslateVMRange(uintptr_t vmaddr, size_t vmsize,
-                        uintptr_t* fileoff, uintptr_t* filesize) const;
-
  private:
-  // Maps each vm_map_ start address to a corresponding file_map_ start address.
-  // If a given vm_map_ start address is missing from the map, it does not come
-  // from the file.
-  std::unordered_map<uintptr_t, uintptr_t> vm_to_file_;
+  MemoryFileMap* map_;
 };
 
-// Allows adding ranges by VM addr/size only.  Uses an underlying MemoryFileMap
-// to translate the VM addresses to file addresses.
-class VMRangeAdder {
+// A VMRangeSink allows data sources like "symbols" to add ranges to our map.
+// These ranges are in virtual memory (VM) space only.  If we want to know the
+// effect on file size we must map these ranges into file space using mappings
+// like "segments" or "sections" which know the VM -> File address tranlsation.
+class VMRangeSink {
  public:
-  VMRangeAdder(MemoryMap* map, const MemoryFileMap* translator)
+  VMRangeSink(MemoryMap* map, const MemoryFileMap* translator)
       : map_(map), translator_(translator) {}
 
   // Adds a region to the memory map.  It should not overlap any previous
@@ -169,8 +117,8 @@ class DependencyMap {
 // symbols, etc) registers itself as a data source.
 struct DataSource {
   enum Type {
-    DATA_SOURCE_MAP,     // Data source fills a MemoryMap.
-    DATA_SOURCE_FILEMAP  // Data source fills a MemoryFileMap.
+    DATA_SOURCE_VM_RANGE,      // Data source fills a VMRangeSink.
+    DATA_SOURCE_VM_FILE_RANGE  // Data source fills a VMFileRangeSink.
   };
 
   DataSource(Type type_, const std::string& name_) : type(type_), name(name_) {}
@@ -180,29 +128,28 @@ struct DataSource {
   // The name, as specified on the command-line
   std::string name;
 
-  typedef void VMRangeAdderFunc(const std::string& filename,
-                                VMRangeAdder* adder);
-  typedef void MemoryFileMapFunc(
-      const std::string& filename, MemoryFileMap* map);
+  typedef void VMRangeFunc(const std::string& filename, VMRangeSink* sink);
+  typedef void VMFileRangeFunc(const std::string& filename,
+                               VMFileRangeSink* map);
 
   // The function that will populate the data structure.
   union {
-    VMRangeAdderFunc *map;
-    MemoryFileMapFunc *filemap;
+    VMRangeFunc *vm_range;
+    VMFileRangeFunc *vm_file_range;
   } func;
 };
 
-inline DataSource VMRangeAdderDataSource(const std::string& name,
-                                         DataSource::VMRangeAdderFunc* func) {
-  DataSource ret(DataSource::DATA_SOURCE_MAP, name);
-  ret.func.map = func;
+inline DataSource VMRangeDataSource(const std::string& name,
+                                    DataSource::VMRangeFunc* func) {
+  DataSource ret(DataSource::DATA_SOURCE_VM_RANGE, name);
+  ret.func.vm_range = func;
   return ret;
 }
 
-inline DataSource MemoryFileMapDataSource(const std::string& name,
-                                          DataSource::MemoryFileMapFunc* func) {
-  DataSource ret(DataSource::DATA_SOURCE_FILEMAP, name);
-  ret.func.filemap = func;
+inline DataSource VMFileRangeDataSource(const std::string& name,
+                                        DataSource::VMFileRangeFunc* func) {
+  DataSource ret(DataSource::DATA_SOURCE_VM_FILE_RANGE, name);
+  ret.func.vm_file_range = func;
   return ret;
 }
 
@@ -211,8 +158,8 @@ void RegisterELFDataSources(std::vector<DataSource>* sources);
 void RegisterMachODataSources(std::vector<DataSource>* sources);
 
 // Provided by dwarf.cc.
-void ReadDWARFSourceFiles(const std::string& filename, VMRangeAdder* adder);
-void ReadDWARFLineInfo(const std::string& filename, VMRangeAdder* adder,
+void ReadDWARFSourceFiles(const std::string& filename, VMRangeSink* sink);
+void ReadDWARFLineInfo(const std::string& filename, VMRangeSink* sink,
                        bool include_line);
 
 
