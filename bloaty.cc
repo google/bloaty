@@ -334,7 +334,8 @@ class Rollup {
 
   void AddSizes(const std::vector<std::string> names,
                 size_t size, bool is_vmsize) {
-    AddInternal(names, 0, size, is_vmsize);
+    // We start at 1 to exclude the base map (see base_map_).
+    AddInternal(names, 1, size, is_vmsize);
   }
 
   // Prints a graphical representation of the rollup.
@@ -470,11 +471,11 @@ void Rollup::RollupRow::Print(size_t indent, size_t longest_label) const {
   if (indent == 0) {
     printf("     VM SIZE    ");
     PrintSpaces(longest_label);
-    printf("    FILE SIZE   ");
+    printf("    FILE SIZE");
     printf("\n");
-    printf(" -------------- ");
+    printf(" --------------");
     PrintSpaces(longest_label);
-    printf(" -------------- ");
+    printf(" --------------");
     printf("\n");
   }
 
@@ -557,9 +558,12 @@ const std::string* RangeMap::TryGetExactly(uintptr_t addr, size_t* size) const {
 
 bool RangeMap::AddRange(uintptr_t addr, size_t size, const std::string& val) {
   // XXX: properly test the whole range, not just the two endpoints.
-  if (TryGet(addr, nullptr, nullptr) ||
-      TryGet(addr + size - 1, nullptr, nullptr)) {
-    return false;
+  const std::string* existing;
+  if ((existing = TryGet(addr, nullptr, nullptr)) != nullptr ||
+      (existing = TryGet(addr + size - 1, nullptr, nullptr)) != nullptr) {
+    if (*existing != val) {
+      return false;
+    }
   }
   mappings_[addr] = std::make_pair(std::move(val), size);
   return true;
@@ -672,10 +676,6 @@ class MemoryMap {
   MemoryMap() {}
   virtual ~MemoryMap() {}
 
-  // For the file space mapping, Fills in generic "Unmapped" sections for
-  // portions of the file that have no mapping.
-  void FillInUnmapped(long filesize);
-
   // Adds a regex that will be applied to all labels prior to inserting them in
   // the map.  All regexes will be applied in sequence.
   void AddRegex(const std::string& regex, const std::string& replacement);
@@ -701,10 +701,6 @@ class MemoryMap {
   std::unordered_map<std::string, std::string> aliases_;
   std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
 };
-
-void MemoryMap::FillInUnmapped(long filesize) {
-  file_map_.Fill(filesize, "[Unmapped]");
-}
 
 void MemoryMap::AddRegex(const std::string& regex, const std::string& replacement) {
   std::unique_ptr<RE2> re2(new RE2(regex));
@@ -863,9 +859,6 @@ void VMRangeSink::AddVMRange(uintptr_t vmaddr, size_t vmsize,
     if (!existing) {
       existing = map_->vm_map()->TryGet(vmaddr + vmsize - 1, &vmstart, &vm_region_size);
     }
-    if (!existing) {
-      std::cerr << "WTF?????????????????????????\n";
-    }
     std::cerr << "Existing mapping: " << *existing << "=[" << vmstart << ", " << vm_region_size<< "]\n";
   }
   if (translator_->TranslateVMRange(vmaddr, vmsize, &fileoff, &filesize)) {
@@ -933,7 +926,7 @@ class Bloaty {
   static long GetFileSize(const std::string& filename);
 
   std::map<std::string, DataSource> sources_map_;
-  MemoryFileMap segment_map_;
+  MemoryFileMap base_map_;
   std::vector<std::unique_ptr<MemoryMap>> maps_;
   std::vector<const DataSource*> sources_;
   std::map<std::string, MemoryMap*> maps_by_name_;
@@ -942,6 +935,16 @@ class Bloaty {
 
 void Bloaty::GetRangeMaps(std::vector<const RangeMap*>* maps, bool is_vm) {
   maps->clear();
+
+  // Start with the base map, so that any unaccounted space is shown as [None]
+  // instead of just being missing from the totals.  The rollup will discard
+  // this so it's not actually visible.
+  if (is_vm) {
+    maps->push_back(base_map_.vm_map());
+  } else {
+    maps->push_back(base_map_.file_map());
+  }
+
   for (const auto& map : maps_) {
     if (is_vm) {
       maps->push_back(map->vm_map());
@@ -1036,13 +1039,15 @@ void Bloaty::ScanDataSources() {
     std::cerr << "bloaty: no segments data source, can't translate VM->File.\n";
     exit(1);
   }
-  VMFileRangeSink segment_sink(&segment_map_);
+  VMFileRangeSink segment_sink(&base_map_);
   it->second.func.vm_file_range(filename_, &segment_sink);
+  size_t file_size = GetFileSize(filename_);
+  base_map_.file_map()->Fill(file_size, "[Unmapped]");
 
   for (size_t i = 0; i < sources_.size(); i++) {
     switch (sources_[i]->type) {
       case DataSource::DATA_SOURCE_VM_RANGE: {
-        VMRangeSink sink(maps_[i].get(), &segment_map_);
+        VMRangeSink sink(maps_[i].get(), &base_map_);
         sources_[i]->func.vm_range(filename_, &sink);
         break;
       }
@@ -1051,9 +1056,6 @@ void Bloaty::ScanDataSources() {
         auto map = static_cast<MemoryFileMap*>(maps_[i].get());
         VMFileRangeSink sink(map);
         sources_[i]->func.vm_file_range(filename_, &sink);
-        if (i == 0) {
-          map->FillInUnmapped(GetFileSize(filename_));
-        }
         break;
       }
 
