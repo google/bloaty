@@ -33,7 +33,7 @@ bool StartsWith(const std::string& haystack, const std::string& needle) {
   return !haystack.compare(0, needle.length(), needle);
 }
 
-static void ParseMachOSymbols(const std::string& filename, MemoryMap* map) {
+static void ParseMachOSymbols(const std::string& filename, VMRangeSink* sink) {
   std::string cmd = std::string("symbols -noSources -noDemangling ") + filename;
 
   // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
@@ -52,7 +52,7 @@ static void ParseMachOSymbols(const std::string& filename, MemoryMap* map) {
         continue;
       }
 
-      map->AddVMRange(addr, size, name);
+      sink->AddVMRange(addr, size, name);
     }
   }
 }
@@ -149,7 +149,7 @@ static void ParseMachODisassembly(const std::string& filename,
 #endif
 
 static void ParseMachOSegments(const std::string& filename,
-                               MemoryFileMap* map) {
+                               VMFileRangeSink* sink) {
   // Load command 2
   //       cmd LC_SEGMENT_64
   //   cmdsize 632
@@ -197,7 +197,7 @@ static void ParseMachOSegments(const std::string& filename,
         fileoff = val;
       } else if (key == "filesize") {
         filesize = val;
-        map->AddFileRange(segname, vmaddr, vmsize, fileoff, filesize);
+        sink->AddRange(segname, vmaddr, vmsize, fileoff, filesize);
       } else if (key == "entryoff") {
         /*
         Object* entry = sink->FindObjectByAddr(first_text_vmaddr + val);
@@ -220,7 +220,7 @@ static void ParseMachOSegments(const std::string& filename,
 }
 
 static void ParseMachOSections(const std::string& filename,
-                               MemoryFileMap* map) {
+                               VMFileRangeSink* sink) {
   // Section
   //   sectname __text
   //    segname __TEXT
@@ -271,7 +271,7 @@ static void ParseMachOSections(const std::string& filename,
         }
 
         std::string label = segname + "," + sectname;
-        map->AddFileRange(label, addr, size, offset, filesize);
+        sink->AddRange(label, addr, size, offset, filesize);
 
         sectname.clear();
         segname.clear();
@@ -290,9 +290,9 @@ static void ParseMachOSections(const std::string& filename,
 }
 
 void RegisterMachODataSources(std::vector<DataSource>* sources) {
-  sources->push_back(MemoryFileMapDataSource("segments", ParseMachOSegments));
-  sources->push_back(MemoryFileMapDataSource("sections", ParseMachOSections));
-  sources->push_back(MemoryMapDataSource("symbols", ParseMachOSymbols));
+  sources->push_back(VMFileRangeDataSource("segments", ParseMachOSegments));
+  sources->push_back(VMFileRangeDataSource("sections", ParseMachOSections));
+  sources->push_back(VMRangeDataSource("symbols", ParseMachOSymbols));
 }
 
 }  // namespace bloaty

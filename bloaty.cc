@@ -29,7 +29,6 @@
 #include <sys/wait.h>
 
 #include "re2/re2.h"
-#include "leveldb/table.h"
 #include <assert.h>
 
 #include "bloaty.h"
@@ -47,6 +46,15 @@ namespace bloaty {
 
 std::string* name_path;
 const size_t kMaxLabelLen = 80;
+
+bool IsWhitespace(const std::string& str) {
+  for (size_t i = 0; i < str.size(); i++) {
+    if (!isspace(str[i])) {
+      return false;
+    }
+  }
+  return true;
+}
 
 void PrintSpaces(size_t n) {
   for (size_t i = 0; i < n; i++) {
@@ -81,7 +89,7 @@ std::string DoubleStringPrintf(const char *fmt, double d) {
 }
 
 std::string SiPrint(size_t size) {
-  const char *prefixes[] = {"", "k", "M", "G", "T"};
+  const char *prefixes[] = {"", "K", "M", "G", "T"};
   int n = 0;
   double size_d = size;
   while (size_d > 1024) {
@@ -180,16 +188,28 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 class NameStripper {
  public:
   bool StripName(const std::string& name) {
-    // XXX: bloaty::(anonymous namespace)::ReadELFSegments(std::basic_string
-    size_t paren = name.find_first_of('(');
-    if (paren == std::string::npos) {
+    if (name[name.size() - 1] != ')') {
+      // (anonymous namespace)::ctype_w
       stripped_ = &name;
       return false;
-    } else {
-      storage_ = name.substr(0, paren);
-      stripped_ = &storage_;
-      return true;
     }
+
+    int nesting = 0;
+    for (size_t n = name.size() - 1; n < name.size(); --n) {
+      if (name[n] == '(') {
+        if (--nesting == 0) {
+          storage_ = name.substr(0, n);
+          stripped_ = &storage_;
+          return true;
+        }
+      } else if (name[n] == ')') {
+        ++nesting;
+      }
+    }
+
+
+    stripped_ = &name;
+    return false;
   }
 
   const std::string& stripped() { return *stripped_; }
@@ -703,7 +723,7 @@ class MemoryMap {
 };
 
 void MemoryMap::AddRegex(const std::string& regex, const std::string& replacement) {
-  std::unique_ptr<RE2> re2(new RE2(regex));
+  std::unique_ptr<RE2> re2(new RE2(re2::StringPiece(regex)));
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
@@ -986,7 +1006,8 @@ Bloaty::Bloaty() {
 
 void Bloaty::SetFilename(const std::string& filename) {
   if (!filename_.empty()) {
-    std::cerr << "Only one filename can be specified.\n";
+    std::cerr << "Only one filename can be specified (had: '" << filename_
+              << "', setting: '" << std::hex << (int)filename[0] << "')\n";
     exit(1);
   }
   filename_ = filename;
@@ -1109,7 +1130,9 @@ int main(int argc, char *argv[]) {
   RE2 regex_pattern("(\\w+)\\+=/(.*)/(.*)/");
 
   for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-d") == 0) {
+    if (IsWhitespace(argv[i])) {
+      continue;
+    } else if (strcmp(argv[i], "-d") == 0) {
       std::vector<std::string> names;
       Split(argv[++i], ',', &names);
       for (const auto& name : names) {

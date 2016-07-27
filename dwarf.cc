@@ -684,7 +684,7 @@ class Reader {
       DieWithDwarfError(err);
     } else if (result == DW_DLV_OK) {
       for (Dwarf_Signed i = 0; i < arange_count; i++) {
-        out->push_back(std::move(AddressRange(dwarf_, aranges[i])));
+        out->push_back(AddressRange(dwarf_, aranges[i]));
       }
       dwarf_dealloc(dwarf_, aranges, DW_DLA_LIST);
     }

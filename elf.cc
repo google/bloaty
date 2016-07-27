@@ -51,13 +51,21 @@ static void ReadELFSymbols(
   //     37: 0000000000443120   128 OBJECT  LOCAL  DEFAULT   15 _ZZN3re23DFA14FastSearchL
   RE2 pattern(R"(\s*\d+: ([0-9a-f]+)\s+([0-9]+) ([A-Z]+)\s+[A-Z]+\s+[A-Z]+\s+([A-Z0-9]+) (\S+))");
 
+  // Large symbols get printed slightly differently (notice the 0x):
+  //
+  //   5898: 00000000001a4d80 0x801058 OBJECT  GLOBAL DEFAULT   33 _ZN8tcmalloc6Static9pageheap_E
+  RE2 pattern_large(R"(\s*\d+: ([0-9a-f]+)\s+0x([0-9a-f]+) ([A-Z]+)\s+[A-Z]+\s+[A-Z]+\s+([A-Z0-9]+) (\S+))");
+
   for (auto& line : ReadLinesFromPipe(cmd)) {
     std::string name;
     std::string type;
     std::string ndx;
     size_t addr, size;
 
-    if (RE2::FullMatch(line, pattern, RE2::Hex(&addr), &size, &type, &ndx, &name)) {
+    if (RE2::FullMatch(line, pattern, RE2::Hex(&addr), &size, &type, &ndx,
+                       &name) ||
+        RE2::FullMatch(line, pattern_large, RE2::Hex(&addr), RE2::Hex(&size),
+                       &type, &ndx, &name)) {
       // We can't skip symbols of size 0 because some symbols appear to
       // have size 0 in the symbol table even though their true size appears to
       // be clearly greater than zero.  For example:
