@@ -33,7 +33,6 @@
 #include <assert.h>
 
 #include "bloaty.h"
-//#include "base/init_google.h"
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -71,6 +70,15 @@ std::string FixedWidthString(const std::string& input, size_t size) {
   }
 }
 
+std::string LeftPad(const std::string& input, size_t size) {
+  std::string ret = input;
+  while (ret.size() < size) {
+    ret = " " + ret;
+  }
+
+  return ret;
+}
+
 std::string DoubleStringPrintf(const char *fmt, double d) {
   char buf[1024];
   snprintf(buf, sizeof(buf), fmt, d);
@@ -86,23 +94,42 @@ std::string SiPrint(ssize_t size, bool force_sign) {
     n++;
   }
 
+  std::string ret;
+
   if (fabs(size_d) > 100 || n == 0) {
-    std::string ret = std::to_string(static_cast<ssize_t>(size_d)) + prefixes[n];
+    ret = std::to_string(static_cast<ssize_t>(size_d)) + prefixes[n];
     if (force_sign && size > 0) {
       ret = "+" + ret;
     }
-    return ret;
   } else if (fabs(size_d) > 10) {
     if (force_sign) {
-      return DoubleStringPrintf("%+0.1f", size_d) + prefixes[n];
+      ret = DoubleStringPrintf("%+0.1f", size_d) + prefixes[n];
     } else {
-      return DoubleStringPrintf("%0.1f", size_d) + prefixes[n];
+      ret = DoubleStringPrintf("%0.1f", size_d) + prefixes[n];
     }
   } else {
     if (force_sign) {
-      return DoubleStringPrintf("%+0.2f", size_d) + prefixes[n];
+      ret = DoubleStringPrintf("%+0.2f", size_d) + prefixes[n];
     } else {
-      return DoubleStringPrintf("%0.2f", size_d) + prefixes[n];
+      ret = DoubleStringPrintf("%0.2f", size_d) + prefixes[n];
+    }
+  }
+
+  return LeftPad(ret, 7);
+}
+
+std::string PercentString(double percent, bool force_sign) {
+  if (percent == 0 || isnan(percent)) {
+    return " [ = ]";
+  } else if (percent == -100) {
+    return " [DEL]";
+  } else if (isinf(percent)) {
+    return " [NEW]";
+  } else {
+    if (force_sign) {
+      return DoubleStringPrintf("%+5.1F%%", percent);
+    } else {
+      return DoubleStringPrintf("%5.1F%%", percent);
     }
   }
 }
@@ -397,14 +424,14 @@ class Rollup {
   // Prints a graphical representation of the rollup.
   void PrintWithBase() const { PrintWithBase(nullptr); }
   void PrintWithBase(Rollup* base) const {
-    RollupRow row("");
+    RollupRow row("TOTAL");
     row.vmsize = vm_total_;
     row.filesize = file_total_;
     row.vmpercent = 100;
     row.filepercent = 100;
     size_t longest_label = 0;
     ComputeRows(0, &row, &longest_label, base, base != nullptr);
-    row.Print(0, longest_label);
+    row.PrintTree(0, longest_label, true);
   }
 
   // Subtract the values in "other" from this.
@@ -466,6 +493,7 @@ class Rollup {
     std::vector<RollupRow> sorted_children;
 
     void Print(size_t indent, size_t longest_label) const;
+    void PrintTree(size_t indent, size_t longest_label, bool is_base) const;
   };
 
   void ComputeRows(size_t indent, RollupRow* row, size_t* longest_label,
@@ -550,6 +578,7 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row, size_t* longest_label,
     auto demangled = demangler.Demangle(child_row.name);
     stripper.StripName(demangled);
     size_t allowed_label_len = std::min(stripper.stripped().size(), kMaxLabelLen);
+    child_row.name = stripper.stripped();
     *longest_label = std::max(*longest_label, allowed_label_len + indent);
     if (!has_base) {
       child_row.vmpercent = Percent(child_row.vmsize, row->vmsize);
@@ -561,53 +590,41 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row, size_t* longest_label,
 }
 
 void Rollup::RollupRow::Print(size_t indent, size_t longest_label) const {
+  std::cout << FixedWidthString("", indent) << " "
+            << PercentString(vmpercent, has_base) << " "
+            << SiPrint(vmsize, has_base) << " "
+            << FixedWidthString(name, longest_label) << " "
+            << SiPrint(filesize, has_base) << " "
+            << PercentString(filepercent, has_base) << "\n";
+}
+
+void Rollup::RollupRow::PrintTree(size_t indent, size_t longest_label,
+                                  bool is_base) const {
   NameStripper stripper;
   Demangler demangler;
 
-  if (indent == 0) {
+  if (is_base) {
     printf("     VM SIZE    ");
     PrintSpaces(longest_label);
     printf("    FILE SIZE");
     printf("\n");
-    printf(" --------------");
+    printf(" -------------- ");
     PrintSpaces(longest_label);
     printf(" --------------");
     printf("\n");
   }
 
-  for (const auto& child : sorted_children) {
-    auto demangled = demangler.Demangle(child.name);
-    stripper.StripName(demangled);
-    if (has_base) {
-      printf("%s %+5.1F%%  %7s %s %7s  %+5.1F%%\n",
-             FixedWidthString("", indent).c_str(), child.vmpercent,
-             SiPrint(child.vmsize, true).c_str(),
-             FixedWidthString(stripper.stripped(), longest_label).c_str(),
-             SiPrint(child.filesize, true).c_str(), child.filepercent);
-    } else {
-      printf("%s %5.1F%%  %6s %s %6s  %5.1F%%\n",
-             FixedWidthString("", indent).c_str(), child.vmpercent,
-             SiPrint(child.vmsize, false).c_str(),
-             FixedWidthString(stripper.stripped(), longest_label).c_str(),
-             SiPrint(child.filesize, false).c_str(), child.filepercent);
-    }
-    child.Print(indent + 4, longest_label);
+  if (!is_base) {
+    Print(indent, longest_label);
   }
 
-  if (indent == 0) {
-    if (has_base) {
-      printf("%s %+5.1F%%  %7s %s %7s  %+5.1F%%\n",
-             FixedWidthString("", indent).c_str(), vmpercent,
-             SiPrint(vmsize, true).c_str(),
-             FixedWidthString("TOTAL", longest_label).c_str(),
-             SiPrint(filesize, true).c_str(), filepercent);
-    } else {
-      printf("%s %5.1F%%  %6s %s %6s  %5.1F%%\n",
-             FixedWidthString("", indent).c_str(), vmpercent,
-             SiPrint(vmsize, false).c_str(),
-             FixedWidthString("TOTAL", longest_label).c_str(),
-             SiPrint(filesize, false).c_str(), filepercent);
-    }
+  for (const auto& child : sorted_children) {
+    child.PrintTree(is_base ? indent : indent + 4, longest_label, false);
+  }
+
+  // The "TOTAL" row comes after all other rows.
+  if (is_base) {
+    Print(indent, longest_label);
   }
 }
 
