@@ -31,10 +31,49 @@ namespace {
 // - nm: display symbols
 // - size: display binary size
 
-static size_t AlignUpTo(size_t offset, size_t granularity) {
+static uint64_t AlignUpTo(uint64_t offset, uint64_t granularity) {
   return offset;
   // Granularity must be a power of two.
   return (offset + granularity - 1) & ~(granularity - 1);
+}
+
+// For object files, addresses are relative to the section they live in, which
+// is indicated by ndx.  We split this into:
+//
+// - 24 bits for index (up to 16M symbols with -ffunction-sections)
+// - 40 bits for address (up to 1TB section)
+static uint64_t ToVMAddr(size_t addr, long ndx, bool is_object) {
+  if (is_object) {
+    return (ndx << 40) | addr;
+  } else {
+    return addr;
+  }
+}
+
+static bool IsObjectFile(const std::string& filename) {
+  // Type:                              REL (Relocatable file)
+  RE2 pattern(R"(Type:\s+(\w+))");
+
+  for (auto& line : ReadLinesFromPipe("readelf -h " + filename)) {
+    std::string type;
+
+    if (RE2::PartialMatch(line, pattern, &type)) {
+      return type == "REL";
+    }
+  }
+  fprintf(stderr, "bloaty: couldn't tell whether %s was an object file.\n",
+          filename.c_str());
+  return false;
+}
+
+static void CheckNotObject(const std::string& filename, const char *source) {
+  if (IsObjectFile(filename)) {
+    fprintf(stderr,
+            "bloaty: can't use data source '%s' on object files (only binaries "
+            "and shared libraries)\n",
+            source);
+    exit(1);
+  }
 }
 
 static void ReadELFSymbols(
@@ -56,6 +95,9 @@ static void ReadELFSymbols(
   //   5898: 00000000001a4d80 0x801058 OBJECT  GLOBAL DEFAULT   33 _ZN8tcmalloc6Static9pageheap_E
   RE2 pattern_large(R"(\s*\d+: ([0-9a-f]+)\s+0x([0-9a-f]+) ([A-Z]+)\s+[A-Z]+\s+[A-Z]+\s+([A-Z0-9]+) (\S+))");
 
+  std::unordered_map<size_t, size_t> section_index;
+  bool is_object = IsObjectFile(filename);
+
   for (auto& line : ReadLinesFromPipe(cmd)) {
     std::string name;
     std::string type;
@@ -66,36 +108,39 @@ static void ReadELFSymbols(
                        &name) ||
         RE2::FullMatch(line, pattern_large, RE2::Hex(&addr), RE2::Hex(&size),
                        &type, &ndx, &name)) {
-      // We can't skip symbols of size 0 because some symbols appear to
-      // have size 0 in the symbol table even though their true size appears to
-      // be clearly greater than zero.  For example:
-      //
-      // $ readelf -s --wide
-      //  Symbol table '.symtab' contains 22833 entries:
-      //    Num:    Value          Size Type    Bind   Vis      Ndx Name
-      // [...]
-      //     10: 0000000000034450     0 FUNC    LOCAL  DEFAULT   13 __do_global_dtors_aux
-      //
-      // $ objdump -d -r -M intel
-      // 0000000000034450 <__do_global_dtors_aux>:
-      //   34450:       80 3d 69 b7 45 00 00    cmp    BYTE PTR [rip+0x45b769],0x0        # 48fbc0 <completed.6687>
-      //   34457:       75 72                   jne    344cb <__do_global_dtors_aux+0x7b>
-      if (size == 0) {
-        (*zero_size_symbols)[addr] = name;
-        continue;
-      }
+      size_t ndx_num = strtol(ndx.c_str(), NULL, 10);
 
-      if (type == "NOTYPE" || type == "TLS" || ndx == "UND" || ndx == "ABS") {
+      if (type == "NOTYPE" || type == "TLS" || ndx == "UND" || ndx == "ABS" ||
+          type == "FILE") {
         // Skip.
       } else if (name.empty()) {
         // This happens in lots of cases where there is a section like .interp
         // or .dynsym.  We could import these and let the section list refine
         // them, but they would show up as garbage symbols until we figure out
         // how to indicate that they are reachable.
-        continue;
+      } else if (size == 0) {
+        // We can't skip symbols of size 0 because some symbols appear to
+        // have size 0 in the symbol table even though their true size appears to
+        // be clearly greater than zero.  For example:
+        //
+        // $ readelf -s --wide
+        //  Symbol table '.symtab' contains 22833 entries:
+        //    Num:    Value          Size Type    Bind   Vis      Ndx Name
+        // [...]
+        //     10: 0000000000034450     0 FUNC    LOCAL  DEFAULT   13 __do_global_dtors_aux
+        //
+        // $ objdump -d -r -M intel
+        // 0000000000034450 <__do_global_dtors_aux>:
+        //   34450:       80 3d 69 b7 45 00 00    cmp    BYTE PTR [rip+0x45b769],0x0        # 48fbc0 <completed.6687>
+        //   34457:       75 72                   jne    344cb <__do_global_dtors_aux+0x7b>
+        if (size == 0) {
+          (*zero_size_symbols)[addr] = name;
+          continue;
+        }
+      } else {
+        uint64_t full_addr = ToVMAddr(addr, ndx_num, is_object);
+        sink->AddVMRangeAllowAlias(full_addr, AlignUpTo(size, 16), name);
       }
-
-      sink->AddVMRangeAllowAlias(addr, AlignUpTo(size, 16), name);
     }
   }
 }
@@ -125,16 +170,21 @@ static void ReadELFSectionsRefineSymbols(
   // table!
 
   //  [23] .ctors            PROGBITS        00000000004807e0 47f7e0 0004d0 00  WA  0   0  8
-  RE2 pattern(R"(([0-9a-f]+) (?:[0-9a-f]+) ([0-9a-f]+))");
+  RE2 pattern(R"(\[ *(\d+)\] +[.\w\-]+ +\w+ +[0-9a-f]+ (?:[0-9a-f]+) ([0-9a-f]+))");
 
+  uint32_t num;
   uintptr_t addr;
   uintptr_t size;
 
+  bool is_object = IsObjectFile(filename);
+
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
-    if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size))) {
+    if (RE2::PartialMatch(line, pattern, &num, RE2::Hex(&addr),
+                          RE2::Hex(&size))) {
       auto it = zero_size_symbols->find(addr);
       if (it != zero_size_symbols->end() && size > 0) {
-        sink->AddVMRangeAllowAlias(addr, size, it->second);
+        uint64_t full_addr = ToVMAddr(addr, num, is_object);
+        sink->AddVMRangeAllowAlias(full_addr, size, it->second);
         zero_size_symbols->erase(it);
       }
     }
@@ -149,33 +199,38 @@ static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) 
   //  [...]
   //  [23] .ctors            PROGBITS        00000000004807e0 47f7e0 0004d0 00  WA  0   0  8
 
-  RE2 pattern(R"(([.\w\-]+) +(\w+) +([0-9a-f]+) ([0-9a-f]+) ([0-9a-f]+))");
+  RE2 pattern(R"(\[ *(\d+)\] +([.\w\-]+) +(\w+) +([0-9a-f]+) ([0-9a-f]+) ([0-9a-f]+) +\S+ +(\w+))");
 
   std::string name;
   std::string type;
+  std::string flags;
+  uint32_t num;
   uintptr_t addr;
   uintptr_t off;
   size_t size;
 
+  bool is_object = IsObjectFile(filename);
+
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
-    if (RE2::PartialMatch(line, pattern, &name, &type, RE2::Hex(&addr),
-                          RE2::Hex(&off), RE2::Hex(&size))) {
+    if (RE2::PartialMatch(line, pattern, &num, &name, &type, RE2::Hex(&addr),
+                          RE2::Hex(&off), RE2::Hex(&size), &flags)) {
       if (name == "NULL") {
         continue;
       }
 
       size_t vmsize;
-      if (addr == 0) {
-        vmsize = 0;
-      } else {
+      if (flags.find("A") != std::string::npos) {
         vmsize = size;
+      } else {
+        vmsize = 0;
       }
 
       if (type == "NOBITS") {
         size = 0;
       }
 
-      sink->AddRange(name, addr, vmsize, off, size);
+      uint64_t full_addr = ToVMAddr(addr, num, is_object);
+      sink->AddRange(name, full_addr, vmsize, off, size);
     }
   }
 }
@@ -195,6 +250,13 @@ static void ReadELFSegments(const std::string& filename, VMFileRangeSink* sink) 
   size_t filesize;
   size_t memsize;
   std::string flg;
+
+  if (IsObjectFile(filename)) {
+    fprintf(stderr,
+            "bloaty: can't use 'segments' source for object files. Object "
+            "files don't have segments.\n");
+    exit(1);
+  }
 
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
     if (RE2::PartialMatch(line, load_pattern, RE2::Hex(&fileoff),
@@ -285,29 +347,24 @@ static void ReadELFSymbols(const std::string& filename, VMRangeSink* sink) {
 }
 
 // ELF files put debug info directly into the binary, so we call the DWARF
-// reader directly on them.
+// reader directly on them.  At the moment we don't attempt to make these
+// work with object files.
 
 static void ReadELFSourceFiles(const std::string& filename,
                                VMRangeSink* sink) {
+  CheckNotObject(filename, "sourcefiles");
   ReadDWARFSourceFiles(filename, sink);
 }
 
 static void ReadELFLineInfo(const std::string& filename, VMRangeSink* sink) {
+  CheckNotObject(filename, "lineinfo");
   ReadDWARFLineInfo(filename, sink, true);
 }
 
 static void ReadELFLineInfoFile(const std::string& filename,
                                 VMRangeSink* sink) {
+  CheckNotObject(filename, "lineinfo:file");
   ReadDWARFLineInfo(filename, sink, false);
-}
-
-void RegisterELFDataSources(std::vector<DataSource>* sources) {
-  sources->push_back(VMFileRangeDataSource("segments", ReadELFSegments));
-  sources->push_back(VMFileRangeDataSource("sections", ReadELFSections));
-  sources->push_back(VMRangeDataSource("symbols", ReadELFSymbols));
-  sources->push_back(VMRangeDataSource("sourcefiles", ReadELFSourceFiles));
-  sources->push_back(VMRangeDataSource("lineinfo", ReadELFLineInfo));
-  sources->push_back(VMRangeDataSource("lineinfo:file", ReadELFLineInfoFile));
 }
 
 std::string ReadBuildId(const std::string& filename) {
@@ -316,6 +373,32 @@ std::string ReadBuildId(const std::string& filename) {
 
 uintptr_t ReadEntryPoint(const std::string& filename) {
   return ReadELFEntryPoint(filename);
+}
+
+class ELFPlatform : public Platform {
+ public:
+  void RegisterDataSources(std::vector<DataSource>* sources) override {
+    sources->push_back(VMFileRangeDataSource("segments", ReadELFSegments));
+    sources->push_back(VMFileRangeDataSource("sections", ReadELFSections));
+    sources->push_back(VMRangeDataSource("symbols", ReadELFSymbols));
+    sources->push_back(VMRangeDataSource("sourcefiles", ReadELFSourceFiles));
+    sources->push_back(VMRangeDataSource("lineinfo", ReadELFLineInfo));
+    sources->push_back(VMRangeDataSource("lineinfo:file", ReadELFLineInfoFile));
+  }
+
+  void AddBaseMap(const std::string& filename, VMFileRangeSink* map) override {
+    if (IsObjectFile(filename)) {
+      ReadELFSections(filename, map);
+    } else {
+      // Slightly more complete for executables, but not present in object
+      // files.
+      ReadELFSegments(filename, map);
+    }
+  }
+};
+
+std::unique_ptr<Platform> NewELFPlatformModule() {
+  return std::unique_ptr<Platform>(new ELFPlatform());
 }
 
 }  // namespace bloaty

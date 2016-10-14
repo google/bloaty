@@ -35,6 +35,12 @@ namespace bloaty {
 class MemoryFileMap;
 class MemoryMap;
 
+// NOTE: all sizes are uint64, even on 32-bit platforms:
+//   - 32-bit platforms can have files >4GB in some cases.
+//   - for object files (not executables/shared libs) we pack both a section
+//     index and an address into the "vmaddr" value, and we need enough bits to
+//     safely do this.
+
 // A VMFileRangeSink allows data sources like "segments" or "sections" to add
 // ranges to our map that exist in *both* VM space and File space.
 class VMFileRangeSink {
@@ -44,8 +50,8 @@ class VMFileRangeSink {
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(const std::string& name, uintptr_t vmaddr, size_t vmsize,
-                long fileoff, long filesize);
+  void AddRange(const std::string& name, uint64_t vmaddr, uint64_t vmsize,
+                uint64_t fileoff, uint64_t filesize);
 
  private:
   MemoryFileMap* map_;
@@ -62,7 +68,7 @@ class VMRangeSink {
 
   // Adds a region to the memory map.  It should not overlap any previous
   // region added with Add(), but it should overlap the base memory map.
-  void AddVMRange(uintptr_t vmaddr, size_t vmsize, const std::string& name);
+  void AddVMRange(uint64_t vmaddr, uint64_t vmsize, const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
   // already under a different name.  If so, this name becomes an alias of the
@@ -70,7 +76,7 @@ class VMRangeSink {
   //
   // This is for things like symbol tables that sometimes map multiple names to
   // the same physical function.
-  void AddVMRangeAllowAlias(uintptr_t vmaddr, size_t size,
+  void AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
                             const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
@@ -80,7 +86,7 @@ class VMRangeSink {
   // come from multiple source files.  But if it does, we don't want to alias
   // the entire source file to another, because it's probably only part of the
   // source file that overlaps.
-  void AddVMRangeIgnoreDuplicate(uintptr_t vmaddr, size_t size,
+  void AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t size,
                                  const std::string& name);
 
  private:
@@ -92,7 +98,7 @@ class VMRangeSink {
 // Used by modules that know how to scan for these references.
 class AddressReferenceSink {
  public:
-  void Add(uintptr_t from, uintptr_t to);
+  void Add(uint64_t from, uint64_t to);
 };
 
 // Contains a label -> label map specifying dependencies.
@@ -153,9 +159,17 @@ inline DataSource VMFileRangeDataSource(const std::string& name,
   return ret;
 }
 
+class Platform {
+ public:
+  virtual ~Platform() {}
+  virtual void RegisterDataSources(std::vector<DataSource>* sources) = 0;
+  virtual void AddBaseMap(const std::string& filename,
+                          VMFileRangeSink* map) = 0;
+};
+
 // Provided by arch-specific platform modules.
-void RegisterELFDataSources(std::vector<DataSource>* sources);
-void RegisterMachODataSources(std::vector<DataSource>* sources);
+std::unique_ptr<Platform> NewELFPlatformModule();
+std::unique_ptr<Platform> NewMachOPlatformModule();
 
 // Provided by dwarf.cc.
 void ReadDWARFSourceFiles(const std::string& filename, VMRangeSink* sink);
