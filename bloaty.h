@@ -34,6 +34,7 @@ namespace bloaty {
 
 class MemoryFileMap;
 class MemoryMap;
+class InputFileMap;
 
 // NOTE: all sizes are uint64, even on 32-bit platforms:
 //   - 32-bit platforms can have files >4GB in some cases.
@@ -45,7 +46,15 @@ class MemoryMap;
 // ranges to our map that exist in *both* VM space and File space.
 class VMFileRangeSink {
  public:
-  VMFileRangeSink(MemoryFileMap* map) : map_(map) {}
+  VMFileRangeSink(InputFileMap* input_files)
+      : map_(nullptr), input_files_(input_files) {}
+
+  // When adding the base map, call this for all input files first.
+  void AddFile(const std::string& filename, uint64_t size);
+
+  // For files that contain multiple files inside (like .a files), call this to
+  // indicate a different filename is starting.
+  void SetFilename(const std::string& filename);
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
@@ -55,6 +64,7 @@ class VMFileRangeSink {
 
  private:
   MemoryFileMap* map_;
+  InputFileMap* input_files_;
 };
 
 // A VMRangeSink allows data sources like "symbols" to add ranges to our map.
@@ -63,8 +73,12 @@ class VMFileRangeSink {
 // like "segments" or "sections" which know the VM -> File address tranlsation.
 class VMRangeSink {
  public:
-  VMRangeSink(MemoryMap* map, const MemoryFileMap* translator)
-      : map_(map), translator_(translator) {}
+  VMRangeSink(InputFileMap* input_files)
+      : map_(nullptr), input_files_(input_files) {}
+
+  // For files that contain multiple files inside (like .a files), call this to
+  // indicate a different filename is starting.
+  void SetFilename(const std::string& filename);
 
   // Adds a region to the memory map.  It should not overlap any previous
   // region added with Add(), but it should overlap the base memory map.
@@ -92,6 +106,7 @@ class VMRangeSink {
  private:
   MemoryMap* map_;
   const MemoryFileMap* translator_;
+  InputFileMap* input_files_;
 };
 
 // An interface for adding address -> address references to a map.
@@ -232,6 +247,8 @@ class LineIterator {
 };
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
+
+uint64_t GetFileSize(const std::string& filename);
 
 }  // namespace bloaty
 

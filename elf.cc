@@ -18,6 +18,7 @@
 #include "bloaty.h"
 
 #include <assert.h>
+#include <stdlib.h>
 
 namespace bloaty {
 
@@ -32,7 +33,7 @@ namespace {
 // - size: display binary size
 
 static uint64_t AlignUpTo(uint64_t offset, uint64_t granularity) {
-  return offset;
+  return offset;  // If we allow this we sometimes span mappings.
   // Granularity must be a power of two.
   return (offset + granularity - 1) & ~(granularity - 1);
 }
@@ -48,6 +49,12 @@ static uint64_t ToVMAddr(size_t addr, long ndx, bool is_object) {
   } else {
     return addr;
   }
+}
+
+static bool IsArchiveFile(const std::string& filename) {
+  int ret = system(
+      (std::string("ar t ") + filename + " 2>/dev/null >/dev/null").c_str());
+  return ret == 0;
 }
 
 static bool IsObjectFile(const std::string& filename) {
@@ -66,19 +73,97 @@ static bool IsObjectFile(const std::string& filename) {
   return false;
 }
 
-static void CheckNotObject(const std::string& filename, const char *source) {
-  if (IsObjectFile(filename)) {
+static void CheckNotObject(const std::string& filename, const char* source,
+                           VMRangeSink* sink) {
+  if (IsArchiveFile(filename) || IsObjectFile(filename)) {
     fprintf(stderr,
             "bloaty: can't use data source '%s' on object files (only binaries "
             "and shared libraries)\n",
             source);
     exit(1);
   }
+  sink->SetFilename(filename);
 }
 
-static void ReadELFSymbols(
-    const std::string& filename, VMRangeSink* sink,
-    std::unordered_map<uintptr_t, std::string>* zero_size_symbols) {
+// Suport for .a files.  When you run objdump on a *.a file, it outputs data
+// from all of the files in sequence, but each file is preceded by a line
+// indicating the new filename.
+static bool TryParseFilename(const std::string& line, std::string* name) {
+  // File: /usr/lib/libxapian.a(serialise-double.o)
+  return RE2::FullMatch(line, R"(File: .*\((.*)\))", name);
+}
+
+static bool ReadArchiveTOC(const std::string& filename, VMFileRangeSink* sink) {
+  std::string cmd = std::string("ar tv ") + filename;
+
+  // rw-rw-r-- 0/0  57120 Dec 18 07:34 2013 compactor.o
+  RE2 pattern(R"(\S+ +\S+ +(\d+) +\w+ +\d+ +\S+ +\d+ +(.+)$)");
+
+  std::string name;
+  uint64_t size;
+
+  for (auto& line : ReadLinesFromPipe(cmd)) {
+    if (line.empty()) continue;
+    if (!RE2::FullMatch(line, pattern, &size, &name)) {
+      std::cerr << "Unexpected output line from 'ar t': " << line << "\n";
+      exit(1);
+    }
+    sink->AddFile(name, size);
+  }
+
+  return true;
+}
+
+static void AddELFOverhead(const std::string& filename, VMFileRangeSink* sink) {
+  std::string cmd = std::string("readelf -h --wide ") + filename;
+  // Start of program headers:          0 (bytes into file)
+  // Start of section headers:          989032 (bytes into file)
+  // Flags:                             0x0
+  // Size of this header:               64 (bytes)
+  // Size of program headers:           0 (bytes)
+  // Number of program headers:         0
+  // Size of section headers:           64 (bytes)
+  // Number of section headers:         7593
+
+  uint64_t phead_start = 0;
+  uint64_t shead_start = 0;
+  uint64_t header_size = 0;
+  uint64_t phead_size = 0;
+  uint64_t phead_count = 0;
+  uint64_t shead_size = 0;
+  uint64_t shead_count = 0;
+  std::string current_filename;
+
+  if (!IsArchiveFile(filename)) {
+    sink->SetFilename(filename);
+  }
+
+  for (auto& line : ReadLinesFromPipe(cmd)) {
+    if (TryParseFilename(line, &current_filename)) {
+      sink->SetFilename(current_filename);
+      continue;
+    }
+
+    RE2::PartialMatch(line, "Start of program headers: +(\\d+)", &phead_start) ||
+        RE2::PartialMatch(line, "Start of section headers: +(\\d+)", &shead_start) ||
+        RE2::PartialMatch(line, "Size of this header: +(\\d+)", &header_size) ||
+        RE2::PartialMatch(line, "Size of program headers: +(\\d+)", &phead_size) ||
+        RE2::PartialMatch(line, "Number of program headers: +(\\d+)", &phead_count) ||
+        RE2::PartialMatch(line, "Size of section headers: +(\\d+)", &shead_size);
+
+    if (RE2::PartialMatch(line, "Number of section headers: +(\\d+)", &shead_count)) {
+      sink->AddRange("[ELF Headers]", 0, 0, 0, header_size);
+      sink->AddRange("[ELF Headers]", 0, 0, phead_start,
+                     phead_size * phead_count);
+      sink->AddRange("[ELF Headers]", 0, 0, shead_start,
+                     shead_size * shead_count);
+    }
+  }
+}
+
+static void ReadELFSymbols(const std::string& filename, VMRangeSink* sink,
+                           std::map<std::pair<std::string, uintptr_t>,
+                                    std::string>* zero_size_symbols) {
   std::string cmd = std::string("readelf -s --wide ") + filename;
   // Symbol table '.symtab' contains 879 entries:
   //    Num:    Value          Size Type    Bind   Vis      Ndx Name
@@ -97,12 +182,23 @@ static void ReadELFSymbols(
 
   std::unordered_map<size_t, size_t> section_index;
   bool is_object = IsObjectFile(filename);
+  std::string current_filename;
+
+  if (!IsArchiveFile(filename)) {
+    sink->SetFilename(filename);
+    current_filename = filename;
+  }
 
   for (auto& line : ReadLinesFromPipe(cmd)) {
     std::string name;
     std::string type;
     std::string ndx;
     size_t addr, size;
+
+    if (TryParseFilename(line, &current_filename)) {
+      sink->SetFilename(current_filename);
+      continue;
+    }
 
     if (RE2::FullMatch(line, pattern, RE2::Hex(&addr), &size, &type, &ndx,
                        &name) ||
@@ -134,7 +230,7 @@ static void ReadELFSymbols(
         //   34450:       80 3d 69 b7 45 00 00    cmp    BYTE PTR [rip+0x45b769],0x0        # 48fbc0 <completed.6687>
         //   34457:       75 72                   jne    344cb <__do_global_dtors_aux+0x7b>
         if (size == 0) {
-          (*zero_size_symbols)[addr] = name;
+          (*zero_size_symbols)[std::make_pair(current_filename, addr)] = name;
           continue;
         }
       } else {
@@ -147,7 +243,8 @@ static void ReadELFSymbols(
 
 static void ReadELFSectionsRefineSymbols(
     const std::string& filename, VMRangeSink* sink,
-    std::unordered_map<uintptr_t, std::string>* zero_size_symbols) {
+    std::map<std::pair<std::string, uintptr_t>, std::string>*
+        zero_size_symbols) {
   std::string cmd = std::string("readelf -S --wide ") + filename;
   // We use the section headers to patch up the symbol table a little.
   // There are a few cases where the symbol table shows a zero size for
@@ -175,13 +272,24 @@ static void ReadELFSectionsRefineSymbols(
   uint32_t num;
   uintptr_t addr;
   uintptr_t size;
+  std::string current_filename;
 
   bool is_object = IsObjectFile(filename);
 
+  if (!IsArchiveFile(filename)) {
+    sink->SetFilename(filename);
+    current_filename = filename;
+  }
+
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
+    if (TryParseFilename(line, &current_filename)) {
+      sink->SetFilename(current_filename);
+      continue;
+    }
+
     if (RE2::PartialMatch(line, pattern, &num, RE2::Hex(&addr),
                           RE2::Hex(&size))) {
-      auto it = zero_size_symbols->find(addr);
+      auto it = zero_size_symbols->find(std::make_pair(current_filename, addr));
       if (it != zero_size_symbols->end() && size > 0) {
         uint64_t full_addr = ToVMAddr(addr, num, is_object);
         sink->AddVMRangeAllowAlias(full_addr, size, it->second);
@@ -191,7 +299,8 @@ static void ReadELFSectionsRefineSymbols(
   }
 }
 
-static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) {
+static void DoReadELFSections(const std::string& filename, VMFileRangeSink* sink,
+                              bool by_flags) {
   std::string cmd = std::string("readelf -S --wide ") + filename;
   // $ readelf -S
   // Section Headers:
@@ -199,11 +308,12 @@ static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) 
   //  [...]
   //  [23] .ctors            PROGBITS        00000000004807e0 47f7e0 0004d0 00  WA  0   0  8
 
-  RE2 pattern(R"(\[ *(\d+)\] +([.\w\-]+) +(\w+) +([0-9a-f]+) ([0-9a-f]+) ([0-9a-f]+) +\S+ +(\w+))");
+  RE2 pattern(R"(\[ *(\d+)\] +([.\w\-]+) +(\w+) +([0-9a-f]+) ([0-9a-f]+) ([0-9a-f]+) +\S+  ? ?(\w*))");
 
   std::string name;
   std::string type;
   std::string flags;
+  std::string archive_filename;
   uint32_t num;
   uintptr_t addr;
   uintptr_t off;
@@ -211,7 +321,16 @@ static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) 
 
   bool is_object = IsObjectFile(filename);
 
+  if (!IsArchiveFile(filename)) {
+    sink->SetFilename(filename);
+  }
+
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
+    if (TryParseFilename(line, &archive_filename)) {
+      sink->SetFilename(archive_filename);
+      continue;
+    }
+
     if (RE2::PartialMatch(line, pattern, &num, &name, &type, RE2::Hex(&addr),
                           RE2::Hex(&off), RE2::Hex(&size), &flags)) {
       if (name == "NULL") {
@@ -230,12 +349,29 @@ static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) 
       }
 
       uint64_t full_addr = ToVMAddr(addr, num, is_object);
+      if (by_flags) {
+        name = std::string("Section [" + flags + "]");
+      }
       sink->AddRange(name, full_addr, vmsize, off, size);
     }
   }
+
+  AddELFOverhead(filename, sink);
 }
 
 static void ReadELFSegments(const std::string& filename, VMFileRangeSink* sink) {
+  if (IsArchiveFile(filename) || IsObjectFile(filename)) {
+    // Object files don't actually have segments.  But we can cheat a little bit
+    // and make up "segments" based on section flags.  This can be really useful
+    // when you are compiling with -ffunction-sections and -fdata-sections,
+    // because in those cases the actual "sections" report becomes pretty
+    // useless (since every function/data has its own section, it's like the
+    // "symbols" report except less readable).
+    DoReadELFSections(filename, sink, true);
+    AddELFOverhead(filename, sink);
+  }
+
+  // Read real segments.
   //   Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
   //   LOAD           0x000000 0x0000000000400000 0x0000000000400000 0x19a8a9 0x19a8a9 R E 0x200000
   //
@@ -244,20 +380,14 @@ static void ReadELFSegments(const std::string& filename, VMFileRangeSink* sink) 
   RE2 load_pattern(
       R"((?:LOAD)\s+0x([0-9a-f]+) 0x([0-9a-f]+) 0x[0-9a-f]+ 0x([0-9a-f]+) 0x([0-9a-f]+) (...))");
 
+  sink->SetFilename(filename);
+
   std::string cmd = std::string("readelf -l --wide ") + filename;
   uintptr_t fileoff;
   uintptr_t vmaddr;
   size_t filesize;
   size_t memsize;
   std::string flg;
-
-  if (IsObjectFile(filename)) {
-    fprintf(stderr,
-            "bloaty: can't use 'segments' source for object files. Object "
-            "files don't have segments.\n");
-    exit(1);
-  }
-
   for ( auto& line : ReadLinesFromPipe(cmd) ) {
     if (RE2::PartialMatch(line, load_pattern, RE2::Hex(&fileoff),
                           RE2::Hex(&vmaddr), RE2::Hex(&filesize),
@@ -340,10 +470,14 @@ static uintptr_t ReadELFEntryPoint(const std::string& filename) {
 }  // namespace
 
 static void ReadELFSymbols(const std::string& filename, VMRangeSink* sink) {
-  std::unordered_map<uintptr_t, std::string> zero_size_symbols;
+  std::map<std::pair<std::string, uintptr_t>, std::string> zero_size_symbols;
 
   ReadELFSymbols(filename, sink, &zero_size_symbols);
   ReadELFSectionsRefineSymbols(filename, sink, &zero_size_symbols);
+}
+
+static void ReadELFSections(const std::string& filename, VMFileRangeSink* sink) {
+  return DoReadELFSections(filename, sink, false);
 }
 
 // ELF files put debug info directly into the binary, so we call the DWARF
@@ -352,18 +486,18 @@ static void ReadELFSymbols(const std::string& filename, VMRangeSink* sink) {
 
 static void ReadELFSourceFiles(const std::string& filename,
                                VMRangeSink* sink) {
-  CheckNotObject(filename, "sourcefiles");
+  CheckNotObject(filename, "sourcefiles", sink);
   ReadDWARFSourceFiles(filename, sink);
 }
 
 static void ReadELFLineInfo(const std::string& filename, VMRangeSink* sink) {
-  CheckNotObject(filename, "lineinfo");
+  CheckNotObject(filename, "lineinfo", sink);
   ReadDWARFLineInfo(filename, sink, true);
 }
 
 static void ReadELFLineInfoFile(const std::string& filename,
                                 VMRangeSink* sink) {
-  CheckNotObject(filename, "lineinfo:file");
+  CheckNotObject(filename, "lineinfo:file", sink);
   ReadDWARFLineInfo(filename, sink, false);
 }
 
@@ -386,13 +520,18 @@ class ELFPlatform : public Platform {
     sources->push_back(VMRangeDataSource("lineinfo:file", ReadELFLineInfoFile));
   }
 
-  void AddBaseMap(const std::string& filename, VMFileRangeSink* map) override {
-    if (IsObjectFile(filename)) {
-      ReadELFSections(filename, map);
+  void AddBaseMap(const std::string& filename, VMFileRangeSink* sink) override {
+    if (IsArchiveFile(filename)) {
+      ReadArchiveTOC(filename, sink);
+      ReadELFSections(filename, sink);
+    } else if (IsObjectFile(filename)) {
+      sink->AddFile(filename, GetFileSize(filename));
+      ReadELFSections(filename, sink);
     } else {
+      sink->AddFile(filename, GetFileSize(filename));
       // Slightly more complete for executables, but not present in object
       // files.
-      ReadELFSegments(filename, map);
+      ReadELFSegments(filename, sink);
     }
   }
 };

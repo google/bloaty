@@ -43,6 +43,19 @@
     exit(1); \
   }
 
+template<typename To, typename From>     // use like this: down_cast<T*>(foo);
+inline To down_cast(From* f) {           // so we only accept pointers
+  static_assert(
+      (std::is_base_of<From, typename std::remove_pointer<To>::type>::value),
+      "target type not derived from source type");
+
+#if !defined(__GNUC__) || defined(__GXX_RTTI)
+  assert(f == nullptr || dynamic_cast<To>(f) != nullptr);
+#endif  // !defined(__GNUC__) || defined(__GXX_RTTI)
+
+  return static_cast<To>(f);
+}
+
 namespace bloaty {
 
 std::string* name_path;
@@ -154,6 +167,19 @@ void Split(const std::string& str, char delim, std::vector<std::string>* out) {
     out->push_back(item);
   }
 }
+
+uint64_t GetFileSize(const std::string& filename) {
+  FILE* file = fopen(filename.c_str(), "rb");
+  if (!file) {
+    std::cerr << "Couldn't get file size for: " << filename << "\n";
+    exit(1);
+  }
+  fseek(file, 0L, SEEK_END);
+  long ret = ftell(file);
+  fclose(file);
+  return ret;
+}
+
 
 // LineReader / LineIterator ///////////////////////////////////////////////////
 
@@ -396,6 +422,12 @@ std::string NameMunger::Munge(const std::string& name) const {
   return ret;
 }
 
+struct ConfiguredDataSource {
+  ConfiguredDataSource(const DataSource* source_) : source(source_) {}
+  const DataSource* source;
+  NameMunger munger;
+};
+
 
 // Rollup //////////////////////////////////////////////////////////////////////
 
@@ -435,11 +467,9 @@ class Rollup {
   }
 
   // Prints a graphical representation of the rollup.
-  void PrintWithBase(uint32_t row_limit) const {
-    PrintWithBase(nullptr, row_limit);
-  }
+  void PrintWithBase(int row_limit) const { PrintWithBase(nullptr, row_limit); }
 
-  void PrintWithBase(Rollup* base, uint32_t row_limit) const {
+  void PrintWithBase(Rollup* base, int row_limit) const {
     RollupRow row("TOTAL");
     row.vmsize = vm_total_;
     row.filesize = file_total_;
@@ -513,12 +543,11 @@ class Rollup {
   };
 
   void ComputeRows(size_t indent, RollupRow* row, size_t* longest_label,
-                   Rollup* base, bool has_base, uint32_t row_limit) const;
+                   Rollup* base, bool has_base, int row_limit) const;
 };
 
 void Rollup::ComputeRows(size_t indent, RollupRow* row, size_t* longest_label,
-                         Rollup* base, bool has_base,
-                         uint32_t row_limit) const {
+                         Rollup* base, bool has_base, int row_limit) const {
   auto& child_rows = row->sorted_children;
   child_rows.reserve(children_.size());
 
@@ -671,7 +700,8 @@ class RangeMap {
   void Fill(uint64_t max, const std::string& val);
 
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                            bool is_vmsize, Rollup* rollup);
+                            bool is_vmsize, const std::string& filename,
+                            int filename_position, Rollup* rollup);
 
  private:
   typedef std::map<uint64_t, std::pair<std::string, uint64_t>> Map;
@@ -738,7 +768,8 @@ void RangeMap::Fill(uint64_t max, const std::string& val) {
 }
 
 void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                             bool is_vmsize, Rollup* rollup) {
+                             bool is_vmsize, const std::string& filename,
+                             int filename_position, Rollup* rollup) {
   assert(range_maps.size() > 0);
 
   std::vector<Map::const_iterator> iters;
@@ -772,9 +803,15 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
     uint64_t next_break = UINTPTR_MAX;
     bool have_data = false;
     keys.clear();
+    size_t i;
 
-    for (size_t i = 0; i < iters.size(); i++) {
+    for (i = 0; i < iters.size(); i++) {
       auto& iter = iters[i];
+
+      if (filename_position >= 0 &&
+          static_cast<unsigned>(filename_position) == i) {
+        keys.push_back(filename);
+      }
 
       // Advance the iterators if its range is behind the current point.
       while (!range_maps[i]->IterIsEnd(iter) && RangeEnd(iter) <= current) {
@@ -794,6 +831,11 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
         keys.push_back(iter->second.first);
         next_break = std::min(next_break, RangeEnd(iter));
       }
+    }
+
+    if (filename_position >= 0 &&
+        static_cast<unsigned>(filename_position) == i) {
+      keys.push_back(filename);
     }
 
     if (next_break == UINTPTR_MAX) {
@@ -853,12 +895,6 @@ class MemoryMap {
 std::string MemoryMap::ApplyNameRegexes(const std::string& name) {
   return munger_ ? munger_->Munge(name) : name;
 }
-
-/*
-bool FindAtAddr(uint64_t vmaddr, std::string* name) const;
-bool FindContainingAddr(uint64_t vmaddr, uint64_t* start,
-                        std::string* name) const;
-                        */
 
 
 // MemoryFileMap ///////////////////////////////////////////////////////////////
@@ -953,6 +989,10 @@ bool MemoryFileMap::TranslateVMRange(uint64_t vmaddr, uint64_t vmsize,
   if (vmaddr + vmsize > vm_range_start + vm_range_size) {
     std::cerr << "Tried to translate range that spanned regions of of our "
               << "mapping.  This shouldn't happen.\n";
+    std::cerr << "Translating range: [" << vmaddr << ", " << (vmaddr + vmsize)
+              << "\n";
+    std::cerr << "Found mapping: {" << vm_range_start << ", "
+              << vm_range_start + vm_range_size << "\n";
     exit(1);
   }
 
@@ -981,12 +1021,196 @@ bool MemoryFileMap::TranslateVMRange(uint64_t vmaddr, uint64_t vmsize,
 }
 
 
+// InputFile ///////////////////////////////////////////////////////////////////
+
+// Contains a set of MemoryMap/MemoryFileMap objects for a given input file.
+// We have one of these objects per input file.  Each one of these objects
+// contains a map for every data source that the user selected.
+//
+// Note that in the case of an archive input file (.a), we create these classes
+// for the files inside (the .o files).  We do NOT have an InputFile object for
+// the .a itself.
+
+class InputFile {
+ public:
+  InputFile(const std::string& filename, uint64_t size, Platform* platform);
+
+  void PushMapFor(ConfiguredDataSource* source);
+
+  // Compute rollups for this file and add them to "rollup".  If
+  // "filename_position" is >= 0, that indicates where in the rollup the
+  // filename should be inserted.
+  void ComputeRollup(int filename_position, Rollup* rollup);
+
+  MemoryMap* GetLastMap() {
+    return maps_.empty() ? &base_map_ : maps_.back().get();
+  }
+
+  const MemoryFileMap& GetBaseMap() { return base_map_; }
+
+ private:
+  void PushMap(const MemoryMap& map) {
+    vm_maps_.push_back(map.vm_map());
+    file_maps_.push_back(map.file_map());
+  }
+
+  const std::string filename_;
+  uint64_t size_;
+  Platform* platform_;
+  MemoryFileMap base_map_;
+  std::vector<std::unique_ptr<MemoryMap>> maps_;
+
+  std::vector<const RangeMap*> vm_maps_;
+  std::vector<const RangeMap*> file_maps_;
+};
+
+InputFile::InputFile(const std::string& filename, uint64_t size,
+                     Platform* platform)
+    : filename_(filename),
+      size_(size),
+      platform_(platform),
+      base_map_(nullptr) {
+  // Start with the base map, so that any unaccounted space is shown as [None]
+  // instead of just being missing from the totals.  The rollup will discard
+  // this so it's not actually visible.
+  PushMap(base_map_);
+}
+
+void InputFile::PushMapFor(ConfiguredDataSource* source) {
+  switch (source->source->type) {
+    case DataSource::DATA_SOURCE_VM_RANGE: {
+      std::unique_ptr<MemoryMap> map(new MemoryMap(&source->munger));
+      maps_.push_back(std::move(map));
+      break;
+    }
+    case DataSource::DATA_SOURCE_VM_FILE_RANGE: {
+      std::unique_ptr<MemoryFileMap> map(new MemoryFileMap(&source->munger));
+      maps_.push_back(std::move(map));
+      break;
+    }
+  }
+
+  PushMap(*maps_.back());
+}
+
+void InputFile::ComputeRollup(int filename_position, Rollup* rollup) {
+  // How that the base map has been set, fill out the file size to ensure that
+  // we cover the entire file.
+  base_map_.file_map()->Fill(size_, "[Unmapped]");
+  RangeMap::ComputeRollup(vm_maps_, true, filename_, filename_position, rollup);
+  RangeMap::ComputeRollup(file_maps_, false, filename_, filename_position,
+                          rollup);
+}
+
+
+// InputFileMap ////////////////////////////////////////////////////////////////
+
+// A [filename -> InputFile] map and code to lazily initialize map entries.
+//
+// Usually this map will have just a single entry in it, for the primary
+// filename.  We only need the map functionality for archive files, which have
+// several actual object files inside.
+
+class InputFileMap {
+ public:
+  InputFileMap(const std::string& main_filename, Platform* platform)
+      : main_filename_(main_filename), platform_(platform) {
+    // Scan base maps; this stage discovers all files.
+    VMFileRangeSink sink(this);
+    platform_->AddBaseMap(main_filename, &sink);
+  }
+
+  // Scan maps for the given data source.
+  void ScanDataSource(ConfiguredDataSource* source);
+
+  // Adds a file to the map with the given size.  This must be called before
+  // GetFile() is called for this filename.  Also, *all* AddFile() calls must
+  // come before any GetFile() calls.
+  void AddFile(const std::string& filename, uint64_t size);
+
+  // Gets an InputFile that was previous called with AddFile().
+  InputFile* GetFile(const std::string& filename);
+
+  // Compute rollup and add to the given rollup object.
+  void ComputeRollup(int filename_position, Rollup* rollup);
+
+ private:
+  const std::string main_filename_;
+  Platform* platform_;
+  ConfiguredDataSource* current_source_;
+  std::unordered_map<std::string, std::unique_ptr<InputFile>> files_;
+};
+
+InputFile* InputFileMap::GetFile(const std::string& filename) {
+  auto& file = files_[filename];
+
+  if (!file.get()) {
+    fprintf(stderr,
+            "bloaty: Data source found file inside archive that initial scan "
+            "did not find: %s\n", filename.c_str());
+    exit(1);
+  }
+
+  return file.get();
+}
+
+void InputFileMap::AddFile(const std::string& filename, uint64_t size) {
+  auto& file = files_[filename];
+
+  if (file.get()) {
+    fprintf(stderr, "bloaty: File was found twice in initial scan: %s\n",
+            filename.c_str());
+    exit(1);
+  }
+
+  file.reset(new InputFile(filename, size, platform_));
+}
+
+void InputFileMap::ScanDataSource(ConfiguredDataSource* source) {
+  for (const auto& pair : files_) {
+    pair.second->PushMapFor(source);
+  }
+
+  current_source_ = source;
+  switch (source->source->type) {
+    case DataSource::DATA_SOURCE_VM_RANGE: {
+      VMRangeSink sink(this);
+      source->source->func.vm_range(main_filename_, &sink);
+      break;
+    }
+
+    case DataSource::DATA_SOURCE_VM_FILE_RANGE: {
+      VMFileRangeSink sink(this);
+      source->source->func.vm_file_range(main_filename_, &sink);
+      break;
+    }
+
+    default:
+      std::cerr << "bloaty: unknown source type?\n";
+      exit(1);
+  }
+}
+
+void InputFileMap::ComputeRollup(int filename_position, Rollup* rollup) {
+  for (const auto& pair : files_) {
+    pair.second->ComputeRollup(filename_position, rollup);
+  }
+}
+
+
 // VMRangeSink ////////////////////////////////////////////////////////////////
+
+void VMRangeSink::SetFilename(const std::string& filename) {
+  auto file = input_files_->GetFile(filename);
+  map_ = file->GetLastMap();
+  translator_ = &file->GetBaseMap();
+}
 
 // Adds a region to the memory map.  It should not overlap any previous
 // region added with Add(), but it should overlap the base memory map.
 void VMRangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
                              const std::string& name) {
+  assert(map_);
   if (vmsize == 0) {
     return;
   }
@@ -1012,6 +1236,7 @@ void VMRangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
 
 void VMRangeSink::AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
                                        const std::string& name) {
+  assert(map_);
   uint64_t existing_size;
   const auto existing = map_->vm_map()->TryGetExactly(vmaddr, &existing_size);
   if (existing) {
@@ -1029,6 +1254,7 @@ void VMRangeSink::AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
 
 void VMRangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
                                             const std::string& name) {
+  assert(map_);
   if (vmsize == 0) {
     return;
   }
@@ -1044,9 +1270,19 @@ void VMRangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
 
 // VMFileRangeSink /////////////////////////////////////////////////////////////
 
+void VMFileRangeSink::AddFile(const std::string& filename, uint64_t size) {
+  input_files_->AddFile(filename, size);
+}
+
+void VMFileRangeSink::SetFilename(const std::string& filename) {
+  auto file = input_files_->GetFile(filename);
+  map_ = down_cast<MemoryFileMap*>(file->GetLastMap());
+}
+
 void VMFileRangeSink::AddRange(const std::string& name, uint64_t vmaddr,
                                uint64_t vmsize, uint64_t fileoff,
                                uint64_t filesize) {
+  assert(map_);
   map_->AddRange(name, vmaddr, vmsize, fileoff, filesize);
 }
 
@@ -1062,15 +1298,11 @@ class Bloaty {
   void SetFilename(const std::string& filename);
   void SetBaseFile(const std::string& filename);
 
-  struct ConfiguredDataSource {
-    ConfiguredDataSource(const DataSource* source_) : source(source_) {}
-    const DataSource* source;
-    NameMunger munger;
-  };
-
   void AddDataSource(const std::string& name);
   ConfiguredDataSource* FindDataSource(const std::string& name) const;
-  size_t GetSourceCount() const { return sources_.size(); }
+  size_t GetSourceCount() const {
+    return sources_.size() + (filename_position_ >= 0 ? 1 : 0);
+  }
 
   void ScanAndRollup(Rollup* rollup);
   void PrintDataSources() const {
@@ -1093,6 +1325,7 @@ class Bloaty {
   std::string filename_;
   std::string base_filename_;
   int row_limit_;
+  int filename_position_;
 };
 
 void Bloaty::CheckFileReadable(const std::string& filename) {
@@ -1104,20 +1337,7 @@ void Bloaty::CheckFileReadable(const std::string& filename) {
   fclose(file);
 }
 
-long Bloaty::GetFileSize(const std::string& filename) {
-  FILE* file = fopen(filename.c_str(), "rb");
-  if (!file) {
-    std::cerr << "Couldn't get file size for: " << filename << "\n";
-    exit(1);
-  }
-  fseek(file, 0L, SEEK_END);
-  long ret = ftell(file);
-  fclose(file);
-  return ret;
-}
-
-
-Bloaty::Bloaty() : row_limit_(20) {
+Bloaty::Bloaty() : row_limit_(20), filename_position_(-1) {
 #ifdef __APPLE__
   platform_ = NewMachOPlatformModule();
 #else
@@ -1156,6 +1376,11 @@ void Bloaty::SetBaseFile(const std::string& filename) {
 }
 
 void Bloaty::AddDataSource(const std::string& name) {
+  if (name == "inputfiles") {
+    filename_position_ = sources_.size() + 1;
+    return;
+  }
+
   auto it = all_known_sources_.find(name);
   if (it == all_known_sources_.end()) {
     std::cerr << "bloaty: no such data source: " << name << "\n";
@@ -1166,8 +1391,7 @@ void Bloaty::AddDataSource(const std::string& name) {
   sources_by_name_[name] = &sources_.back();
 }
 
-Bloaty::ConfiguredDataSource* Bloaty::FindDataSource(
-    const std::string& name) const {
+ConfiguredDataSource* Bloaty::FindDataSource(const std::string& name) const {
   auto it = sources_by_name_.find(name);
   if (it != sources_by_name_.end()) {
     return it->second;
@@ -1177,52 +1401,13 @@ Bloaty::ConfiguredDataSource* Bloaty::FindDataSource(
 }
 
 void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup) {
-  // Always scan segments first (even if we're not displaying it) because we use
-  // it for VM -> File address translation.
-  MemoryFileMap base_map(nullptr);
-  std::vector<std::unique_ptr<MemoryMap>> maps;
-
-  // Start with the base map, so that any unaccounted space is shown as [None]
-  // instead of just being missing from the totals.  The rollup will discard
-  // this so it's not actually visible.
-  std::vector<const RangeMap*> vm_maps = {base_map.vm_map()};
-  std::vector<const RangeMap*> file_maps = {base_map.file_map()};
-
-  size_t file_size = GetFileSize(filename);
-  VMFileRangeSink base_sink(&base_map);
-  platform_->AddBaseMap(filename, &base_sink);
-  base_map.file_map()->Fill(file_size, "[Unmapped]");
+  InputFileMap map(filename, platform_.get());
 
   for (size_t i = 0; i < sources_.size(); i++) {
-    switch (sources_[i].source->type) {
-      case DataSource::DATA_SOURCE_VM_RANGE: {
-        std::unique_ptr<MemoryMap> map(new MemoryMap(&sources_[i].munger));
-        VMRangeSink sink(map.get(), &base_map);
-        sources_[i].source->func.vm_range(filename, &sink);
-        maps.push_back(std::move(map));
-        break;
-      }
-
-      case DataSource::DATA_SOURCE_VM_FILE_RANGE: {
-        std::unique_ptr<MemoryFileMap> map(
-            new MemoryFileMap(&sources_[i].munger));
-        VMFileRangeSink sink(map.get());
-        sources_[i].source->func.vm_file_range(filename, &sink);
-        maps.push_back(std::move(map));
-        break;
-      }
-
-      default:
-        std::cerr << "bloaty: unknown source type?\n";
-        exit(1);
-    }
-
-    vm_maps.push_back(maps.back()->vm_map());
-    file_maps.push_back(maps.back()->file_map());
+    map.ScanDataSource(&sources_[i]);
   }
-  std::vector<const RangeMap*> range_maps;
-  RangeMap::ComputeRollup(vm_maps, true, rollup);
-  RangeMap::ComputeRollup(file_maps, false, rollup);
+
+  map.ComputeRollup(filename_position_, rollup);
 }
 
 void Bloaty::ScanAndRollup(Rollup* rollup) {
