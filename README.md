@@ -6,6 +6,11 @@ Bloaty McBloatface will show you a size profile of the binary
 so you can understand why it's bloated and how to make it
 smaller.
 
+Bloaty works on binaries, shared objects, object files, and
+static libraries (`.a` files).  It supports ELF and Mach-O.
+
+This is not an official Google product.
+
 ## Building Bloaty
 
 To build, simply run:
@@ -29,29 +34,29 @@ On Linux you'll see output something like:
 
 ```
      VM SIZE                         FILE SIZE
- --------------                  --------------
-   0.0%       0 .debug_info        2.40M   36.1%
-   0.0%       0 .debug_loc         1.78M   26.9%
-   0.0%       0 .debug_str          839k   12.4%
-   0.0%       0 .debug_ranges       533k    7.9%
-  71.0%    335k .text               335k    4.9%
-   0.0%       0 .debug_pubnames     259k    3.8%
-   0.0%       0 .debug_line         195k    2.9%
-   0.0%       0 .debug_abbrev      74.3k    1.1%
-  14.5%   68.5k .rodata            68.5k    1.0%
-   0.0%       0 .strtab            46.4k    0.7%
-   0.0%       0 .debug_pubtypes    44.7k    0.7%
-   6.5%   30.5k .eh_frame          30.5k    0.4%
-   0.0%       0 .symtab            29.6k    0.4%
-   2.8%   13.1k .gcc_except_table  13.1k    0.2%
-   0.0%       0 .debug_aranges     11.8k    0.2%
-   1.8%   8.61k [Other]            8.10k    0.1%
-   1.0%   4.70k .eh_frame_hdr      4.70k    0.1%
-   0.8%   3.89k .dynsym            3.89k    0.1%
-   0.8%   3.61k .dynstr            3.61k    0.1%
-   0.7%   3.38k .rela.plt          3.38k    0.0%
-   0.1%     612 [None]             3.24k    0.0%
- 100.0%    472k TOTAL              6.63M  100.0%
+ --------------                   --------------
+   0.0%       0 .debug_info        2.73Mi  38.1%
+   0.0%       0 .debug_loc         2.17Mi  30.3%
+   0.0%       0 .debug_str          856Ki  11.7%
+   0.0%       0 .debug_ranges       579Ki   7.9%
+  71.3%   355Ki .text               355Ki   4.8%
+   0.0%       0 .debug_line         208Ki   2.8%
+   0.0%       0 .debug_abbrev      81.8Ki   1.1%
+  14.4%  71.5Ki .rodata            71.5Ki   1.0%
+   0.0%       0 .strtab            50.9Ki   0.7%
+   7.1%  35.3Ki .eh_frame          35.3Ki   0.5%
+   0.0%       0 .symtab            30.3Ki   0.4%
+   0.0%       0 .debug_aranges     12.2Ki   0.2%
+   2.0%  10.2Ki .gcc_except_table  10.2Ki   0.1%
+   1.4%  6.95Ki [Other]            5.83Ki   0.1%
+   1.0%  5.00Ki .eh_frame_hdr      5.00Ki   0.1%
+   0.8%  4.05Ki .dynsym            4.05Ki   0.1%
+   0.8%  3.75Ki .dynstr            3.75Ki   0.1%
+   0.7%  3.49Ki .rela.plt          3.49Ki   0.0%
+   0.0%       0 [ELF Headers]      2.93Ki   0.0%
+   0.1%     616 [None]             2.50Ki   0.0%
+   0.5%  2.34Ki .plt               2.34Ki   0.0%
+ 100.0%   498Ki TOTAL              7.16Mi 100.0%
 ```
 
 The "VM SIZE" column tells you how much space the binary
@@ -64,6 +69,71 @@ on disk.  These two can be very different from each other:
 - Some data is mapped into memory but doesn't exist in the
   file.  This mainly applies to the `.bss` section
   (zero-initialized data).
+
+Run Bloaty with `--help` to see a list of available options:
+
+```
+$ blaze-bin/experimental/users/haberman/bloaty/bloaty --help
+Bloaty McBloatface: a size profiler for binaries.
+
+USAGE: bloaty [options] <binary>
+
+Options:
+
+  -b <binary>      Show a diff view, with <binary> as the base.
+  -d <sources>     Comma-separated list of sources to scan.
+  -r <regex>       Add regex to the list of regexes.
+                   Format for regex is:
+                     SOURCE=~/PATTERN/REPLACEMENT/
+  -n <num>         How many rows to show per level before collapsing
+                   other keys into '[Other]'.  Set to '0' for unlimited.
+                   Defaults to 20.
+  -W               Show warnings.  Use when developing/debugging data
+                   sources or when you distrust the results.
+  --help           Display this message and exit.
+  --list-sources   Show a list of available sources and exit.
+```
+
+## Size Diffs
+
+You can use Bloaty to see how the size of a binary changed.  Pass
+`-b <binary>` to set the base image, and Bloaty will show you
+the diff.
+
+For example, here is a size diff between a couple different versions
+of Bloaty, showing how it grew when I added some features.
+
+```
+$ ./bloaty -b oldbloaty bloaty
+     VM SIZE                         FILE SIZE
+ --------------                   --------------
+  [ = ]       0 .debug_info       +59.6Ki  +2.2%
+  [ = ]       0 .debug_str        +46.2Ki  +5.7%
+  [ = ]       0 .debug_loc        +15.9Ki  +0.7%
+  +2.2% +7.72Ki .text             +7.72Ki  +2.2%
+  [ = ]       0 .debug_ranges     +4.55Ki  +0.8%
+  [ = ]       0 .debug_line       +3.28Ki  +1.6%
+  [ = ]       0 .strtab           +2.46Ki  +5.1%
+  +2.7% +1.91Ki .rodata           +1.91Ki  +2.7%
+  +5.6% +1.87Ki .eh_frame         +1.87Ki  +5.6%
+  [ = ]       0 .symtab           +1.29Ki  +4.4%
+  [ = ]       0 .debug_aranges       +496  +4.1%
+  [ = ]       0 .debug_abbrev        +493  +0.6%
+  +4.1%    +412 .gcc_except_table    +412  +4.1%
+  +4.8%    +232 .eh_frame_hdr        +232  +4.8%
+  +4.9%    +168 .rela.plt            +168  +4.9%
+  +4.2%    +168 .dynsym              +168  +4.2%
+  +4.9%    +112 .plt                 +112  +4.9%
+  +2.0%     +74 .dynstr               +74  +2.0%
+   0.0%      62 [Other]                62   0.0%
+  +4.8%     +56 .got.plt              +56  +4.8%
+  -2.5%     -16 [None]               -738 -22.4%
+  +2.6% +12.7Ki TOTAL              +146Ki  +2.0%
+```
+
+Each line shows the how much each part changed compared to
+its previous size.  The "TOTAL" line shows how much the size
+changed overall.
 
 ## Hierarchical Profiles
 
@@ -125,14 +195,20 @@ $ bloaty -d segments,sections bloaty
 ```
 
 Bloaty displays a maximum of 20 lines for each level; other
-values are grouped into an `[Other]` bin.  TODO: make this a
-parameter.
+values are grouped into an `[Other]` bin.  Use `-n <num>`
+to override this setting.  If you pass `-n 0`, all data
+will be output without collapsing anything into `[Other]`.
 
 # Data Sources
 
 Bloaty has many data sources built in.  It's easy to add a
 new data source if you have a new way of mapping address
 ranges to some interesting higher-level abstraction.
+
+While Bloaty works on binaries, shared objects, object
+files, and static libraries (`.a` files), some of the data
+sources don't work on object files.  This applies especially
+to data sources that read debug info.
 
 ## Segments
 
@@ -155,6 +231,28 @@ Here we see one segment mapped `[R E]` (read/execute) and
 one segment mapped `[RW ]` (read/write).  A large part of
 the binary is not loaded into memory, which we see as
 `[None]`.
+
+Object files and static libraries don't have segments.
+However we fake it by grouping sections by their flags.
+This gives us a break-down sort of like real segments.
+
+```
+     VM SIZE                     FILE SIZE
+ --------------               --------------
+   0.0%       0 Section []     1.70Mi  76.6%
+   0.0%       0 Section [MS]    421Ki  18.5%
+  49.7%  28.5Ki Section [AX]   28.5Ki   1.3%
+   0.0%       0 [ELF Headers]  27.8Ki   1.2%
+  28.5%  16.4Ki Section [AXG]  16.4Ki   0.7%
+   0.0%       0 [None]         15.1Ki   0.7%
+   0.0%       0 Section [G]    10.8Ki   0.5%
+  17.5%  10.0Ki Section [A]    10.0Ki   0.4%
+   3.5%  2.00Ki Section [AMS]  2.00Ki   0.1%
+   0.5%     288 Section [AM]      288   0.0%
+   0.3%     149 Section [AG]      149   0.0%
+   0.0%      26 Section [WA]        8   0.0%
+ 100.0%  57.3Ki TOTAL          2.22Mi 100.0%
+```
 
 ## Sections
 
@@ -224,6 +322,43 @@ $ bloaty -d symbols
    0.7%   3.37k bloaty::ReadELFSymbols                   3.37k    0.0%
  100.0%    472k TOTAL                                    6.63M  100.0%
 ```
+
+## Input Files
+
+When you are running Bloaty on a `.a` file, sometimes you want
+to break things down by the `.o` file inside the archive.
+
+```
+$ bloaty -d inputfiles third_party/re2/obj/libre2.a
+     VM SIZE                          FILE SIZE
+ --------------                    --------------
+  12.5%  63.5Ki re2.o               2.13Mi  12.0%
+  11.2%  56.7Ki regexp.o            2.08Mi  11.7%
+   9.6%  48.8Ki dfa.o               1.71Mi   9.7%
+   6.6%  33.4Ki prefilter_tree.o    1.53Mi   8.6%
+  10.1%  51.0Ki parse.o             1.31Mi   7.4%
+   7.1%  35.8Ki compile.o           1.13Mi   6.4%
+   5.6%  28.4Ki prefilter.o         1.07Mi   6.0%
+   5.5%  28.0Ki simplify.o           957Ki   5.3%
+   4.2%  21.2Ki nfa.o                866Ki   4.8%
+   3.8%  19.0Ki mimics_pcre.o        760Ki   4.2%
+   2.6%  13.2Ki set.o                741Ki   4.1%
+   3.0%  15.4Ki prog.o               602Ki   3.3%
+   2.8%  14.4Ki tostring.o           581Ki   3.2%
+   1.7%  8.61Ki filtered_re2.o       553Ki   3.1%
+   2.3%  11.9Ki bitstate.o           533Ki   2.9%
+   1.0%  5.12Ki [Other]              407Ki   2.3%
+   1.8%  8.98Ki onepass.o            398Ki   2.2%
+   6.6%  33.4Ki unicode_groups.o     198Ki   1.1%
+   0.6%  3.14Ki stringpiece.o        116Ki   0.6%
+   0.2%  1.23Ki strutil.o           97.0Ki   0.5%
+   1.1%  5.80Ki unicode_casefold.o  89.7Ki   0.5%
+ 100.0%   506Ki TOTAL               17.7Mi 100.0%
+```
+
+You are free to use this data source even for non-`.a`
+files, but it won't be very useful since it will always just
+resolve to the input file you passed.
 
 ## Source Files
 
@@ -364,14 +499,6 @@ escape backslashes.
 # Future Work
 
 Here are some tentative plans for future features.
-
-## Size Diffs
-
-If the program or toolchain changed, a user might want to
-view a size *diff* between two programs.  To support this
-the program should allow setting a baseline program.  Then
-everything showed in the tally would be a diff instead of
-an absolute size.
 
 ## Understanding Symbol References
 
