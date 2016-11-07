@@ -378,6 +378,7 @@ $ ./bloaty -d symbols bloaty
 When you pass multiple files to Bloaty, the `inputfiles`
 source will let you break it down by input file:
 
+```
 $ ./bloaty -d inputfiles src/*.o
      VM SIZE                    FILE SIZE
  --------------              --------------
@@ -387,6 +388,7 @@ $ ./bloaty -d inputfiles src/*.o
    5.5%  7.99Ki src/macho.o    415Ki   6.4%
    2.5%  3.57Ki src/main.o     279Ki   4.3%
  100.0%   145Ki TOTAL         6.34Mi 100.0%
+```
 
 ## Archive Members
 
