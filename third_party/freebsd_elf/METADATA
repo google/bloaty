@@ -1,0 +1,26 @@
+name: "FreeBSD ELF headers"
+description:
+    "A few header files from the FreeBSD project. These define the ELF format."
+    "They only contain struct and constant definitions (no code) and their"
+    "contents are almost entirely derivable from the ELF standard."
+
+third_party {
+  url {
+    type: HOMEPAGE
+    value: "https://www.freebsd.org"
+  }
+  url {
+    type: GIT
+    value: "https://github.com/freebsd/freebsd"
+  }
+  version: "303d759f5bc75c9f96d98b44b797faadb4a6a1c6"
+  last_upgrade_date {
+    year: 2016
+    month: 10
+    day: 27
+  }
+  local_modifications:
+      "Uniquified header guards and fixed up include paths. "
+      "Also changed to use stdint.h integer types.  Removed any "
+      "machine-specific definitions for now."
+}

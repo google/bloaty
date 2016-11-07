@@ -1,6 +1,3 @@
 [submodule "third_party/re2"]
 	path = third_party/re2
 	url = https://github.com/google/re2
-[submodule "third_party/leveldb"]
-	path = third_party/leveldb
-	url = https://github.com/google/leveldb.git
