@@ -29,7 +29,8 @@ third_party/re2/Makefile third_party/googletest/CMakeLists.txt: .gitmodules
 	git submodule init && git submodule update
 
 clean:
-	rm -f bloaty src/*.o
+	rm -f bloaty src/*.o src/libbloaty.a
+	rm -f tests/range_map_test tests/bloaty_test
 	cd third_party/re2 && make clean
 	rm -rf *.dSYM
 
