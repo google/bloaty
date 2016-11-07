@@ -3,11 +3,13 @@
 
 Ever wondered what's making your ELF or Mach-O binary big?
 Bloaty McBloatface will show you a size profile of the binary
-so you can understand why it's bloated and how to make it
-smaller.
+so you can understand what's taking up space inside.
 
 Bloaty works on binaries, shared objects, object files, and
-static libraries (`.a` files).  It supports ELF and Mach-O.
+static libraries (`.a` files).  It supports ELF/DWARF and
+Mach-O, though the Mach-O support is much more preliminary
+(it shells out to `otool`/`symbols` instead of parsing the
+file directly).
 
 This is not an official Google product.
 
@@ -35,28 +37,28 @@ On Linux you'll see output something like:
 ```
      VM SIZE                         FILE SIZE
  --------------                   --------------
-   0.0%       0 .debug_info        2.73Mi  38.1%
-   0.0%       0 .debug_loc         2.17Mi  30.3%
-   0.0%       0 .debug_str          856Ki  11.7%
-   0.0%       0 .debug_ranges       579Ki   7.9%
-  71.3%   355Ki .text               355Ki   4.8%
-   0.0%       0 .debug_line         208Ki   2.8%
-   0.0%       0 .debug_abbrev      81.8Ki   1.1%
-  14.4%  71.5Ki .rodata            71.5Ki   1.0%
-   0.0%       0 .strtab            50.9Ki   0.7%
-   7.1%  35.3Ki .eh_frame          35.3Ki   0.5%
-   0.0%       0 .symtab            30.3Ki   0.4%
-   0.0%       0 .debug_aranges     12.2Ki   0.2%
-   2.0%  10.2Ki .gcc_except_table  10.2Ki   0.1%
-   1.4%  6.95Ki [Other]            5.83Ki   0.1%
-   1.0%  5.00Ki .eh_frame_hdr      5.00Ki   0.1%
-   0.8%  4.05Ki .dynsym            4.05Ki   0.1%
-   0.8%  3.75Ki .dynstr            3.75Ki   0.1%
-   0.7%  3.49Ki .rela.plt          3.49Ki   0.0%
-   0.0%       0 [ELF Headers]      2.93Ki   0.0%
-   0.1%     616 [None]             2.50Ki   0.0%
-   0.5%  2.34Ki .plt               2.34Ki   0.0%
- 100.0%   498Ki TOTAL              7.16Mi 100.0%
+   0.0%       0 .debug_info        2.97Mi  38.3%
+   0.0%       0 .debug_loc         2.30Mi  29.7%
+   0.0%       0 .debug_str         1.03Mi  13.3%
+   0.0%       0 .debug_ranges       611Ki   7.7%
+  72.8%   332Ki .text               332Ki   4.2%
+   0.0%       0 .debug_line         218Ki   2.8%
+   0.0%       0 .debug_abbrev      85.4Ki   1.1%
+   0.0%       0 .strtab            62.8Ki   0.8%
+  13.2%  60.0Ki .rodata            60.0Ki   0.8%
+   7.0%  31.8Ki .eh_frame          31.8Ki   0.4%
+   0.0%       0 .symtab            27.8Ki   0.3%
+   0.0%       0 .debug_aranges     13.5Ki   0.2%
+   2.3%  10.5Ki .gcc_except_table  10.5Ki   0.1%
+   1.5%  6.77Ki [Other]            5.60Ki   0.1%
+   0.9%  4.18Ki .eh_frame_hdr      4.18Ki   0.1%
+   0.8%  3.54Ki .dynsym            3.54Ki   0.0%
+   0.8%  3.52Ki .dynstr            3.52Ki   0.0%
+   0.7%  2.98Ki .rela.plt          2.98Ki   0.0%
+   0.1%     568 [ELF Headers]      2.93Ki   0.0%
+   0.0%      34 [Unmapped]         2.85Ki   0.0%
+   0.0%       4 [None]                  0   0.0%
+ 100.0%   456Ki TOTAL              7.75Mi 100.0%
 ```
 
 The "VM SIZE" column tells you how much space the binary
@@ -70,65 +72,107 @@ on disk.  These two can be very different from each other:
   file.  This mainly applies to the `.bss` section
   (zero-initialized data).
 
+The default breakdown in Bloaty is by sections, but many
+other ways of slicing the binary are supported such as
+symbols and segments.  If you compiled with debug info, you
+can even break down by compile units and inlines!
+
+```
+$ ./bloaty bloaty -d compileunits
+     VM SIZE                            FILE SIZE
+ --------------                      --------------
+  27.9%   128Ki [None]                7.43Mi  95.9%
+  12.9%  59.2Ki src/bloaty.cc         59.0Ki   0.7%
+   7.3%  33.4Ki re2/re2.cc            32.3Ki   0.4%
+   6.9%  31.6Ki re2/dfa.cc            31.6Ki   0.4%
+   6.8%  31.4Ki re2/parse.cc          31.4Ki   0.4%
+   6.7%  30.9Ki src/dwarf.cc          30.9Ki   0.4%
+   6.7%  30.6Ki re2/regexp.cc         27.8Ki   0.4%
+   5.1%  23.7Ki re2/compile.cc        23.7Ki   0.3%
+   4.3%  19.7Ki re2/simplify.cc       19.7Ki   0.2%
+   3.2%  14.8Ki src/elf.cc            14.8Ki   0.2%
+   3.1%  14.2Ki re2/nfa.cc            14.2Ki   0.2%
+   1.8%  8.34Ki re2/bitstate.cc       8.34Ki   0.1%
+   1.7%  7.84Ki re2/prog.cc           7.84Ki   0.1%
+   1.6%  7.13Ki re2/tostring.cc       7.13Ki   0.1%
+   1.5%  6.67Ki re2/onepass.cc        6.67Ki   0.1%
+   1.4%  6.58Ki src/macho.cc          6.58Ki   0.1%
+   0.7%  3.27Ki src/main.cc           3.27Ki   0.0%
+   0.2%     797 [Other]                  797   0.0%
+   0.1%     666 util/stringprintf.cc     666   0.0%
+   0.1%     573 util/strutil.cc          573   0.0%
+   0.1%     476 util/rune.cc             476   0.0%
+ 100.0%   460Ki TOTAL                 7.75Mi 100.0%
+```
+
+
 Run Bloaty with `--help` to see a list of available options:
 
 ```
-$ blaze-bin/experimental/users/haberman/bloaty/bloaty --help
+$ ./bloaty --help
 Bloaty McBloatface: a size profiler for binaries.
 
-USAGE: bloaty [options] <binary>
+USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
-  -b <binary>      Show a diff view, with <binary> as the base.
   -d <sources>     Comma-separated list of sources to scan.
-  -r <regex>       Add regex to the list of regexes.
-                   Format for regex is:
-                     SOURCE=~/PATTERN/REPLACEMENT/
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
                    Defaults to 20.
-  -W               Show warnings.  Use when developing/debugging data
-                   sources or when you distrust the results.
+  -r <regex>       Add regex to the list of regexes.
+                   Format for regex is:
+                     SOURCE:s/PATTERN/REPLACEMENT/
+  -s <sortby>      Whether to sort by VM or File size.  Possible values
+                   are:
+                     -s vm
+                     -s file
+                     -s both (the default: sorts by max(vm, file)).
+  -v               Verbose output.  Dumps warnings encountered during
+                   processing and full VM/file maps at the end.
+                   Add more v's (-vv, -vvv) for even more.
   --help           Display this message and exit.
   --list-sources   Show a list of available sources and exit.
 ```
 
 ## Size Diffs
 
-You can use Bloaty to see how the size of a binary changed.  Pass
-`-b <binary>` to set the base image, and Bloaty will show you
-the diff.
+You can use Bloaty to see how the size of a binary changed.
+On the command-line, pass `--` followed by the files you
+want to use as the diff base.
 
 For example, here is a size diff between a couple different versions
 of Bloaty, showing how it grew when I added some features.
 
 ```
-$ ./bloaty -b oldbloaty bloaty
+$ ./bloaty bloaty -- oldbloaty
      VM SIZE                         FILE SIZE
- --------------                   --------------
-  [ = ]       0 .debug_info       +59.6Ki  +2.2%
-  [ = ]       0 .debug_str        +46.2Ki  +5.7%
-  [ = ]       0 .debug_loc        +15.9Ki  +0.7%
-  +2.2% +7.72Ki .text             +7.72Ki  +2.2%
-  [ = ]       0 .debug_ranges     +4.55Ki  +0.8%
-  [ = ]       0 .debug_line       +3.28Ki  +1.6%
-  [ = ]       0 .strtab           +2.46Ki  +5.1%
-  +2.7% +1.91Ki .rodata           +1.91Ki  +2.7%
-  +5.6% +1.87Ki .eh_frame         +1.87Ki  +5.6%
-  [ = ]       0 .symtab           +1.29Ki  +4.4%
-  [ = ]       0 .debug_aranges       +496  +4.1%
-  [ = ]       0 .debug_abbrev        +493  +0.6%
-  +4.1%    +412 .gcc_except_table    +412  +4.1%
-  +4.8%    +232 .eh_frame_hdr        +232  +4.8%
-  +4.9%    +168 .rela.plt            +168  +4.9%
-  +4.2%    +168 .dynsym              +168  +4.2%
-  +4.9%    +112 .plt                 +112  +4.9%
-  +2.0%     +74 .dynstr               +74  +2.0%
-   0.0%      62 [Other]                62   0.0%
-  +4.8%     +56 .got.plt              +56  +4.8%
-  -2.5%     -16 [None]               -738 -22.4%
-  +2.6% +12.7Ki TOTAL              +146Ki  +2.0%
+ ++++++++++++++ GROWING           ++++++++++++++
+  [ = ]       0 .debug_str        +41.2Ki  +5.0%
+  [ = ]       0 .debug_info       +36.8Ki  +1.3%
+  [ = ]       0 .debug_loc        +12.4Ki  +0.6%
+  +1.8% +6.12Ki .text             +6.12Ki  +1.8%
+  [ = ]       0 .debug_ranges     +4.47Ki  +0.8%
+  [ = ]       0 .debug_line       +2.69Ki  +1.3%
+  [ = ]       0 .strtab           +1.52Ki  +3.1%
+  +3.9% +1.32Ki .eh_frame         +1.32Ki  +3.9%
+  +1.6% +1.12Ki .rodata           +1.12Ki  +1.6%
+  [ = ]       0 .symtab              +696  +2.3%
+  [ = ]       0 .debug_aranges       +288  +2.4%
+  +2.7%    +272 .gcc_except_table    +272  +2.7%
+  +2.7%    +136 .eh_frame_hdr        +136  +2.7%
+  +1.2%     +48 .dynsym               +48  +1.2%
+  +1.4%     +48 .rela.plt             +48  +1.4%
+  +1.4%     +32 .plt                  +32  +1.4%
+  +0.6%     +22 .dynstr               +22  +0.6%
+  +1.3%     +16 .got.plt              +16  +1.3%
+  +1.2%      +4 .gnu.version           +4  +1.2%
+
+ -------------- SHRINKING         --------------
+ -18.5%     -10 [Unmapped]        -1.14Ki -31.4%
+  [ = ]       0 .debug_abbrev         -72  -0.1%
+
+  +1.9% +9.12Ki TOTAL              +107Ki  +1.5%
 ```
 
 Each line shows the how much each part changed compared to
@@ -144,54 +188,55 @@ a single hierarchical profile.  For example, we can use the
 
 ```
 $ bloaty -d segments,sections bloaty
-     VM SIZE                              FILE SIZE
- --------------                       --------------
-   0.0%       0 [None]                  6.17M   93.1%
-       0.0%       0 .debug_info             2.40M   38.8%
-       0.0%       0 .debug_loc              1.78M   28.9%
-       0.0%       0 .debug_str               839k   13.3%
-       0.0%       0 .debug_ranges            533k    8.4%
-       0.0%       0 .debug_pubnames          259k    4.1%
-       0.0%       0 .debug_line              195k    3.1%
-       0.0%       0 .debug_abbrev           74.3k    1.2%
-       0.0%       0 .strtab                 46.4k    0.7%
-       0.0%       0 .debug_pubtypes         44.7k    0.7%
-       0.0%       0 .symtab                 29.6k    0.5%
-       0.0%       0 .debug_aranges          11.8k    0.2%
-       0.0%       0 [None]                  2.65k    0.0%
-       0.0%       0 .shstrtab                 403    0.0%
-       0.0%       0 .comment                  199    0.0%
-  98.9%    467k LOAD [R E]               467k    6.9%
-      71.8%    335k .text                    335k   71.8%
-      14.7%   68.5k .rodata                 68.5k   14.7%
-       6.5%   30.5k .eh_frame               30.5k    6.5%
-       2.8%   13.1k .gcc_except_table       13.1k    2.8%
-       1.0%   4.70k .eh_frame_hdr           4.70k    1.0%
-       0.8%   3.89k .dynsym                 3.89k    0.8%
-       0.8%   3.61k .dynstr                 3.61k    0.8%
-       0.7%   3.38k .rela.plt               3.38k    0.7%
-       0.5%   2.27k .plt                    2.27k    0.5%
-       0.1%     600 [None]                    600    0.1%
-       0.1%     360 .rela.dyn                 360    0.1%
-       0.1%     332 .gnu.version              332    0.1%
-       0.1%     304 .gnu.version_r            304    0.1%
-       0.0%     212 .gnu.hash                 212    0.0%
-       0.0%      36 .note.gnu.build-id         36    0.0%
-       0.0%      32 .note.ABI-tag              32    0.0%
-       0.0%      28 .interp                    28    0.0%
-       0.0%      26 .init                      26    0.0%
-       0.0%       9 .fini                       9    0.0%
-   1.1%   5.05k LOAD [RW ]              3.95k    0.1%
-      43.3%   2.18k .data                   2.18k   55.3%
-      22.8%   1.15k .got.plt                1.15k   29.1%
-      21.7%   1.09k .bss                        0    0.0%
-      10.5%     544 .dynamic                  544   13.5%
-       0.8%      40 .init_array                40    1.0%
-       0.5%      24 .got                       24    0.6%
-       0.2%      12 [None]                      8    0.2%
-       0.2%       8 .jcr                        8    0.2%
-       0.2%       8 .fini_array                 8    0.2%
- 100.0%    472k TOTAL                   6.63M  100.0%
+      VM SIZE                              FILE SIZE
+ --------------                        --------------
+   0.0%       0 [Unmapped]              7.31Mi  94.2%
+      -NAN%       0 .debug_info             2.97Mi  40.6%
+      -NAN%       0 .debug_loc              2.30Mi  31.5%
+      -NAN%       0 .debug_str              1.03Mi  14.2%
+      -NAN%       0 .debug_ranges            611Ki   8.2%
+      -NAN%       0 .debug_line              218Ki   2.9%
+      -NAN%       0 .debug_abbrev           85.4Ki   1.1%
+      -NAN%       0 .strtab                 62.8Ki   0.8%
+      -NAN%       0 .symtab                 27.8Ki   0.4%
+      -NAN%       0 .debug_aranges          13.5Ki   0.2%
+      -NAN%       0 [Unmapped]              2.82Ki   0.0%
+      -NAN%       0 .shstrtab                  371   0.0%
+      -NAN%       0 .comment                    43   0.0%
+  99.2%   452Ki LOAD [RX]                452Ki   5.7%
+      73.4%   332Ki .text                    332Ki  73.4%
+      13.3%  60.0Ki .rodata                 60.0Ki  13.3%
+       7.0%  31.8Ki .eh_frame               31.8Ki   7.0%
+       2.3%  10.5Ki .gcc_except_table       10.5Ki   2.3%
+       0.9%  4.18Ki .eh_frame_hdr           4.18Ki   0.9%
+       0.8%  3.54Ki .dynsym                 3.54Ki   0.8%
+       0.8%  3.52Ki .dynstr                 3.52Ki   0.8%
+       0.7%  2.98Ki .rela.plt               2.98Ki   0.7%
+       0.4%  2.00Ki .plt                    2.00Ki   0.4%
+       0.1%     568 [ELF Headers]              568   0.1%
+       0.1%     408 .rela.dyn                  408   0.1%
+       0.1%     304 .gnu.version_r             304   0.1%
+       0.1%     302 .gnu.version               302   0.1%
+       0.0%     216 .gnu.hash                  216   0.0%
+       0.0%      36 .note.gnu.build-id          36   0.0%
+       0.0%      32 .note.ABI-tag               32   0.0%
+       0.0%      28 .interp                     28   0.0%
+       0.0%      26 .init                       26   0.0%
+       0.0%      18 [Unmapped]                  18   0.0%
+       0.0%       9 .fini                        9   0.0%
+   0.8%  3.46Ki LOAD [RW]               1.88Ki   0.0%
+      45.6%  1.58Ki .bss                         0   0.0%
+      29.3%  1.02Ki .got.plt                1.02Ki  54.1%
+      14.9%     528 .dynamic                   528  27.4%
+       7.1%     252 .data                      252  13.1%
+       1.4%      48 .init_array                 48   2.5%
+       0.7%      24 .got                        24   1.2%
+       0.5%      16 [Unmapped]                  16   0.8%
+       0.2%       8 .fini_array                  8   0.4%
+       0.2%       8 .jcr                         8   0.4%
+       0.1%       4 [None]                       0   0.0%
+   0.0%       0 [ELF Headers]           2.38Ki   0.0%
+ 100.0%   456Ki TOTAL                   7.75Mi 100.0%
 ```
 
 Bloaty displays a maximum of 20 lines for each level; other
@@ -219,39 +264,37 @@ There are usually just a few segments: one for each set of
 
 ```
 $ bloaty -d segments bloaty
-     VM SIZE                  FILE SIZE
- --------------           --------------
-   0.0%       0 [None]      6.17M   93.1%
-  98.9%    467k LOAD [R E]   467k    6.9%
-   1.1%   5.05k LOAD [RW ]  3.95k    0.1%
- 100.0%    472k TOTAL       6.63M  100.0%
+      VM SIZE                     FILE SIZE
+ --------------               --------------
+   0.0%       0 [Unmapped]     7.31Mi  94.2%
+  99.2%   452Ki LOAD [RX]       452Ki   5.7%
+   0.8%  3.46Ki LOAD [RW]      1.88Ki   0.0%
+   0.0%       0 [ELF Headers]  2.38Ki   0.0%
+ 100.0%   456Ki TOTAL          7.75Mi 100.0%
 ```
 
 Here we see one segment mapped `[R E]` (read/execute) and
 one segment mapped `[RW ]` (read/write).  A large part of
 the binary is not loaded into memory, which we see as
-`[None]`.
+`[Unmapped]`.
 
 Object files and static libraries don't have segments.
 However we fake it by grouping sections by their flags.
 This gives us a break-down sort of like real segments.
 
 ```
+ $ ./bloaty bloaty -d segments src/bloaty.o
      VM SIZE                     FILE SIZE
  --------------               --------------
-   0.0%       0 Section []     1.70Mi  76.6%
-   0.0%       0 Section [MS]    421Ki  18.5%
-  49.7%  28.5Ki Section [AX]   28.5Ki   1.3%
-   0.0%       0 [ELF Headers]  27.8Ki   1.2%
-  28.5%  16.4Ki Section [AXG]  16.4Ki   0.7%
-   0.0%       0 [None]         15.1Ki   0.7%
-   0.0%       0 Section [G]    10.8Ki   0.5%
-  17.5%  10.0Ki Section [A]    10.0Ki   0.4%
-   3.5%  2.00Ki Section [AMS]  2.00Ki   0.1%
-   0.5%     288 Section [AM]      288   0.0%
-   0.3%     149 Section [AG]      149   0.0%
-   0.0%      26 Section [WA]        8   0.0%
- 100.0%  57.3Ki TOTAL          2.22Mi 100.0%
+   0.0%       0 [Unmapped]     7.31Mi  67.6%
+   0.0%       0 Section []     2.95Mi  27.3%
+  85.2%   452Ki LOAD [RX]       452Ki   4.1%
+  11.3%  59.8Ki Section [AX]   59.8Ki   0.5%
+   0.0%       0 [ELF Headers]  28.3Ki   0.3%
+   2.9%  15.4Ki Section [A]    15.4Ki   0.1%
+   0.7%  3.46Ki LOAD [RW]      1.88Ki   0.0%
+   0.0%      41 Section [AW]       20   0.0%
+ 100.0%   531Ki TOTAL          10.8Mi 100.0%
 ```
 
 ## Sections
@@ -263,30 +306,30 @@ its own section.  Bloaty's default output is sections.
 
 ```
 $ bloaty -d sections bloaty
-     VM SIZE                         FILE SIZE
- --------------                  --------------
-   0.0%       0 .debug_info        2.40M   36.1%
-   0.0%       0 .debug_loc         1.78M   26.9%
-   0.0%       0 .debug_str          839k   12.4%
-   0.0%       0 .debug_ranges       533k    7.9%
-  71.0%    335k .text               335k    4.9%
-   0.0%       0 .debug_pubnames     259k    3.8%
-   0.0%       0 .debug_line         195k    2.9%
-   0.0%       0 .debug_abbrev      74.3k    1.1%
-  14.5%   68.5k .rodata            68.5k    1.0%
-   0.0%       0 .strtab            46.4k    0.7%
-   0.0%       0 .debug_pubtypes    44.7k    0.7%
-   6.5%   30.5k .eh_frame          30.5k    0.4%
-   0.0%       0 .symtab            29.6k    0.4%
-   2.8%   13.1k .gcc_except_table  13.1k    0.2%
-   0.0%       0 .debug_aranges     11.8k    0.2%
-   1.8%   8.61k [Other]            8.10k    0.1%
-   1.0%   4.70k .eh_frame_hdr      4.70k    0.1%
-   0.8%   3.89k .dynsym            3.89k    0.1%
-   0.8%   3.61k .dynstr            3.61k    0.1%
-   0.7%   3.38k .rela.plt          3.38k    0.0%
-   0.1%     612 [None]             3.24k    0.0%
- 100.0%    472k TOTAL              6.63M  100.0%
+      VM SIZE                         FILE SIZE
+ --------------                   --------------
+   0.0%       0 .debug_info        2.97Mi  38.3%
+   0.0%       0 .debug_loc         2.30Mi  29.7%
+   0.0%       0 .debug_str         1.03Mi  13.3%
+   0.0%       0 .debug_ranges       611Ki   7.7%
+  72.8%   332Ki .text               332Ki   4.2%
+   0.0%       0 .debug_line         218Ki   2.8%
+   0.0%       0 .debug_abbrev      85.4Ki   1.1%
+   0.0%       0 .strtab            62.8Ki   0.8%
+  13.2%  60.0Ki .rodata            60.0Ki   0.8%
+   7.0%  31.8Ki .eh_frame          31.8Ki   0.4%
+   0.0%       0 .symtab            27.8Ki   0.3%
+   0.0%       0 .debug_aranges     13.5Ki   0.2%
+   2.3%  10.5Ki .gcc_except_table  10.5Ki   0.1%
+   1.5%  6.77Ki [Other]            5.60Ki   0.1%
+   0.9%  4.18Ki .eh_frame_hdr      4.18Ki   0.1%
+   0.8%  3.54Ki .dynsym            3.54Ki   0.0%
+   0.8%  3.52Ki .dynstr            3.52Ki   0.0%
+   0.7%  2.98Ki .rela.plt          2.98Ki   0.0%
+   0.1%     568 [ELF Headers]      2.93Ki   0.0%
+   0.0%      34 [Unmapped]         2.85Ki   0.0%
+   0.0%       4 [None]                  0   0.0%
+ 100.0%   456Ki TOTAL              7.75Mi 100.0%
 ```
 
 ## Symbols
@@ -296,176 +339,145 @@ functions or variables.  C++ symbols are demangled for
 convenience.
 
 ```
-$ bloaty -d symbols
-     VM SIZE                                               FILE SIZE
- --------------                                        --------------
-  17.7%   83.5k [None]                                   6.25M   94.3%
-  60.9%    287k [Other]                                   286k    4.2%
-   2.8%   13.1k GCC_except_table2                        13.1k    0.2%
-   2.6%   12.3k re2::RE2::Match                          12.3k    0.2%
-   1.7%   7.83k re2::unicode_groups                      7.83k    0.1%
-   1.6%   7.56k re2::NFA::Search                         7.56k    0.1%
-   1.2%   5.76k re2::BitState::TrySearch                 5.76k    0.1%
-   1.0%   4.81k _dwarf_exec_frame_instr                  4.81k    0.1%
-   0.9%   4.49k re2::DFA::DFA                            4.49k    0.1%
-   0.9%   4.34k re2::Regexp::Parse                       4.34k    0.1%
-   0.9%   4.20k re2::RE2::Init                           4.20k    0.1%
-   0.9%   4.09k re2::Prog::IsOnePass                     4.09k    0.1%
-   0.9%   4.04k re2::Compiler::PostVisit                 4.04k    0.1%
-   0.8%   4.01k _dwarf_internal_srclines                 4.01k    0.1%
-   0.8%   3.91k re2::Regexp::FactorAlternationRecursive  3.91k    0.1%
-   0.8%   3.77k re2::DFA::RunStateOnByte                 3.77k    0.1%
-   0.8%   3.68k re2::unicode_casefold                    3.68k    0.1%
-   0.7%   3.40k main                                     3.40k    0.1%
-   0.7%   3.40k re2::DFA::InlinedSearchLoop              3.40k    0.1%
-   0.7%   3.38k re2::DFA::InlinedSearchLoop              3.38k    0.0%
-   0.7%   3.37k bloaty::ReadELFSymbols                   3.37k    0.0%
- 100.0%    472k TOTAL                                    6.63M  100.0%
+$ ./bloaty -d symbols bloaty
+      VM SIZE                                                                                        FILE SIZE
+ --------------                                                                                  --------------
+  17.9%  81.9Ki [Unmapped]                                                                        7.39Mi  95.3%
+  62.3%   283Ki [Other]                                                                            284Ki   3.6%
+   2.7%  12.3Ki re2::RE2::Match(re2::StringPiece const&, int, int, re2::RE2::Anchor, re2::String  12.3Ki   0.2%
+   1.7%  7.83Ki re2::unicode_groups                                                               7.83Ki   0.1%
+   1.7%  7.56Ki re2::NFA::Search                                                                  7.56Ki   0.1%
+   1.3%  5.76Ki re2::BitState::TrySearch                                                          5.76Ki   0.1%
+   1.2%  5.43Ki bloaty::Bloaty::ScanAndRollupFile                                                 5.43Ki   0.1%
+   1.0%  4.49Ki re2::DFA::DFA                                                                     4.49Ki   0.1%
+   1.0%  4.35Ki bool bloaty::(anonymous namespace)::ForEachElf<bloaty::(anonymous namespace)::Do  4.35Ki   0.1%
+   1.0%  4.34Ki re2::Regexp::Parse                                                                4.34Ki   0.1%
+   0.9%  4.20Ki re2::RE2::Init                                                                    4.20Ki   0.1%
+   0.9%  4.09Ki re2::Prog::IsOnePass                                                              4.09Ki   0.1%
+   0.9%  4.04Ki re2::Compiler::PostVisit                                                          4.04Ki   0.1%
+   0.9%  4.04Ki bloaty::ReadDWARFInlines                                                          4.04Ki   0.1%
+   0.9%  3.91Ki re2::Regexp::FactorAlternationRecursive                                           3.91Ki   0.0%
+   0.8%  3.77Ki re2::DFA::RunStateOnByte                                                          3.77Ki   0.0%
+   0.8%  3.68Ki re2::unicode_casefold                                                             3.68Ki   0.0%
+   0.8%  3.52Ki bloaty::ElfFileHandler::ProcessFile                                               3.52Ki   0.0%
+   0.7%  3.40Ki re2::DFA::InlinedSearchLoop(re2::DFA::SearchParams*, bool, bool, bool) [clone .c  3.40Ki   0.0%
+   0.7%  3.38Ki re2::DFA::InlinedSearchLoop(re2::DFA::SearchParams*, bool, bool, bool) [clone .c  3.38Ki   0.0%
+   0.0%     165 [None]                                                                                 0   0.0%
+ 100.0%   456Ki TOTAL                                                                             7.75Mi 100.0%
 ```
 
 ## Input Files
 
-When you are running Bloaty on a `.a` file, sometimes you want
-to break things down by the `.o` file inside the archive.
+When you pass multiple files to Bloaty, the `inputfiles`
+source will let you break it down by input file:
+
+$ ./bloaty -d inputfiles src/*.o
+     VM SIZE                    FILE SIZE
+ --------------              --------------
+  51.8%  75.2Ki src/bloaty.o  3.05Mi  48.2%
+  28.2%  40.9Ki src/dwarf.o   2.04Mi  32.2%
+  12.1%  17.5Ki src/elf.o      579Ki   8.9%
+   5.5%  7.99Ki src/macho.o    415Ki   6.4%
+   2.5%  3.57Ki src/main.o     279Ki   4.3%
+ 100.0%   145Ki TOTAL         6.34Mi 100.0%
+
+## Archive Members
+
+When you are running Bloaty on a `.a` file, the `armembers`
+source will let you break it down by `.o` file inside the
+archive.
 
 ```
-$ bloaty -d inputfiles third_party/re2/obj/libre2.a
-     VM SIZE                          FILE SIZE
- --------------                    --------------
-  12.5%  63.5Ki re2.o               2.13Mi  12.0%
-  11.2%  56.7Ki regexp.o            2.08Mi  11.7%
-   9.6%  48.8Ki dfa.o               1.71Mi   9.7%
-   6.6%  33.4Ki prefilter_tree.o    1.53Mi   8.6%
-  10.1%  51.0Ki parse.o             1.31Mi   7.4%
-   7.1%  35.8Ki compile.o           1.13Mi   6.4%
-   5.6%  28.4Ki prefilter.o         1.07Mi   6.0%
-   5.5%  28.0Ki simplify.o           957Ki   5.3%
-   4.2%  21.2Ki nfa.o                866Ki   4.8%
-   3.8%  19.0Ki mimics_pcre.o        760Ki   4.2%
-   2.6%  13.2Ki set.o                741Ki   4.1%
-   3.0%  15.4Ki prog.o               602Ki   3.3%
-   2.8%  14.4Ki tostring.o           581Ki   3.2%
-   1.7%  8.61Ki filtered_re2.o       553Ki   3.1%
-   2.3%  11.9Ki bitstate.o           533Ki   2.9%
-   1.0%  5.12Ki [Other]              407Ki   2.3%
-   1.8%  8.98Ki onepass.o            398Ki   2.2%
-   6.6%  33.4Ki unicode_groups.o     198Ki   1.1%
-   0.6%  3.14Ki stringpiece.o        116Ki   0.6%
-   0.2%  1.23Ki strutil.o           97.0Ki   0.5%
-   1.1%  5.80Ki unicode_casefold.o  89.7Ki   0.5%
- 100.0%   506Ki TOTAL               17.7Mi 100.0%
+./bloaty -d armembers src/libbloaty.a 
+     VM SIZE                         FILE SIZE
+ --------------                   --------------
+  53.1%  75.2Ki bloaty.o           3.05Mi  50.1%
+  28.9%  40.9Ki dwarf.o            2.04Mi  33.5%
+  12.4%  17.5Ki elf.o               579Ki   9.3%
+   5.6%  7.99Ki macho.o             415Ki   6.7%
+   0.0%       0 [AR Symbol Table]  27.3Ki   0.4%
+   0.0%       0 [AR Headers]          308   0.0%
+ 100.0%   141Ki TOTAL              6.10Mi 100.0%
 ```
 
 You are free to use this data source even for non-`.a`
 files, but it won't be very useful since it will always just
-resolve to the input file you passed.
+resolve to the input file (the `.a` file).
 
-## Source Files
+## Compile Units
 
-Using debug information, we can tell what source file each
-bit of the binary came from.  Specifically, this uses the
-"address ranges" or "aranges" information from DWARF.  It's
-not perfect and sometimes you'll see some of the binary show
-up as `[None]` if it's not mentioned in aranges.  But it can
-tell us a lot.
+Using debug information, we can tell what compile unit (and
+corresponding source file) each bit of the binary came from.
+There are a couple different places in DWARF we can look for
+this information; currently we mainly use the
+`.debug_aranges` section.  It's not perfect and sometimes
+you'll see some of the binary show up as `[None]` if it's
+not mentioned in aranges (improving this is a TODO).  But it
+can tell us a lot.
 
 ```
-$ ./bloaty -d sourcefiles bloaty
+ $ ./bloaty -d compileunits bloaty
      VM SIZE                            FILE SIZE
- --------------                     --------------
-  42.5%    200k [None]                6.36M   96.0%
-   8.5%   40.1k bloaty.cc             40.0k    0.6%
-   6.9%   32.5k re2/re2.cc            32.5k    0.5%
-   6.7%   31.6k re2/dfa.cc            31.6k    0.5%
-   6.6%   31.4k re2/parse.cc          31.4k    0.5%
-   5.9%   27.8k re2/regexp.cc         27.8k    0.4%
-   5.0%   23.7k re2/compile.cc        23.7k    0.3%
-   4.2%   19.7k re2/simplify.cc       19.7k    0.3%
-   3.0%   14.2k re2/nfa.cc            14.2k    0.2%
-   2.3%   10.6k elf.cc                10.6k    0.2%
-   1.8%   8.34k re2/bitstate.cc       8.34k    0.1%
-   1.7%   7.84k re2/prog.cc           7.84k    0.1%
-   1.5%   7.16k dwarf.cc              7.16k    0.1%
-   1.5%   7.13k re2/tostring.cc       7.13k    0.1%
-   1.4%   6.67k re2/onepass.cc        6.67k    0.1%
-   0.1%     666 util/stringprintf.cc    666    0.0%
-   0.1%     590 macho.cc                590    0.0%
-   0.1%     573 util/strutil.cc         573    0.0%
-   0.1%     476 util/rune.cc            476    0.0%
-   0.1%     414 re2/stringpiece.cc      414    0.0%
-   0.1%     383 [Other]                 383    0.0%
- 100.0%    472k TOTAL                 6.63M  100.0%
+ --------------                      --------------
+  27.9%   128Ki [None]                7.43Mi  95.9%
+  12.9%  59.2Ki src/bloaty.cc         59.0Ki   0.7%
+   7.3%  33.4Ki re2/re2.cc            32.3Ki   0.4%
+   6.9%  31.6Ki re2/dfa.cc            31.6Ki   0.4%
+   6.8%  31.4Ki re2/parse.cc          31.4Ki   0.4%
+   6.7%  30.9Ki src/dwarf.cc          30.9Ki   0.4%
+   6.7%  30.6Ki re2/regexp.cc         27.8Ki   0.4%
+   5.1%  23.7Ki re2/compile.cc        23.7Ki   0.3%
+   4.3%  19.7Ki re2/simplify.cc       19.7Ki   0.2%
+   3.2%  14.8Ki src/elf.cc            14.8Ki   0.2%
+   3.1%  14.2Ki re2/nfa.cc            14.2Ki   0.2%
+   1.8%  8.34Ki re2/bitstate.cc       8.34Ki   0.1%
+   1.7%  7.84Ki re2/prog.cc           7.84Ki   0.1%
+   1.6%  7.13Ki re2/tostring.cc       7.13Ki   0.1%
+   1.5%  6.67Ki re2/onepass.cc        6.67Ki   0.1%
+   1.4%  6.58Ki src/macho.cc          6.58Ki   0.1%
+   0.7%  3.27Ki src/main.cc           3.27Ki   0.0%
+   0.2%     797 [Other]                  797   0.0%
+   0.1%     666 util/stringprintf.cc     666   0.0%
+   0.1%     573 util/strutil.cc          573   0.0%
+   0.1%     476 util/rune.cc             476   0.0%
+ 100.0%   460Ki TOTAL                 7.75Mi 100.0%
 ```
 
-## Source Lines
+## Inlines
 
-The DWARF debugging information also contains "source line"
+The DWARF debugging information also contains "line info"
 information that understands inlining.  So within a
 function, it will know which instructions came from an
 inlined function from a header file.  This is the
 information the debugger uses to point at a specific source
 line as you're tracing through a program.
 
-There are two variations of this data source.  One shows
-source file and line together, and one shows just source
-files:
-
 ```
-$ ./bloaty -d lineinfo bloaty
-     VM SIZE                                                                                        FILE SIZE
- --------------                                                                                 --------------
-  41.8%    197k [None]                                                                            6.36M   96.0%
-  11.8%   55.7k /usr/include/c++/4.8/bits/char_traits.h:243                                       55.7k    0.8%
-  11.5%   54.2k /usr/local/google/home/haberman/code/bloaty/third_party/re2/./util/sparse_set.h:  54.2k    0.8%
-   9.7%   46.0k [Other]                                                                           46.0k    0.7%
-   9.4%   44.5k /usr/include/c++/4.8/ext/atomicity.h:84                                           44.5k    0.7%
-   8.7%   40.9k /usr/local/google/home/haberman/code/bloaty/bloaty.cc:134                         40.9k    0.6%
-   3.8%   17.7k /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8/../../../../include/c++/4.8/bits/char_t  17.7k    0.3%
-   0.5%   2.26k /usr/include/c++/4.8/bits/basic_ios.h:456                                         2.26k    0.0%
-   0.5%   2.21k /usr/include/c++/4.8/ostream:535                                                  2.21k    0.0%
-   0.4%   1.77k /usr/include/c++/4.8/streambuf:466                                                1.77k    0.0%
-   0.4%   1.67k /usr/include/c++/4.8/bits/basic_string.h:539                                      1.67k    0.0%
-   0.2%   1.04k /usr/include/c++/4.8/bits/basic_ios.h:276                                         1.04k    0.0%
-   0.2%     877 /usr/include/c++/4.8/ostream:385                                                    877    0.0%
-   0.2%     864 /usr/include/c++/4.8/bits/basic_string.h:1009                                       864    0.0%
-   0.2%     864 /usr/include/c++/4.8/bits/basic_string.h:583                                        864    0.0%
-   0.2%     803 /usr/include/c++/4.8/bits/basic_string.h:249                                        803    0.0%
-   0.2%     726 /usr/include/c++/4.8/sstream:424                                                    726    0.0%
-   0.1%     721 /usr/include/c++/4.8/bits/char_traits.h:271                                         721    0.0%
-   0.1%     678 /usr/include/c++/4.8/bits/basic_string.h:275                                        678    0.0%
-   0.1%     666 /usr/include/c++/4.8/ostream:93                                                     666    0.0%
-   0.1%     650 /usr/local/google/home/haberman/code/bloaty/third_party/re2/./util/logging.h:62     650    0.0%
- 100.0%    472k TOTAL                                                                             6.63M  100.0%
-```
-
-For files only:
-
-```
-$ ./bloaty -d lineinfo:file
-     VM SIZE                                                                                        FILE SIZE
- --------------                                                                                 --------------
-  41.9%    198k [None]                                                                            6.36M   96.0%
-  11.9%   56.4k /usr/local/google/home/haberman/code/bloaty/third_party/re2/./util/sparse_set.h   56.4k    0.8%
-   8.7%   41.0k /usr/local/google/home/haberman/code/bloaty/bloaty.cc                             41.0k    0.6%
-   6.2%   29.3k [Other]                                                                           29.3k    0.4%
-   4.8%   22.6k /usr/include/c++/4.8/bits/basic_string.h                                          22.6k    0.3%
-   4.0%   18.8k /usr/include/c++/4.8/ext/atomicity.h                                              18.8k    0.3%
-   3.8%   17.7k /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8/../../../../include/c++/4.8/bits/char_t  17.7k    0.3%
-   2.2%   10.4k /usr/local/google/home/haberman/code/bloaty/third_party/re2/re2/compile.cc        10.4k    0.2%
-   2.1%   10.1k /usr/include/c++/4.8/ostream                                                      10.1k    0.1%
-   1.9%   8.97k /usr/local/google/home/haberman/code/bloaty/third_party/re2/re2/dfa.cc            8.97k    0.1%
-   1.7%   7.98k /usr/include/c++/4.8/bits/basic_ios.h                                             7.98k    0.1%
-   1.5%   6.91k /usr/include/c++/4.8/sstream                                                      6.91k    0.1%
-   1.4%   6.46k /usr/local/google/home/haberman/code/bloaty/third_party/re2/re2/re2.cc            6.46k    0.1%
-   1.2%   5.86k /usr/local/google/home/haberman/code/bloaty/third_party/re2/./util/logging.h      5.86k    0.1%
-   1.2%   5.51k /usr/include/c++/4.8/bits/stl_tree.h                                              5.51k    0.1%
-   1.1%   5.39k /usr/include/c++/4.8/streambuf                                                    5.39k    0.1%
-   1.1%   5.22k /usr/include/c++/4.8/bits/basic_string.tcc                                        5.22k    0.1%
-   1.0%   4.49k /usr/include/c++/4.8/bits/stl_deque.h                                             4.49k    0.1%
-   0.8%   3.85k /usr/local/google/home/haberman/code/bloaty/third_party/re2/re2/simplify.cc       3.85k    0.1%
-   0.8%   3.83k /usr/local/google/home/haberman/code/bloaty/third_party/re2/./re2/walker-inl.h    3.83k    0.1%
-   0.7%   3.38k /usr/include/c++/4.8/bits/char_traits.h                                           3.38k    0.0%
- 100.0%    472k TOTAL                                                                             6.63M  100.0%
+$ ./bloaty -d inlines bloaty 
+     VM SIZE                                                    FILE SIZE
+ --------------                                              --------------
+   2.4%   110Ki [None]                                        7.42Mi  95.6%
+  90.3%  4.01Mi /usr/include/c++/4.8/bitsstl_vector.h:414     15.3Ki   0.2%
+   5.5%   250Ki [Other]                                        250Ki   3.2%
+   0.3%  11.4Ki /usr/include/c++/4.8/bitsbasic_string.h:539   11.4Ki   0.1%
+   0.2%  8.81Ki /usr/include/c++/4.8ostream:535               8.81Ki   0.1%
+   0.2%  7.59Ki /usr/include/c++/4.8/bitsbasic_ios.h:456      7.59Ki   0.1%
+   0.1%  6.20Ki /usr/include/c++/4.8streambuf:466             6.20Ki   0.1%
+   0.1%  6.06Ki /usr/include/c++/4.8/bitsbasic_string.h:249   6.06Ki   0.1%
+   0.1%  4.24Ki /usr/include/c++/4.8/bitsbasic_string.h:240   4.24Ki   0.1%
+   0.1%  3.61Ki /usr/include/c++/4.8/bitsbasic_ios.h:276      3.61Ki   0.0%
+   0.1%  3.51Ki /usr/include/c++/4.8/extatomicity.h:81        3.51Ki   0.0%
+   0.1%  3.19Ki /usr/include/c++/4.8/bitsbasic_string.h:583   3.19Ki   0.0%
+   0.1%  3.06Ki /usr/include/c++/4.8/bitsbasic_string.h:293   3.06Ki   0.0%
+   0.1%  2.94Ki /usr/include/c++/4.8/extnew_allocator.h:110   2.94Ki   0.0%
+   0.1%  2.89Ki /usr/include/c++/4.8ostream:385               2.89Ki   0.0%
+   0.1%  2.87Ki /usr/include/c++/4.8/bitsstl_construct.h:102  2.87Ki   0.0%
+   0.1%  2.86Ki /usr/include/c++/4.8/extatomicity.h:84        2.86Ki   0.0%
+   0.1%  2.76Ki /usr/include/c++/4.8/extatomicity.h:49        2.76Ki   0.0%
+   0.1%  2.70Ki /usr/include/c++/4.8/bitschar_traits.h:271    2.70Ki   0.0%
+   0.1%  2.62Ki /usr/include/c++/4.8/bitsbasic_string.h:275   2.62Ki   0.0%
+   0.1%  2.58Ki /usr/include/c++/4.8ostream:93                2.58Ki   0.0%
+ 100.0%  4.45Mi TOTAL                                         7.75Mi 100.0%
 ```
 
 # Using Regular Expressions
@@ -474,8 +486,11 @@ You can filter the lists by using regular expressions.  For
 example, to view by source file by group all re2-related
 sources together, you can write:
 
+(TODO: this appears to be broken at the moment, needs
+fixing!)
+
 ```
-$ ./bloaty -d sourcefiles bloaty -r 'sourcefiles+=/.*re2.*/RE2/'
+$ ./bloaty -d inlines bloaty -r 'inlines:s/.*re2.*/RE2/'
      VM SIZE                            FILE SIZE
  --------------                     --------------
   42.5%    200k [None]                6.36M   96.0%
@@ -514,6 +529,11 @@ enable a lot of features:
   dominator tree) so users can see the weight of their
   binary in this way.
 
-We will probably also want to let the user optionally map
-symbols to higher-level abstractions, like rules in their
-build language.  I've prototyped this in earlier CLs.
+## Improving the quality of data sources
+
+One of the things we have to do in Bloaty is deal with
+incomplete information.  For examples, `.debug_aranges`
+which we use for the `compileunits` data source is often
+missing or incomplete.  Refining the input sources to be
+more complete and accurate will make help Bloaty's numbers
+be even more accurate.
