@@ -380,7 +380,8 @@ inline bool IsLittleEndian() {
   return *(char*)&x == 1;
 }
 
-#ifdef __GNUC__
+// These are more efficient but appear not to exist on OS X.
+#if defined(__GNUC__) && !defined(__APPLE__)
 
 template <class T, size_t size> struct ByteSwapper { T operator()(T val); };
 

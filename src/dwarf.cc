@@ -1333,7 +1333,7 @@ class FixedAttrReader {
   bool has_attr_[sizeof...(Args)];
 
   // The set of attributes we are expecting.
-  std::array<DwarfAttribute, sizeof...(Args)> attributes_;
+  DwarfAttribute attributes_[sizeof...(Args)];
 
   // The slots where we store the values we have parsed.
   ValueTuple values_;

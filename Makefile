@@ -10,19 +10,11 @@ else
   GC_SECTIONS = -Wl,-gc-sections
 endif
 
-third_party/re2/Makefile third_party/googletest/CMakeLists.txt: .gitmodules
-	git submodule init && git submodule update
-
-clean:
-	rm -f bloaty src/*.o
-	cd third_party/re2 && make clean
-	rm -rf *.dSYM
+bloaty: src/main.o src/libbloaty.a third_party/re2/obj/libre2.a
+	$(CXX) $(GC_SECTIONS) -o $@ $^ -lpthread
 
 src/libbloaty.a: src/elf.o src/bloaty.o src/dwarf.o src/macho.o
 	ar rcs $@ $^
-
-bloaty: src/main.o src/libbloaty.a third_party/re2/obj/libre2.a
-	$(CXX) $(GC_SECTIONS) -o $@ $^ -lpthread
 
 src/bloaty.o: src/bloaty.cc src/bloaty.h
 src/dwarf.o: src/dwarf.cc src/bloaty.h src/dwarf_constants.h
@@ -33,6 +25,13 @@ src/main.o: src/main.cc src/bloaty.h
 third_party/re2/obj/libre2.a: third_party/re2/Makefile
 	make -j8 -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
 
+third_party/re2/Makefile third_party/googletest/CMakeLists.txt: .gitmodules
+	git submodule init && git submodule update
+
+clean:
+	rm -f bloaty src/*.o
+	cd third_party/re2 && make clean
+	rm -rf *.dSYM
 
 ## Tests #######################################################################
 

@@ -428,7 +428,6 @@ TEST_F(BloatyTest, SimpleBinary) {
 
   // This is currently broken for the 32-bit x86 binary.
   // TODO(haberman): fix this.
-  std::cerr << "YO testdir: " << GetTestDirectory() << "\n";
   if (GetTestDirectory() != "linux-x86") {
     RunBloaty({"bloaty", "-d", "compileunits,symbols", file});
     auto row = FindRow("bar.o.c");

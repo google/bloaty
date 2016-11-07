@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -26,6 +27,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <signal.h>
@@ -712,10 +714,11 @@ std::string DoubleStringPrintf(const char *fmt, double d) {
 }
 
 std::string SiPrint(ssize_t size, bool force_sign) {
-  std::array<std::string, 5> prefixes = {{"", "Ki", "Mi", "Gi", "Ti"}};
+  const char *prefixes[] = {"", "Ki", "Mi", "Gi", "Ti"};
+  size_t num_prefixes = 5;
   int n = 0;
   double size_d = size;
-  while (fabs(size_d) > 1024 && n < prefixes.size() - 2) {
+  while (fabs(size_d) > 1024 && n < num_prefixes - 2) {
     size_d /= 1024;
     n++;
   }
@@ -946,8 +949,9 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
     while (it != mappings_.end() && EntryContains(it, addr)) {
       if (verbose_level > 1) {
         fprintf(stderr,
-                "WARN: adding mapping [%lx, %lx] for label %s, this "
-                "conflicts with existing mapping [%16lx, %16lx] for label %s\n",
+                "WARN: adding mapping [%" PRIx64 "x, %" PRIx64 "x] for label"
+                "%s, this conflicts with existing mapping [%" PRIx64 ", %"
+                PRIx64 "] for label %s\n",
                 addr, end, val.c_str(), it->first, it->second.end,
                 it->second.label.c_str());
       }
@@ -964,8 +968,9 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
       this_end = std::min(end, it->first);
       if (verbose_level > 1) {
         fprintf(stderr,
-                "WARN(2): adding mapping [%lx, %lx] for label %s, this "
-                "conflicts with existing mapping [%16lx, %16lx] for label %s\n",
+                "WARN(2): adding mapping [%" PRIx64 ", %" PRIx64 "] for label "
+                "%s, this conflicts with existing mapping [%" PRIx64 ", %"
+                PRIx64 "] for label %s\n",
                 addr, end, val.c_str(), it->first, it->second.end,
                 it->second.label.c_str());
       }
@@ -1004,8 +1009,8 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
     if (translator.TranslateAndTrimRangeWithEntry(it, addr, end, &this_addr,
                                                   &this_size)) {
       if (verbose_level > 2) {
-        fprintf(stderr, "  -> translates to: [%lx, %lx]\n", this_addr,
-                this_size);
+        fprintf(stderr, "  -> translates to: [%" PRIx64 " %" PRIx64 "]\n",
+                this_addr, this_size);
       }
       other->AddRange(this_addr, this_size, val);
     }
@@ -1203,7 +1208,7 @@ RangeSink::~RangeSink() {}
 void RangeSink::AddFileRange(StringPiece name, uint64_t fileoff,
                              uint64_t filesize) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddFileRange(%.*s, %lx, %lx)\n",
+    fprintf(stderr, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             fileoff, filesize);
   }
@@ -1217,7 +1222,7 @@ void RangeSink::AddFileRange(StringPiece name, uint64_t fileoff,
 void RangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
                            const std::string& name) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddVMRange(%.*s, %lx, %lx)\n",
+    fprintf(stderr, "[%s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             vmaddr, vmsize);
   }
@@ -1243,7 +1248,8 @@ void RangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
 void RangeSink::AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
                          uint64_t fileoff, uint64_t filesize) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddRange(%.*s, %lx, %lx, %lx, %lx)\n",
+    fprintf(stderr, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
+            ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             vmaddr, vmsize, fileoff, filesize);
   }
@@ -1434,7 +1440,8 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
     }
 
     void PrintMapRow(StringPiece str, uint64_t start, uint64_t end) {
-      printf("[%16lx, %16lx] %.*s\n", start, end, (int)str.size(), str.data());
+      printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
+             str.data());
     }
 
     MemoryMap* base_map() { return &base_map_; }
