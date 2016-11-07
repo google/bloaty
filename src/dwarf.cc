@@ -42,7 +42,7 @@ int DivRoundUp(int n, int d) {
   return (n + (d - 1)) / d;
 }
 
-#define CHECK_RETURN(call) if (!(call)) { __builtin_trap(); return false; }
+#define CHECK_RETURN(call) if (!(call)) { return false; }
 #define CHECK_RETURN_STRINGPIECE(call) if (!(call)) { return StringPiece(); }
 
 
