@@ -24,6 +24,13 @@ $ make
 Bloaty depends on RE2, so the Makefile will download it
 (via a Git submodule) and build that also.
 
+To run the tests (requires that `cmake` is installed and
+available on your path) run:
+
+```
+$ make test
+```
+
 ## Running Bloaty
 
 Run it directly on a binary target.  For example, run it on itself.
