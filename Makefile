@@ -4,6 +4,7 @@
 # Disable -Wsign-compare because StringPiece currently unhelpfully defines
 # size() as ssize_t instad of size_t.
 CXXFLAGS=-std=c++11 -ffunction-sections -fdata-sections -Wall -Wno-sign-compare -g -I third_party/re2 -I. -Isrc -O2
+RE2_H=third_party/re2/re2/re2.h
 
 ifeq ($(shell uname), Darwin)
 else
@@ -16,16 +17,16 @@ bloaty: src/main.o src/libbloaty.a third_party/re2/obj/libre2.a
 src/libbloaty.a: src/elf.o src/bloaty.o src/dwarf.o src/macho.o
 	ar rcs $@ $^
 
-src/bloaty.o: src/bloaty.cc src/bloaty.h
-src/dwarf.o: src/dwarf.cc src/bloaty.h src/dwarf_constants.h
-src/elf.o: src/elf.cc src/bloaty.h
-src/macho.o: src/macho.cc src/bloaty.h
-src/main.o: src/main.cc src/bloaty.h
+src/bloaty.o: src/bloaty.cc src/bloaty.h $(RE2_H)
+src/dwarf.o: src/dwarf.cc src/bloaty.h src/dwarf_constants.h $(RE2_H)
+src/elf.o: src/elf.cc src/bloaty.h $(RE2_H)
+src/macho.o: src/macho.cc src/bloaty.h $(RE2_H)
+src/main.o: src/main.cc src/bloaty.h $(RE2_H)
 
 third_party/re2/obj/libre2.a: third_party/re2/Makefile
-	make -j8 -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
+	make -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
 
-third_party/re2/Makefile third_party/googletest/CMakeLists.txt: .gitmodules
+third_party/re2/Makefile $(RE2_H) third_party/googletest/CMakeLists.txt: .gitmodules
 	git submodule init && git submodule update
 
 clean:
