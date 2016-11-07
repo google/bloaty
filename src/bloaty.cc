@@ -562,6 +562,10 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
             val_to_rank =
                 std::max(std::abs(row.vmsize), std::abs(row.filesize));
             break;
+          default:
+            assert(false);
+            val_to_rank = -1;
+            break;
         }
 
         // Reverse so that numerically we always sort high-to-low.

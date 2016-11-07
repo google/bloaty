@@ -1832,7 +1832,6 @@ bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
 
     CHECK_RETURN(line_info_reader.SeekToOffset(attr_reader.GetAttribute<0>(),
                  die_reader.unit_sizes().address_size));
-    uint64_t begin_addr = 0;
     uint64_t last_addr = 0;
     std::string last_source;
 
@@ -1846,11 +1845,10 @@ bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                                     number, include_line);
       if (line_info.end_sequence ||
           (!last_source.empty() && name != last_source)) {
-        sink->AddVMRange(begin_addr, addr - begin_addr, last_source);
-        begin_addr = addr;
+        sink->AddVMRange(last_addr, addr - last_addr, last_source);
+        last_addr = addr;
       }
       last_source = name;
-      last_addr = addr;
     }
 
     if (!die_reader.NextCompilationUnit()) {
