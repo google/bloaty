@@ -749,11 +749,11 @@ std::string SiPrint(ssize_t size, bool force_sign) {
 
 std::string PercentString(double percent, bool diff_mode) {
   if (diff_mode) {
-    if (percent == 0 || isnan(percent)) {
+    if (percent == 0 || std::isnan(percent)) {
       return " [ = ]";
     } else if (percent == -100) {
       return " [DEL]";
-    } else if (isinf(percent)) {
+    } else if (std::isinf(percent)) {
       return " [NEW]";
     } else {
       // We want to keep this fixed-width even if the percent is very large.
