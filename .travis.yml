@@ -1,0 +1,14 @@
+language: cpp
+
+sudo: required  # only required for dist: trusty
+dist: trusty
+
+compiler:
+  - clang
+  - gcc
+
+os:
+  - linux
+  - osx
+
+script: make test
