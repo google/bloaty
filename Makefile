@@ -24,7 +24,7 @@ src/macho.o: src/macho.cc src/bloaty.h $(RE2_H)
 src/main.o: src/main.cc src/bloaty.h $(RE2_H)
 
 third_party/re2/obj/libre2.a: third_party/re2/Makefile
-	make -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
+	$(MAKE) -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
 
 third_party/re2/Makefile $(RE2_H) third_party/googletest/CMakeLists.txt: .gitmodules
 	git submodule init && git submodule update
@@ -32,7 +32,7 @@ third_party/re2/Makefile $(RE2_H) third_party/googletest/CMakeLists.txt: .gitmod
 clean:
 	rm -f bloaty src/*.o src/libbloaty.a
 	rm -f tests/range_map_test tests/bloaty_test
-	cd third_party/re2 && make clean
+	cd third_party/re2 && $(MAKE) clean
 	rm -rf *.dSYM
 
 ## Tests #######################################################################
@@ -53,4 +53,4 @@ tests/bloaty_test: tests/bloaty_test.cc src/libbloaty.a $(TESTLIBS) third_party/
 	$(CXX) $(CXXFLAGS) $(TESTFLAGS) -o $@ $^ -lpthread
 
 third_party/googletest/googlemock/gtest/libgtest_main.a: third_party/googletest/CMakeLists.txt
-	cd third_party/googletest && cmake . && make
+	cd third_party/googletest && cmake . && $(MAKE)
