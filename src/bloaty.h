@@ -21,6 +21,9 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#ifdef __FreeBSD__
+#include <sys/endian.h>
+#endif
 
 #include <memory>
 #include <set>
@@ -392,17 +395,35 @@ struct ByteSwapper<T, 1> {
 
 template <class T>
 struct ByteSwapper<T, 2> {
-  T operator()(T val) { return __bswap_16(val); }
+  T operator()(T val) {
+#ifdef __FreeBSD__
+    return bswap16(val);
+#else
+    return __bswap_16(val);
+#endif
+  }
 };
 
 template <class T>
 struct ByteSwapper<T, 4> {
-  T operator()(T val) { return __bswap_32(val); }
+  T operator()(T val) {
+#ifdef __FreeBSD__
+    return bswap32(val);
+#else
+    return __bswap_32(val);
+#endif
+  }
 };
 
 template <class T>
 struct ByteSwapper<T, 8> {
-  T operator()(T val) { return __bswap_64(val); }
+  T operator()(T val) {
+#ifdef __FreeBSD__
+    return bswap64(val);
+#else
+    return __bswap_64(val);
+#endif
+  }
 };
 
 template <class T>
