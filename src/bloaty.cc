@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cmath>
+#include <cinttypes>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -27,7 +28,6 @@
 #include <vector>
 
 #include <fcntl.h>
-#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <signal.h>
