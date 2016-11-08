@@ -1,6 +1,8 @@
 
 # Bloaty McBloatface: a size profiler for binaries
 
+[![Build Status](https://travis-ci.org/google/bloaty.svg?branch=master)](https://travis-ci.org/google/bloaty)
+
 Ever wondered what's making your ELF or Mach-O binary big?
 Bloaty McBloatface will show you a size profile of the binary
 so you can understand what's taking up space inside.
