@@ -26,8 +26,12 @@ src/main.o: src/main.cc src/bloaty.h $(RE2_H)
 third_party/re2/obj/libre2.a: third_party/re2/Makefile
 	$(MAKE) -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
 
-third_party/re2/Makefile $(RE2_H) third_party/googletest/CMakeLists.txt: .gitmodules
+# These targets share a pattern match to coerce make into only executing once
+# See this discussion: http://stackoverflow.com/a/3077254/1780018
+third%party/re2/Makefile third%party/re2/re2/re2.h third%party/googletest/CMakeLists.txt: .gitmodules
 	git submodule init && git submodule update
+	@# Ensure .gitmodules cannot be newer
+	touch .gitmodules -r $@
 
 clean:
 	rm -f bloaty src/*.o src/libbloaty.a
