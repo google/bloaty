@@ -1565,7 +1565,9 @@ bool BloatyMain(int argc, char* argv[], RollupOutput* output) {
       }
       base_files = true;
     } else if (strcmp(argv[i], "-d") == 0) {
-      CheckNextArg(i, argc, "-d");
+      if (!CheckNextArg(i, argc, "-d")) {
+        return false;
+      }
       std::vector<std::string> names;
       Split(argv[++i], ',', &names);
       for (const auto& name : names) {
@@ -1590,10 +1592,14 @@ bool BloatyMain(int argc, char* argv[], RollupOutput* output) {
 
       source->munger->AddRegex(regex, substitution);
     } else if (strcmp(argv[i], "-n") == 0) {
-      CheckNextArg(i, argc, "-n");
+      if (!CheckNextArg(i, argc, "-n")) {
+        return false;
+      }
       bloaty.SetRowLimit(strtod(argv[++i], NULL));
     } else if (strcmp(argv[i], "-s") == 0) {
-      CheckNextArg(i, argc, "-s");
+      if (!CheckNextArg(i, argc, "-s")) {
+        return false;
+      }
       i++;
       if (strcmp(argv[i], "vm") == 0) {
         sortby = SortBy::kVM;
