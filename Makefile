@@ -40,16 +40,20 @@ clean:
 TESTFLAGS=-Ithird_party/googletest/googletest/include -Ithird_party/googletest/googlemock/include
 TESTLIBS=third_party/googletest/googlemock/gtest/libgtest_main.a third_party/googletest/googlemock/gtest/libgtest.a
 
-test: tests/range_map_test tests/bloaty_test
+test: tests/range_map_test tests/bloaty_test tests/bloaty_misc_test
 	TOP=`pwd`; \
 	tests/range_map_test && \
 	(cd tests/testdata/linux-x86_64 && $$TOP/tests/bloaty_test) && \
-	(cd tests/testdata/linux-x86 && $$TOP/tests/bloaty_test)
+	(cd tests/testdata/linux-x86 && $$TOP/tests/bloaty_test) && \
+	(cd tests/testdata/misc && $$TOP/tests/bloaty_misc_test)
 
 tests/range_map_test: tests/range_map_test.cc src/libbloaty.a $(TESTLIBS) third_party/re2/obj/libre2.a
 	$(CXX) $(CXXFLAGS) $(TESTFLAGS) -o $@ $^ -lpthread
 
 tests/bloaty_test: tests/bloaty_test.cc src/libbloaty.a $(TESTLIBS) third_party/re2/obj/libre2.a
+	$(CXX) $(CXXFLAGS) $(TESTFLAGS) -o $@ $^ -lpthread
+
+tests/bloaty_misc_test: tests/bloaty_misc_test.cc src/libbloaty.a $(TESTLIBS) third_party/re2/obj/libre2.a
 	$(CXX) $(CXXFLAGS) $(TESTFLAGS) -o $@ $^ -lpthread
 
 third_party/googletest/googlemock/gtest/libgtest_main.a: third_party/googletest/CMakeLists.txt
