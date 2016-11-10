@@ -68,6 +68,7 @@ class ElfFile {
 
   const Elf64_Ehdr& header() const { return header_; }
   Elf64_Xword section_count() const { return section_count_; }
+  Elf64_Xword section_string_index() const { return section_string_index_; }
 
   // Represents an ELF segment (data used by the loader / dynamic linker).
   class Segment {
@@ -160,6 +161,7 @@ class ElfFile {
   StringPiece data_;
   Elf64_Ehdr header_;
   Elf64_Xword section_count_;
+  Elf64_Xword section_string_index_;
   StringPiece header_region_;
   StringPiece section_headers_;
   StringPiece segment_headers_;
@@ -325,14 +327,28 @@ bool ElfFile::Initialize() {
 
   CHECK_RETURN(ReadStruct<Elf32_Ehdr>(0, EhdrMunger(), &header_));
 
-  section_count_ = header_.e_shnum;
+  Section section0;
+  bool has_section0 = 0;
 
-  if (section_count_ == 0) {
-    // ELF extension: if the section count overflows the e_shnum field, it is
-    // stored in sh_size of the first section header.
-    Section section;
-    CHECK_RETURN(ReadSection(header_.e_shoff, &section));
-    section_count_ = section.header().sh_size;
+  // ELF extensions: if certain fields overflow, we have to find their true data
+  // from elsewhere.  For more info see:
+  // https://docs.oracle.com/cd/E19683-01/817-3677/chapter6-94076/index.html
+  if (header_.e_shoff > 0 &&
+      data_.size() > (header_.e_shoff + header_.e_shentsize)) {
+    section_count_ = 1;
+    CHECK_RETURN(ReadSection(0, &section0));
+    has_section0 = true;
+  }
+
+  section_count_ = header_.e_shnum;
+  section_string_index_ = header_.e_shstrndx;
+
+  if (section_count_ == 0 && has_section0) {
+    section_count_ = section0.header().sh_size;
+  }
+
+  if (section_string_index_ == SHN_XINDEX && has_section0) {
+    section_string_index_ = section0.header().sh_link;
   }
 
   CHECK_RETURN(SetRegion(0, header_.e_ehsize, &header_region_));
@@ -662,9 +678,14 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
   bool is_object = IsObjectFile(sink->input_file().data());
   return ForEachElf(
       sink, [=](const ElfFile& elf, StringPiece filename, uint32_t index_base) {
+        if (elf.section_count() == 0) {
+          return true;
+        }
+
         std::string name_from_flags;
         ElfFile::Section section_names;
-        CHECK_RETURN(elf.ReadSection(elf.header().e_shstrndx, &section_names));
+        CHECK_RETURN(
+            elf.ReadSection(elf.section_string_index(), &section_names));
         CHECK_RETURN(section_names.header().sh_type == SHT_STRTAB);
 
         for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
@@ -775,7 +796,7 @@ static bool ReadELFSegments(RangeSink* sink) {
 
 static bool ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
   ElfFile::Section section_names;
-  CHECK_RETURN(elf.ReadSection(elf.header().e_shstrndx, &section_names));
+  CHECK_RETURN(elf.ReadSection(elf.section_string_index(), &section_names));
   CHECK_RETURN(section_names.header().sh_type == SHT_STRTAB);
 
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
