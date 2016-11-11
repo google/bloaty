@@ -1032,6 +1032,7 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
       case DW_FORM_ref_sig8:
         return func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
       case DW_FORM_addr:
+      case DW_FORM_ref_addr:
         if (sizes.address_size) {
           return func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
         } else if (sizes.address_size == 4) {
