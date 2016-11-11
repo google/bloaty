@@ -507,6 +507,12 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
   return true;
 }
 
+void MaybeAddFileRange(RangeSink* sink, StringPiece label, StringPiece range) {
+  if (sink) {
+    sink->AddFileRange(label, range);
+  }
+}
+
 template <class Func>
 bool OnElfFile(const ElfFile& elf, StringPiece filename,
                unsigned long index_base, RangeSink* sink, Func func) {
@@ -514,29 +520,29 @@ bool OnElfFile(const ElfFile& elf, StringPiece filename,
 
   // Add these *after* running the user callback.  That way if there is
   // overlap, the user's annotations will take precedence.
-  sink->AddFileRange("[ELF Headers]", elf.header_region());
-  sink->AddFileRange("[ELF Headers]", elf.section_headers());
-  sink->AddFileRange("[ELF Headers]", elf.segment_headers());
+  MaybeAddFileRange(sink, "[ELF Headers]", elf.header_region());
+  MaybeAddFileRange(sink, "[ELF Headers]", elf.section_headers());
+  MaybeAddFileRange(sink, "[ELF Headers]", elf.segment_headers());
 
   // Any sections of the file not covered by any segments/sections/symbols/etc.
-  sink->AddFileRange("[Unmapped]", elf.entire_file());
+  MaybeAddFileRange(sink, "[Unmapped]", elf.entire_file());
 
   return true;
 }
 
 template <class Func>
-bool ForEachElf(RangeSink* sink, Func func) {
-  ArFile ar_file(sink->input_file().data());
+bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
+  ArFile ar_file(file.data());
   unsigned long index_base = 0;
 
   if (ar_file.IsOpen()) {
     ArFile::MemberFile member;
     ArFile::MemberReader reader(ar_file);
 
-    sink->AddFileRange("[AR Headers]", ar_file.magic());
+    MaybeAddFileRange(sink, "[AR Headers]", ar_file.magic());
 
     while (reader.ReadMember(&member)) {
-      sink->AddFileRange("[AR Headers]", member.header);
+      MaybeAddFileRange(sink, "[AR Headers]", member.header);
       switch (member.file_type) {
         case ArFile::MemberFile::kNormal: {
           ElfFile elf(member.contents);
@@ -544,28 +550,28 @@ bool ForEachElf(RangeSink* sink, Func func) {
             CHECK_RETURN(OnElfFile(elf, member.filename, index_base, sink, func));
             index_base += elf.section_count();
           } else {
-            sink->AddFileRange("[AR Non-ELF Member File]", member.contents);
+            MaybeAddFileRange(sink, "[AR Non-ELF Member File]",
+                              member.contents);
           }
           break;
         }
         case ArFile::MemberFile::kSymbolTable:
-          sink->AddFileRange("[AR Symbol Table]", member.contents);
+          MaybeAddFileRange(sink, "[AR Symbol Table]", member.contents);
           break;
         case ArFile::MemberFile::kLongFilenameTable:
-          sink->AddFileRange("[AR Headers]", member.contents);
+          MaybeAddFileRange(sink, "[AR Headers]", member.contents);
           break;
       }
     }
   } else {
-    ElfFile elf(sink->input_file().data());
+    ElfFile elf(file.data());
     if (!elf.IsOpen()) {
       fprintf(stderr, "Not an ELF or Archive file: %s\n",
-              sink->input_file().filename().c_str());
+              file.filename().c_str());
       return false;
     }
 
-    CHECK_RETURN(
-        OnElfFile(elf, sink->input_file().filename(), index_base, sink, func));
+    CHECK_RETURN(OnElfFile(elf, file.filename(), index_base, sink, func));
   }
 
   return true;
@@ -579,12 +585,6 @@ bool ForEachElf(RangeSink* sink, Func func) {
 // - readelf: more ELF-specific objdump (no disassembly though)
 // - nm: display symbols
 // - size: display binary size
-
-static uint64_t AlignUpTo(uint64_t offset, uint64_t granularity) {
-  return offset;  // If we allow this we sometimes span mappings.
-  // Granularity must be a power of two.
-  return (offset + granularity - 1) & ~(granularity - 1);
-}
 
 // For object files, addresses are relative to the section they live in, which
 // is indicated by ndx.  We split this into:
@@ -620,10 +620,11 @@ static bool CheckNotObject(const char* source, RangeSink* sink) {
   return true;
 }
 
-static bool ReadELFSymbols(RangeSink* sink) {
-  bool is_object = IsObjectFile(sink->input_file().data());
-  return ForEachElf(sink, [=](const ElfFile& elf, StringPiece filename,
-                              uint32_t index_base) {
+static bool ReadELFSymbols(const InputFile& file, RangeSink* sink,
+                           SymbolTable* table) {
+  bool is_object = IsObjectFile(file.data());
+  return ForEachElf(file, sink, [=](const ElfFile& elf, StringPiece filename,
+                                    uint32_t index_base) {
     for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
       ElfFile::Section section;
       CHECK_RETURN(elf.ReadSection(i, &section));
@@ -659,8 +660,13 @@ static bool ReadELFSymbols(RangeSink* sink) {
         CHECK_RETURN(strtab_section.ReadName(sym.st_name, &name));
         uint64_t full_addr =
             ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
-        sink->AddVMRangeAllowAlias(full_addr, AlignUpTo(sym.st_size, 16),
-                                   name.as_string());
+        if (sink) {
+          sink->AddVMRangeAllowAlias(full_addr, sym.st_size, name.as_string());
+        }
+        if (table) {
+          table->insert(
+              std::make_pair(name, std::make_pair(full_addr, sym.st_size)));
+        }
       }
     }
 
@@ -677,7 +683,8 @@ enum ReportSectionsBy {
 static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) {
   bool is_object = IsObjectFile(sink->input_file().data());
   return ForEachElf(
-      sink, [=](const ElfFile& elf, StringPiece filename, uint32_t index_base) {
+      sink->input_file(), sink,
+      [=](const ElfFile& elf, StringPiece filename, uint32_t index_base) {
         if (elf.section_count() == 0) {
           return true;
         }
@@ -756,8 +763,9 @@ static bool ReadELFSegments(RangeSink* sink) {
     return true;
   }
 
-  return ForEachElf(sink, [=](const ElfFile& elf, StringPiece filename,
-                              uint32_t index_base) {
+  return ForEachElf(sink->input_file(), sink, [=](const ElfFile& elf,
+                                                  StringPiece filename,
+                                                  uint32_t index_base) {
     for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
       ElfFile::Segment segment;
       CHECK_RETURN(elf.ReadSegment(i, &segment));
@@ -850,17 +858,19 @@ class ElfFileHandler : public FileHandler {
           CHECK_RETURN(DoReadELFSections(sink, kReportBySectionName));
           break;
         case DataSource::kSymbols:
-          CHECK_RETURN(ReadELFSymbols(sink));
+          CHECK_RETURN(ReadELFSymbols(sink->input_file(), sink, nullptr));
           break;
         case DataSource::kArchiveMembers:
           CHECK_RETURN(DoReadELFSections(sink, kReportByFilename));
           break;
         case DataSource::kCompileUnits: {
           CHECK_RETURN(CheckNotObject("compileunits", sink));
+          SymbolTable symtab;
           ElfFile elf(sink->input_file().data());
+          CHECK_RETURN(ReadELFSymbols(sink->input_file(), nullptr, &symtab));
           dwarf::File dwarf;
           CHECK_RETURN(elf.IsOpen() && ReadDWARFSections(elf, &dwarf))
-          CHECK_RETURN(ReadDWARFCompileUnits(dwarf, sink));
+          CHECK_RETURN(ReadDWARFCompileUnits(dwarf, symtab, sink));
           break;
         }
         case DataSource::kInlines: {

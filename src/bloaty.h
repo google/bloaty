@@ -168,12 +168,12 @@ struct File {
 
 }  // namespace dwarf
 
-typedef std::unordered_map<StringPiece, std::pair<uint64_t, uint64_t>>
-    SymbolTable;
+typedef std::map<StringPiece, std::pair<uint64_t, uint64_t>> SymbolTable;
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
-bool ReadDWARFCompileUnits(const dwarf::File& file, RangeSink* sink);
+bool ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
+                           RangeSink* sink);
 bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 
