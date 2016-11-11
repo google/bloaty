@@ -27,6 +27,7 @@ TEST_F(BloatyTest, InlinesOnSmallFile) {
       {"bloaty", "-d", "compileunits", "03-small-binary-that-crashed-inlines.bin"});
   RunBloaty(
       {"bloaty", "-d", "inlines", "03-small-binary-that-crashed-inlines.bin"});
+  EXPECT_EQ(top_row_->vmsize, 2340);
 }
 
 TEST_F(BloatyTest, GoBinary) {
