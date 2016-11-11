@@ -21,3 +21,8 @@ TEST_F(BloatyTest, NoSections) {
 TEST_F(BloatyTest, SectionCountOverflow) {
   RunBloaty({"bloaty", "02-section-count-overflow.o"});
 }
+
+TEST_F(BloatyTest, InlinesOnSmallFile) {
+  RunBloaty(
+      {"bloaty", "-d", "inlines", "03-small-binary-that-crashed-inlines.bin"});
+}

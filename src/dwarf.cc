@@ -534,8 +534,6 @@ class DIEReader {
 
   bool ReadCompilationUnitHeader(StringPiece data);
   bool ReadCode();
-  bool SkipDIEs(size_t levels);
-  bool SkipAttributes();
 
   enum class State {
     kReadyToReadAttributes,
@@ -619,7 +617,6 @@ bool DIEReader::NextCompilationUnit() {
 }
 
 bool DIEReader::NextDIE() {
-
   do {
     if (remaining_.size() == 0) {
       state_ = State::kEof;
@@ -884,14 +881,18 @@ class FormReader<T, typename std::enable_if<std::is_integral<T>::value>::type>
                                  Func func) {
     switch (form) {
       case DW_FORM_data1:
+      case DW_FORM_ref1:
         return func(&Base::template ReadAttr<&ME::ReadFixed<int8_t>>);
       case DW_FORM_data2:
+      case DW_FORM_ref2:
         CHECK_RETURN(sizeof(T) >= 2);
         return func(&Base::template ReadAttr<&ME::ReadFixed<int16_t>>);
       case DW_FORM_data4:
+      case DW_FORM_ref4:
         CHECK_RETURN(sizeof(T) >= 4);
         return func(&Base::template ReadAttr<&ME::ReadFixed<int32_t>>);
       case DW_FORM_data8:
+      case DW_FORM_ref8:
         CHECK_RETURN(sizeof(T) >= 8);
         return func(&Base::template ReadAttr<&ME::ReadFixed<int64_t>>);
       case DW_FORM_addr:
@@ -1014,8 +1015,11 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
   static bool GetFunctionForForm(CompilationUnitSizes sizes, uint8_t form,
                                  Func func) {
     switch (form) {
+      case DW_FORM_flag_present:
+        return func(&Base::template ReadAttr<&ME::DoNothing>);
       case DW_FORM_data1:
       case DW_FORM_ref1:
+      case DW_FORM_flag:
         return func(&Base::template ReadAttr<&ME::SkipFixed<1>>);
       case DW_FORM_data2:
       case DW_FORM_ref2:
@@ -1067,6 +1071,8 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
   }
 
  private:
+  bool DoNothing() { return true; }
+
   template <size_t N>
   bool SkipFixed() {
     return SkipBytes(N, &data_);
@@ -1165,15 +1171,14 @@ ActionBuf::ActionBuf(const AbbrevTable::Abbrev& abbrev,
 
   // Overwrite any entries for attributes we actually want to store somewhere.
   for (const auto& action : indexed_actions) {
-    assert(action.index < action_list_.size());
-    if (action_list_[action.index].data) {
-      fprintf(stderr,
-              "bloaty: internal error, specified same DWARF attribute more "
-              "than once\n");
-      exit(1);
-    }
-
     if (action.action.func) {
+      assert(action.index < action_list_.size());
+      if (action_list_[action.index].data) {
+        fprintf(stderr,
+                "bloaty: internal error, specified same DWARF attribute more "
+                "than once\n");
+        exit(1);
+      }
       action_list_[action.index] = action.action;
     }
   }
@@ -1738,33 +1743,45 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
-static bool ReadDWARFDebugInfo(const dwarf::File& file, RangeSink* sink) {
+static bool ReadDWARFDebugInfo(const dwarf::File& file,
+                               const SymbolTable& symtab, RangeSink* sink) {
   dwarf::DIEReader die_reader(file);
-  dwarf::FixedAttrReader<StringPiece, uint64_t, uint64_t> attr_reader(
-      &die_reader, {DW_AT_name, DW_AT_low_pc, DW_AT_high_pc});
+  dwarf::FixedAttrReader<StringPiece, StringPiece, uint64_t, uint64_t>
+      attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
+                                DW_AT_high_pc});
 
   CHECK_RETURN(die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo));
 
   do {
+    CHECK_RETURN(attr_reader.ReadAttributes(&die_reader));
     std::string name = attr_reader.GetAttribute<0>().as_string();
     if (name.empty()) {
       continue;
     }
 
     do {
-      uint64_t low_pc = attr_reader.GetAttribute<1>();
-      uint64_t high_pc = attr_reader.GetAttribute<2>();
+      uint64_t low_pc = attr_reader.GetAttribute<2>();
+      uint64_t high_pc = attr_reader.GetAttribute<3>();
 
-      if (attr_reader.HasAttribute<1>() && attr_reader.HasAttribute<2>()) {
+      if (attr_reader.HasAttribute<2>() && attr_reader.HasAttribute<3>()) {
         sink->AddVMRangeIgnoreDuplicate(low_pc, high_pc - low_pc, name);
       }
-    } while (die_reader.NextDIE());
+
+      if (attr_reader.HasAttribute<1>()) {
+        auto it = symtab.find(attr_reader.GetAttribute<1>());
+        if (it != symtab.end()) {
+          sink->AddVMRangeIgnoreDuplicate(it->second.first, it->second.second,
+                                          name);
+        }
+      }
+    } while (die_reader.NextDIE() && attr_reader.ReadAttributes(&die_reader));
   } while (die_reader.NextCompilationUnit());
 
   return die_reader.IsEof();
 }
 
-bool ReadDWARFCompileUnits(const dwarf::File& file, RangeSink* sink) {
+bool ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
+                           RangeSink* sink) {
   if (!file.debug_info.size()) {
     fprintf(stderr, "bloaty: missing debug info\n");
     return false;
@@ -1774,7 +1791,7 @@ bool ReadDWARFCompileUnits(const dwarf::File& file, RangeSink* sink) {
     CHECK_RETURN(ReadDWARFAddressRanges(file, sink));
   }
 
-  CHECK_RETURN(ReadDWARFDebugInfo(file, sink));
+  CHECK_RETURN(ReadDWARFDebugInfo(file, symtab, sink));
 
   return true;
 }
