@@ -42,7 +42,6 @@
 #include <assert.h>
 
 #include "bloaty.h"
-//#include "base/init_google.h"
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -353,7 +352,7 @@ class NameMunger {
 };
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
-  std::unique_ptr<RE2> re2(new RE2(re2::StringPiece(regex)));
+  std::unique_ptr<RE2> re2(new RE2(StringPiece(regex)));
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
