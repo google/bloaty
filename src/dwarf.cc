@@ -1825,10 +1825,15 @@ bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
     const std::string& GetSourceFilename(size_t index) {
       auto& ret = filenames_[index];
       if (ret.empty()) {
-        auto filename = reader_.filename(index);
-        ret =
-            reader_.include_directory(filename.directory_index).as_string() +
-            filename.name.as_string();
+        const dwarf::LineInfoReader::FileName& filename =
+            reader_.filename(index);
+        StringPiece directory =
+            reader_.include_directory(filename.directory_index);
+        ret = directory.as_string();
+        if (!ret.empty()) {
+          ret += "/";
+        }
+        ret += filename.name.as_string();
       }
       return ret;
     }
