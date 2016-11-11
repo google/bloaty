@@ -24,5 +24,14 @@ TEST_F(BloatyTest, SectionCountOverflow) {
 
 TEST_F(BloatyTest, InlinesOnSmallFile) {
   RunBloaty(
+      {"bloaty", "-d", "compileunits", "03-small-binary-that-crashed-inlines.bin"});
+  RunBloaty(
       {"bloaty", "-d", "inlines", "03-small-binary-that-crashed-inlines.bin"});
+}
+
+TEST_F(BloatyTest, GoBinary) {
+  RunBloaty(
+      {"bloaty", "-d", "compileunits", "04-go-binary-with-ref-addr.bin"});
+  RunBloaty(
+      {"bloaty", "-d", "inlines", "04-go-binary-with-ref-addr.bin"});
 }
