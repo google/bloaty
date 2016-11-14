@@ -20,6 +20,7 @@
 #define BLOATY_H_
 
 #include <stdlib.h>
+#define __STDC_LIMIT_MACROS
 #include <stdint.h>
 #ifdef __FreeBSD__
 #include <sys/endian.h>
