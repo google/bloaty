@@ -1148,46 +1148,64 @@ std::string MemoryMap::ApplyNameRegexes(StringPiece name) {
 }
 
 
-// InputFile ///////////////////////////////////////////////////////////////////
+// MmapInputFile ///////////////////////////////////////////////////////////////
 
-InputFile::InputFile(const std::string& filename) : filename_(filename) {
-  // For any early returns, data_ remains NULL-initialized, so IsOpen() will be
-  // false.
+class MmapInputFile : public InputFile {
+ public:
+  MmapInputFile(const std::string& filename) : InputFile(filename) {}
+  ~MmapInputFile() override;
 
-  int fd = open(filename.c_str(), O_RDONLY);
+  bool Open();
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(MmapInputFile);
+};
+
+bool MmapInputFile::Open() {
+  int fd = open(filename().c_str(), O_RDONLY);
   struct stat buf;
   const char *map;
 
   if (fd < 0) {
-    fprintf(stderr, "bloaty: couldn't open file '%s': %s\n", filename.c_str(),
+    fprintf(stderr, "bloaty: couldn't open file '%s': %s\n", filename().c_str(),
             strerror(errno));
-    return;
+    return false;
   }
 
   if (fstat(fd, &buf) < 0) {
-    fprintf(stderr, "bloaty: couldn't stat file '%s': %s\n", filename.c_str(),
+    fprintf(stderr, "bloaty: couldn't stat file '%s': %s\n", filename().c_str(),
             strerror(errno));
-    return;
+    return false;
   }
 
   map = static_cast<char*>(
       mmap(nullptr, buf.st_size, PROT_READ, MAP_SHARED, fd, 0));
 
   if (map == MAP_FAILED) {
-    fprintf(stderr, "bloaty: couldn't mmap file '%s': %s\n", filename.c_str(),
+    fprintf(stderr, "bloaty: couldn't mmap file '%s': %s\n", filename().c_str(),
             strerror(errno));
-    return;
+    return false;
   }
 
   data_.set(map, buf.st_size);
+  return true;
 }
 
-InputFile::~InputFile() {
-  if (IsOpen()) {
+MmapInputFile::~MmapInputFile() {
+  if (data_.data() != nullptr) {
     if (munmap(const_cast<char*>(data_.data()), data_.size()) != 0) {
       fprintf(stderr, "bloaty: error calling munmap(): %s\n", strerror(errno));
     }
   }
+}
+
+std::unique_ptr<InputFile> MmapInputFileFactory::TryOpenFile(
+    const std::string& filename) const {
+  std::unique_ptr<MmapInputFile> file(new MmapInputFile(filename));
+  if (!file->Open()) {
+    file.reset();
+  }
+  return std::move(file);
 }
 
 
@@ -1276,7 +1294,7 @@ struct ConfiguredDataSource {
 
 class Bloaty {
  public:
-  Bloaty();
+  Bloaty(const InputFileFactory& factory);
 
   bool AddFilename(const std::string& filename, bool base_file);
 
@@ -1309,6 +1327,7 @@ class Bloaty {
 
   bool ScanAndRollupFile(const InputFile& file, Rollup* rollup);
 
+  const InputFileFactory& file_factory_;
   std::map<std::string, DataSourceDefinition> all_known_sources_;
   std::vector<ConfiguredDataSource> sources_;
   std::map<std::string, ConfiguredDataSource*> sources_by_name_;
@@ -1318,13 +1337,14 @@ class Bloaty {
   int filename_position_;
 };
 
-Bloaty::Bloaty() : row_limit_(20), filename_position_(-1) {
+Bloaty::Bloaty(const InputFileFactory& factory)
+    : file_factory_(factory), row_limit_(20), filename_position_(-1) {
   MakeAllSourcesMap(data_sources);
 }
 
 bool Bloaty::AddFilename(const std::string& filename, bool is_base) {
-  std::unique_ptr<InputFile> file(new InputFile(filename));
-  if (!file->IsOpen()) {
+  std::unique_ptr<InputFile> file(file_factory_.TryOpenFile(filename));
+  if (!file.get()) {
     std::cerr << "bloaty: couldn't open file '" << filename << "'\n";
     return false;
   }
@@ -1550,8 +1570,9 @@ void Split(const std::string& str, char delim, std::vector<std::string>* out) {
   }
 }
 
-bool BloatyMain(int argc, char* argv[], RollupOutput* output) {
-  bloaty::Bloaty bloaty;
+bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
+                RollupOutput* output) {
+  bloaty::Bloaty bloaty(file_factory);
 
   RE2 regex_pattern("(\\w+)\\:s/(.*)/(.*)/");
   bool base_files = false;

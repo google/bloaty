@@ -18,7 +18,8 @@
 
 int main(int argc, char *argv[]) {
   bloaty::RollupOutput output;
-  bool ok = bloaty::BloatyMain(argc, argv, &output);
+  bloaty::MmapInputFileFactory mmap_factory;
+  bool ok = bloaty::BloatyMain(argc, argv, mmap_factory, &output);
   if (ok) {
     output.Print(&std::cout);
     return 0;

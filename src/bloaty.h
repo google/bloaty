@@ -55,19 +55,31 @@ enum class DataSource {
 
 class InputFile {
  public:
-  InputFile(const std::string& filename);
-  ~InputFile();
-
-  bool IsOpen() { return data_.data() != nullptr; }
+  InputFile(const std::string& filename) : filename_(filename) {}
+  virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }
   StringPiece data() const { return data_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(InputFile);
-
   const std::string filename_;
+
+ protected:
   StringPiece data_;
+};
+
+class InputFileFactory {
+ public:
+  // Returns nullptr if the file could not be opened.
+  virtual std::unique_ptr<InputFile> TryOpenFile(
+      const std::string& filename) const = 0;
+};
+
+class MmapInputFileFactory : public InputFileFactory {
+ public:
+  std::unique_ptr<InputFile> TryOpenFile(
+      const std::string& filename) const override;
 };
 
 // NOTE: all sizes are uint64, even on 32-bit platforms:
@@ -374,8 +386,8 @@ struct RollupOutput {
   void PrintTree(const RollupRow& row, size_t indent, std::ostream* out) const;
 };
 
-bool BloatyMain(int argc, char *argv[], RollupOutput* output);
-
+bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
+                RollupOutput* output);
 
 // Endianness utilities ////////////////////////////////////////////////////////
 

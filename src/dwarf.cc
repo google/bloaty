@@ -106,7 +106,7 @@ typename std::enable_if<std::is_unsigned<T>::value, bool>::type ReadLEB128(
       if (ret > std::numeric_limits<T>::max()) {
         fprintf(stderr,
                 "DWARF data contained larger LEB128 than we were expecting.\n");
-        exit(1);
+        return false;
       }
       *out = static_cast<T>(ret);
       return true;
@@ -114,7 +114,6 @@ typename std::enable_if<std::is_unsigned<T>::value, bool>::type ReadLEB128(
   }
 
   fprintf(stderr, "Corrupt DWARF data, unterminated LEB128.\n");
-  exit(1);
   return false;
 }
 
@@ -140,7 +139,7 @@ typename std::enable_if<std::is_signed<T>::value, bool>::type ReadLEB128(
           ret < std::numeric_limits<T>::min()) {
         fprintf(stderr,
                 "DWARF data contained larger LEB128 than we were expecting.\n");
-        exit(1);
+        return false;
       }
       *out = ret;
       return true;
@@ -148,7 +147,6 @@ typename std::enable_if<std::is_signed<T>::value, bool>::type ReadLEB128(
   }
 
   fprintf(stderr, "Corrupt DWARF data, unterminated LEB128.\n");
-  exit(1);
   return false;
 }
 
@@ -163,7 +161,6 @@ bool SkipLEB128(StringPiece* data) {
   }
 
   fprintf(stderr, "Corrupt DWARF data, unterminated LEB128.\n");
-  exit(1);
   return false;
 }
 
@@ -208,7 +205,6 @@ struct CompilationUnitSizes {
     } else {
       fprintf(stderr, "bloaty: unexpected address size: %d\n",
               static_cast<int>(address_size));
-      exit(1);
       return false;
     }
   }
@@ -307,7 +303,7 @@ bool AbbrevTable::ReadAbbrevs(StringPiece data) {
 
     if (abbrev.code) {
       fprintf(stderr, "bloaty: DWARF data contained duplicate abbrev code.\n");
-      exit(1);
+      return false;
     }
 
     uint8_t has_child;
@@ -417,7 +413,7 @@ bool AddressRanges::NextUnit() {
 
   if (version > 2) {
     fprintf(stderr, "bloaty: DWARF data is too new for us.\n");
-    exit(1);
+    return false;
   }
 
   CHECK_RETURN(sizes_.ReadDWARFOffset(&unit_remaining_, &debug_info_offset_));
@@ -430,7 +426,7 @@ bool AddressRanges::NextUnit() {
   if (segment_size) {
     fprintf(stderr,
             "bloaty: we don't know how to handle segmented addresses.\n");
-    exit(1);
+    return false;
   }
 
   size_t ofs = unit_remaining_.data() - section_.data();
