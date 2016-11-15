@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef BLOATY_TESTS_TEST_H_
+#define BLOATY_TESTS_TEST_H_
+
 #include "bloaty.h"
 
 #include <fstream>
@@ -23,33 +26,7 @@
 #include "gtest/gtest.h"
 #include "gmock/gmock.h"
 
-// For constructing arrays of strings in the slightly peculiar format
-// required by execve().
-class StrArr {
- public:
-  explicit StrArr(const std::vector<std::string>& strings)
-      : size_(strings.size()), array_(new char*[size_ + 1]) {
-    array_[size_] = NULL;
-    for (size_t i = 0; i < strings.size(); i++) {
-      // Can't use c_str() directly because array_ is not const char*.
-      array_[i] = strdup(strings[i].c_str());
-    }
-  }
-
-  ~StrArr() {
-    // unique_ptr frees the array of pointers but not the pointed-to strings.
-    for (int i = 0; i < size_; i++) {
-      free(array_[i]);
-    }
-  }
-
-  char **get() { return array_.get(); }
-
- private:
-  size_t size_;
-  // Can't use vector<char*> because execve() takes ptr to non-const array.
-  std::unique_ptr<char*[]> array_;
-};
+#include "strarr.h"
 
 bool GetFileSize(const std::string& filename, uint64_t* size) {
   FILE* file = fopen(filename.c_str(), "rb");
@@ -125,7 +102,8 @@ class BloatyTest : public ::testing::Test {
     std::cerr << "Running bloaty: " << JoinStrings(strings) << "\n";
     output_.reset(new bloaty::RollupOutput);
     top_row_ = &output_->toplevel_row();
-    if (bloaty::BloatyMain(strings.size(), StrArr(strings).get(),
+    bloaty::MmapInputFileFactory factory;
+    if (bloaty::BloatyMain(strings.size(), StrArr(strings).get(), factory,
                            output_.get())) {
       CheckConsistency();
       output_->Print(&std::cerr);
@@ -220,3 +198,4 @@ class BloatyTest : public ::testing::Test {
 constexpr int BloatyTest::kUnknown;
 constexpr int BloatyTest::kSameAsVM;
 
+#endif  // BLOATY_TESTS_TEST_H_
