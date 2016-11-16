@@ -357,7 +357,7 @@ void NameMunger::AddRegex(const std::string& regex, const std::string& replaceme
 }
 
 std::string NameMunger::Munge(StringPiece name) const {
-  std::string ret;
+  std::string ret(name.as_string());
 
   for (const auto& pair : regexes_) {
     if (RE2::Replace(&ret, *pair.first, pair.second)) {
@@ -365,7 +365,7 @@ std::string NameMunger::Munge(StringPiece name) const {
     }
   }
 
-  return name.as_string();
+  return ret;
 }
 
 
