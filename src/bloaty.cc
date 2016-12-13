@@ -1637,6 +1637,8 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
       verbose_level = 2;
     } else if (strcmp(argv[i], "-vvv") == 0) {
       verbose_level = 3;
+    } else if (strcmp(argv[i], "-w") == 0) {
+      max_label_len = 100000000;
     } else if (strcmp(argv[i], "--list-sources") == 0) {
       bloaty.PrintDataSources();
       return false;
