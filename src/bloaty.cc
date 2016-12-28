@@ -1550,6 +1550,7 @@ Options:
   -v               Verbose output.  Dumps warnings encountered during
                    processing and full VM/file maps at the end.
                    Add more v's (-vv, -vvv) for even more.
+  -w               Wide output; don't truncate long labels.
   --help           Display this message and exit.
   --list-sources   Show a list of available sources and exit.
 )";
@@ -1637,6 +1638,8 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
       verbose_level = 2;
     } else if (strcmp(argv[i], "-vvv") == 0) {
       verbose_level = 3;
+    } else if (strcmp(argv[i], "-w") == 0) {
+      max_label_len = SIZE_MAX;
     } else if (strcmp(argv[i], "--list-sources") == 0) {
       bloaty.PrintDataSources();
       return false;
