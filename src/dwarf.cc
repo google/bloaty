@@ -153,7 +153,7 @@ typename std::enable_if<std::is_signed<T>::value, bool>::type ReadLEB128(
 bool SkipLEB128(StringPiece* data) {
   size_t limit =
       std::min(static_cast<size_t>(data->size()), static_cast<size_t>(10));
-  for (int i = 0; i < limit; i++) {
+  for (size_t i = 0; i < limit; i++) {
     if (((*data)[i] & 0x80) == 0) {
       data->remove_prefix(i + 1);
       return true;

@@ -84,7 +84,7 @@ constexpr DataSourceDefinition data_sources[] = {
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 
 const char* GetDataSourceLabel(DataSource source) {
-  for (int i = 0; i < ARRAY_SIZE(data_sources); i++) {
+  for (size_t i = 0; i < ARRAY_SIZE(data_sources); i++) {
     if (data_sources[i].number == source) {
       return data_sources[i].name;
     }
@@ -715,7 +715,7 @@ std::string DoubleStringPrintf(const char *fmt, double d) {
 std::string SiPrint(ssize_t size, bool force_sign) {
   const char *prefixes[] = {"", "Ki", "Mi", "Gi", "Ti"};
   size_t num_prefixes = 5;
-  int n = 0;
+  size_t n = 0;
   double size_d = size;
   while (fabs(size_d) > 1024 && n < num_prefixes - 2) {
     size_d /= 1024;
