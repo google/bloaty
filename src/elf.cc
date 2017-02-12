@@ -43,8 +43,8 @@ struct NullFunc {
 
 bool StringPieceToSize(StringPiece str, size_t* out) {
   char *end = nullptr;
-  *out = strtol(str.data(), &end, 10);
-  return end != str.data() && *out != LONG_MIN && *out != LONG_MAX;
+  *out = strtoul(str.data(), &end, 10);
+  return end != str.data() && *out != ULONG_MAX;
 }
 
 
