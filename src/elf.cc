@@ -127,7 +127,7 @@ class ElfFile {
         : elf_(elf), data_(data) {}
 
     template <class T32, class T64, class Munger>
-    bool Read(size_t offset, Munger munger, T64* out) const {
+    bool Read(size_t offset, Munger, T64* out) const {
       if (elf_.is_64bit() && elf_.is_native_endian()) {
         return Memcpy(offset, out);
       } else {
@@ -623,7 +623,7 @@ static bool CheckNotObject(const char* source, RangeSink* sink) {
 static bool ReadELFSymbols(const InputFile& file, RangeSink* sink,
                            SymbolTable* table) {
   bool is_object = IsObjectFile(file.data());
-  return ForEachElf(file, sink, [=](const ElfFile& elf, StringPiece filename,
+  return ForEachElf(file, sink, [=](const ElfFile& elf, StringPiece,
                                     uint32_t index_base) {
     for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
       ElfFile::Section section;
@@ -764,8 +764,8 @@ static bool ReadELFSegments(RangeSink* sink) {
   }
 
   return ForEachElf(sink->input_file(), sink, [=](const ElfFile& elf,
-                                                  StringPiece filename,
-                                                  uint32_t index_base) {
+                                                  StringPiece,
+                                                  uint32_t) {
     for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
       ElfFile::Segment segment;
       CHECK_RETURN(elf.ReadSegment(i, &segment));
