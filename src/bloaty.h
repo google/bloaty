@@ -229,7 +229,7 @@ class LineIterator {
  public:
   LineIterator(LineReader* reader) : reader_(reader) {}
 
-  bool operator!=(const LineIterator&) const {
+  bool operator!=(const LineIterator& /*other*/) const {
     // Hack for range-based for.
     return !reader_->eof();
   }
