@@ -96,7 +96,7 @@ class RangeSink {
             const MemoryMap* translator, MemoryMap* map);
   ~RangeSink();
 
-  const DataSource data_source() const { return data_source_; }
+  DataSource data_source() const { return data_source_; }
   const InputFile& input_file() const { return *file_; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
@@ -229,7 +229,7 @@ class LineIterator {
  public:
   LineIterator(LineReader* reader) : reader_(reader) {}
 
-  bool operator!=(const LineIterator& other) const {
+  bool operator!=(const LineIterator& /*other*/) const {
     // Hack for range-based for.
     return !reader_->eof();
   }

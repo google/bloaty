@@ -3,7 +3,7 @@
 
 # Disable -Wsign-compare because StringPiece currently unhelpfully defines
 # size() as ssize_t instad of size_t.
-CXXFLAGS=-std=c++11 -Wall -Wno-sign-compare -g -I third_party/re2 -I. -Isrc
+CXXFLAGS=-std=c++11 -W -Wall -Wno-sign-compare -g -I third_party/re2 -I. -Isrc
 RE2_H=third_party/re2/re2/re2.h
 RE2_A=third_party/re2/obj/libre2.a
 
