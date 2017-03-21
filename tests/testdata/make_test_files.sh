@@ -22,6 +22,7 @@ cd $1
 OUTPUT_DIR=`pwd`
 TMP=`mktemp -d`
 CC="${CC:-cc}"
+CXX="${CXX:-c++}"
 echo Writing output to $OUTPUT_DIR
 echo Working in $TMP
 cd $TMP
@@ -29,6 +30,21 @@ cd $TMP
 function publish() {
   echo $1
   cp $1 $OUTPUT_DIR
+}
+
+function make_mangled_tmp_obj() {
+  FILE=$1
+  CONTENTS="$2"
+  CFILE=`basename $1`.c
+  echo "$CONTENTS" > $CFILE
+  $CXX -g -fPIC -o $FILE -c $CFILE -std=c++11
+}
+
+function make_mangled_obj() {
+  FILE=$1
+  CONTENTS="$2"
+  make_mangled_tmp_obj $FILE "$CONTENTS"
+  publish $FILE
 }
 
 function make_tmp_obj() {
@@ -114,3 +130,8 @@ int foo_func() { return foo_y / 17 * 37 / 21; }
 "
 
 make_ar "06-diff.a" "foo2.o" "bar.o" "a_filename_longer_than_sixteen_chars.o"
+
+make_mangled_obj "07-mangled.o" "
+#include <stdint.h>
+uint32_t func(uint32_t n) { return n + 1; }
+"

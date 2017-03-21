@@ -56,6 +56,7 @@ namespace bloaty {
 
 size_t max_label_len = 80;
 int verbose_level = 0;
+bool demangle_names = true;
 
 enum class SortBy {
   kVM, kFile, kBoth
@@ -659,8 +660,14 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
       }
     }
 
-    auto demangled = demangler.Demangle(child_row.name);
-    stripper.StripName(demangled);
+    std::string display_name;
+    if (demangle_names) {
+      display_name = demangler.Demangle(child_row.name);
+    } else {
+      display_name = child_row.name;
+    }
+
+    stripper.StripName(display_name);
     size_t allowed_label_len =
         std::min(stripper.stripped().size(), max_label_len);
     child_row.name = stripper.stripped();
@@ -1553,6 +1560,7 @@ Options:
   -w               Wide output; don't truncate long labels.
   --help           Display this message and exit.
   --list-sources   Show a list of available sources and exit.
+  --no-demangle    Don't demangle C++ symbol names.
 )";
 
 bool CheckNextArg(int i, int argc, const char *option) {
@@ -1643,6 +1651,8 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
     } else if (strcmp(argv[i], "--list-sources") == 0) {
       bloaty.PrintDataSources();
       return false;
+    } else if (strcmp(argv[i], "--no-demangle") == 0) {
+      demangle_names = false;
     } else if (strcmp(argv[i], "--help") == 0) {
       fputs(usage, stderr);
       return false;
