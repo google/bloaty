@@ -16,6 +16,10 @@
 #include "bloaty.h"
 #include "re2/re2.h"
 
+#ifdef __APPLE__
+  #include <mach-o/loader.h>
+#endif
+
 // There are several programs that offer useful information about
 // binaries:
 //
@@ -30,6 +34,12 @@
 #define CHECK_RETURN(call) if (!(call)) { return false; }
 
 namespace bloaty {
+
+#ifndef __APPLE__
+std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
+  return nullptr;
+}
+#else // __APPLE__
 
 bool StartsWith(const std::string& haystack, const std::string& needle) {
   return !haystack.compare(0, needle.length(), needle);
@@ -62,142 +72,62 @@ static bool ParseMachOSymbols(RangeSink* sink) {
   return true;
 }
 
-static bool ParseMachOSegments(RangeSink* sink) {
-  // Load command 2
-  //       cmd LC_SEGMENT_64
-  //   cmdsize 632
-  //   segname __DATA
-  //    vmaddr 0x000000010003a000
-  //    vmsize 0x0000000000004000
-  //   fileoff 237568
-  //  filesize 16384
-  //   maxprot 0x00000007
-  //  initprot 0x00000003
-  //    nsects 7
-  //     flags 0x0
-  //
-  std::string cmd = std::string("otool -l ") + sink->input_file().filename();
+static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
+  struct mach_header_64 *header = (struct mach_header_64 *) sink->input_file().data().data();
 
-  RE2 key_decimal_pattern(R"((\w+) ([1-9][0-9]*))");
-  RE2 key_hex_pattern(R"((\w+) 0x([0-9a-f]+))");
-  RE2 key_text_pattern(R"( (\w+) (\w+))");
-  std::string key;
-  std::string text_val;
-  std::string segname;
-  uintptr_t val;
-  uintptr_t vmaddr = 0;
-  uintptr_t vmsize = 0;
-  uintptr_t fileoff = 0;
-  uintptr_t filesize = 0;
+  // advance past mach header to get to first load command
+  struct load_command *command = (struct load_command *) (header + 1);
 
-  // The entry point appears to be relative to the vmaddr of the first __TEXT
-  // segment.  Should verify that this is the precise rule.
-  uintptr_t first_text_vmaddr = 0;
-  bool in_text_section = false;
+  for (uint32_t i = 0;
+      i < header->ncmds;
+      i++, command = (struct load_command *) ((char *) command + command->cmdsize))
+  {
+    if (command->cmd == LC_SEGMENT_64) {
+      struct segment_command_64 *segment_command = (struct segment_command_64 *) command;
 
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-
-    if (RE2::PartialMatch(line, key_decimal_pattern, &key, &val) ||
-        RE2::PartialMatch(line, key_hex_pattern, &key, RE2::Hex(&val))) {
-      if (key == "vmaddr") {
-        vmaddr = val;
-        if (first_text_vmaddr == 0 && in_text_section) {
-          first_text_vmaddr = vmaddr;
-        }
-      } else if (key == "vmsize") {
-        vmsize = val;
-      } else if (key == "fileoff") {
-        fileoff = val;
-      } else if (key == "filesize") {
-        filesize = val;
-        sink->AddRange(segname, vmaddr, vmsize, fileoff, filesize);
-      } else if (key == "entryoff") {
-        /*
-        Object* entry = sink->FindObjectByAddr(first_text_vmaddr + val);
-        if (entry) {
-          sink->SetEntryPoint(entry);
-        }
-        */
+      // __PAGEZERO is a special blank segment usually used to trap NULL-dereferences
+      // (since all protection bits are 0 it cannot be read from, written to, or executed)
+      if (std::string(segment_command->segname) == SEG_PAGEZERO) {
+        // theoretically __PAGEZERO *should* count towards VM size
+        // however on x86_64 __PAGEZERO takes up all lower 4 GiB
+        // hence we skip it to avoid skewing the results (such as showing 99.99% or 100% for __PAGEZERO)
+        continue;
       }
-    } else if (RE2::PartialMatch(line, key_text_pattern, &key, &text_val)) {
-      if (key == "segname") {
-        in_text_section = (text_val == "__TEXT");
-        segname = text_val;
-        vmaddr = 0;
-        vmsize = 0;
-        fileoff = 0;
-        filesize = 0;
-      }
-    }
-  }
+      
+      if (data_source == DataSource::kSegments) { // if segments are all we need this is enough
+        // side note: segname (& sectname) may NOT be NULL-terminated,
+        //   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
+        //   hence specifying size when constructing std::string
+        sink->AddRange(std::string(segment_command->segname, 16),
+                       segment_command->vmaddr,
+                       segment_command->vmsize,
+                       segment_command->fileoff,
+                       segment_command->filesize);
+      } else if (data_source == DataSource::kSections) { // otherwise load sections
+        // advance past segment command header
+        struct section_64 *section = (struct section_64 *) (segment_command + 1);
+        for (uint32_t j = 0; j < segment_command->nsects; j++, section++) {
+          // filesize equals vmsize unless the section is zerofill
+          // note that the flags check (& 0x01) in the original implementation is incorrect
+          // the lowest byte is interpreted similar to a enum rather than a bitmask
+          // e.g. __mod_init_func (S_MOD_INIT_FUNC_POINTERS, 0x09) has lowest bit set but is not a zerofill
+          uint64_t filesize = section->size;
+          switch (section->flags & SECTION_TYPE) {
+            case S_ZEROFILL:
+            case S_GB_ZEROFILL:
+            case S_THREAD_LOCAL_ZEROFILL:
+              filesize = 0;
+              break;
 
-  return true;
-}
+            default:
+              break;
+          }
 
-static bool ParseMachOSections(RangeSink* sink) {
-  // Section
-  //   sectname __text
-  //    segname __TEXT
-  //       addr 0x0000000100000ac0
-  //       size 0x0000000000030b10
-  //     offset 2752
-  //      align 2^4 (16)
-  //     reloff 0
-  //     nreloc 0
-  //      flags 0x80000400
-  //  reserved1 0
-  //  reserved2 0
-
-  std::string cmd = std::string("otool -l ") + sink->input_file().filename();
-
-  RE2 key_decimal_pattern(R"((\w+) ([1-9][0-9]*))");
-  RE2 key_hex_pattern(R"((\w+) 0x([0-9a-f]+))");
-  RE2 key_text_pattern(R"( (\w+) (\w+))");
-  std::string key;
-  std::string text_val;
-  std::string sectname;
-  std::string segname;
-  uintptr_t val;
-  uintptr_t addr = 0;
-  uintptr_t size = 0;
-  uintptr_t offset = 0;
-
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-
-    if (RE2::PartialMatch(line, key_decimal_pattern, &key, &val) ||
-        RE2::PartialMatch(line, key_hex_pattern, &key, RE2::Hex(&val))) {
-      if (key == "addr") {
-        addr = val;
-      } else if (key == "size") {
-        size = val;
-      } else if (key == "offset") {
-        offset = val;
-      } else if (key == "size") {
-        size = val;
-      } else if (key == "flags") {
-        size_t filesize = size;
-        if (val & 0x1) {
-          filesize = 0;
+          std::string label = std::string(section->segname, 16) + "," + std::string(section->sectname, 16);
+          sink->AddRange(label, section->addr, section->size, section->offset, filesize);
         }
-
-        if (segname.empty() || sectname.empty()) {
-          continue;
-        }
-
-        std::string label = segname + "," + sectname;
-        sink->AddRange(label, addr, size, offset, filesize);
-
-        sectname.clear();
-        segname.clear();
-        addr = 0;
-        size = 0;
-        offset = 0;
-      }
-    } else if (RE2::PartialMatch(line, key_text_pattern, &key, &text_val)) {
-      if (key == "sectname") {
-        sectname = text_val;
-      } else if (key == "segname") {
-        segname = text_val;
+      } else {
+        return false;
       }
     }
   }
@@ -207,17 +137,15 @@ static bool ParseMachOSections(RangeSink* sink) {
 
 class MachOFileHandler : public FileHandler {
   bool ProcessBaseMap(RangeSink* sink) override {
-    return ParseMachOSegments(sink);
+    return ParseMachOLoadCommands(sink, DataSource::kSegments);
   }
 
   bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
-          CHECK_RETURN(ParseMachOSegments(sink));
-          break;
         case DataSource::kSections:
-          CHECK_RETURN(ParseMachOSections(sink));
+          CHECK_RETURN(ParseMachOLoadCommands(sink, sink->data_source()));
           break;
         case DataSource::kSymbols:
           CHECK_RETURN(ParseMachOSymbols(sink));
@@ -236,19 +164,23 @@ class MachOFileHandler : public FileHandler {
 };
 
 std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
-  std::string cmd = "file " + file.filename();
-  std::string cmd_tonull = cmd + " > /dev/null 2> /dev/null";
-  if (system(cmd_tonull.c_str()) < 0) {
-    return nullptr;
-  }
+  struct mach_header_64 *header = (struct mach_header_64 *) file.data().data();
 
-  for (auto& line : ReadLinesFromPipe(cmd)) {
-    if (line.find("Mach-O") != std::string::npos) {
-      return std::unique_ptr<FileHandler>(new MachOFileHandler);
-    }
+  // 32 bit and fat binaries are effectively deprecated, don't bother
+  // note check for MH_CIGAM_64 is unneccessary as long as this tool is executed on
+  //   the same architecture as the target binary
+  // too allow checking for target binaries complied for a different architecture (e.g. checking ARM
+  //   binaries on Intel), corresponding changes also need to be made to swap byte-order when
+  //   reading sizes and offsets from load commands
+  if (header->magic == MH_MAGIC_64) { 
+    return std::unique_ptr<FileHandler>(new MachOFileHandler);
   }
 
   return nullptr;
 }
+#endif //__APPLE__
 
 }  // namespace bloaty
+
+// vim: expandtab:ts=2:sw=2
+
