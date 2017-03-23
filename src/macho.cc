@@ -16,8 +16,12 @@
 #include "bloaty.h"
 #include "re2/re2.h"
 
+#include <cassert>
+
 #ifdef __APPLE__
   #include <mach-o/loader.h>
+  #include <mach-o/nlist.h>
+  #include <mach-o/reloc.h>
 #endif
 
 // There are several programs that offer useful information about
@@ -72,41 +76,50 @@ static bool ParseMachOSymbols(RangeSink* sink) {
   return true;
 }
 
+// segname (& sectname) may NOT be NULL-terminated,
+//   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
+//   hence specifying size when constructing std::string
+static std::string str_from_char(const char *s, size_t maxlen) {
+  return std::string(s, strnlen(s, maxlen));
+}
+
 static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
   struct mach_header_64 *header = (struct mach_header_64 *) sink->input_file().data().data();
 
   // advance past mach header to get to first load command
   struct load_command *command = (struct load_command *) (header + 1);
+  struct segment_command_64 *__linkedit_segment = NULL;
 
   for (uint32_t i = 0;
       i < header->ncmds;
       i++, command = (struct load_command *) ((char *) command + command->cmdsize))
   {
     if (command->cmd == LC_SEGMENT_64) {
-      struct segment_command_64 *segment_command = (struct segment_command_64 *) command;
+      struct segment_command_64 *segment = (struct segment_command_64 *) command;
 
       // __PAGEZERO is a special blank segment usually used to trap NULL-dereferences
       // (since all protection bits are 0 it cannot be read from, written to, or executed)
-      if (std::string(segment_command->segname) == SEG_PAGEZERO) {
+      if (str_from_char(segment->segname, 16) == SEG_PAGEZERO) {
         // theoretically __PAGEZERO *should* count towards VM size
         // however on x86_64 __PAGEZERO takes up all lower 4 GiB
         // hence we skip it to avoid skewing the results (such as showing 99.99% or 100% for __PAGEZERO)
         continue;
       }
+
+      if (str_from_char(segment->segname, 16) == SEG_LINKEDIT) {
+        __linkedit_segment = segment;
+      }
       
       if (data_source == DataSource::kSegments) { // if segments are all we need this is enough
-        // side note: segname (& sectname) may NOT be NULL-terminated,
-        //   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
-        //   hence specifying size when constructing std::string
-        sink->AddRange(std::string(segment_command->segname, 16),
-                       segment_command->vmaddr,
-                       segment_command->vmsize,
-                       segment_command->fileoff,
-                       segment_command->filesize);
+        sink->AddRange(str_from_char(segment->segname, 16),
+                       segment->vmaddr,
+                       segment->vmsize,
+                       segment->fileoff,
+                       segment->filesize);
       } else if (data_source == DataSource::kSections) { // otherwise load sections
         // advance past segment command header
-        struct section_64 *section = (struct section_64 *) (segment_command + 1);
-        for (uint32_t j = 0; j < segment_command->nsects; j++, section++) {
+        struct section_64 *section = (struct section_64 *) (segment + 1);
+        for (uint32_t j = 0; j < segment->nsects; j++, section++) {
           // filesize equals vmsize unless the section is zerofill
           // note that the flags check (& 0x01) in the original implementation is incorrect
           // the lowest byte is interpreted similar to a enum rather than a bitmask
@@ -123,13 +136,96 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
               break;
           }
 
-          std::string label = std::string(section->segname, 16) + "," + std::string(section->sectname, 16);
+          std::string label = str_from_char(section->segname, 16) + "," + str_from_char(section->sectname, 16);
           sink->AddRange(label, section->addr, section->size, section->offset, filesize);
         }
       } else {
         return false;
       }
     }
+
+    // additional __LINKEDIT info
+    // not "sections" per se, but nevertheless useful (and more complex parsing logic)
+    if (data_source == DataSource::kSections) {
+      if (command->cmd == LC_DYLD_INFO || command->cmd == LC_DYLD_INFO_ONLY) {
+        // technically load commands can come in any order
+        // however unless deliberately hand crafted, LC_SEGMENT_64 comes before any others
+        // hence __LINKEDIT should've been identified
+        // while technically dyld info can point to any segment, "normal" binaries have it points into __LINKEDIT
+        assert(__linkedit_segment);
+
+        struct dyld_info_command *dyld_info = (struct dyld_info_command *) command;
+
+        #define ADD_DYLD_INFO_RANGE(section, desc) \
+        sink->AddRange(desc, \
+                       __linkedit_segment->vmaddr + dyld_info-> section##_off - __linkedit_segment->fileoff, \
+                       dyld_info-> section##_size, \
+                       dyld_info-> section##_off, \
+                       dyld_info-> section##_size)
+
+        ADD_DYLD_INFO_RANGE(rebase, "Rebase Info");
+        ADD_DYLD_INFO_RANGE(bind, "Binding Info");
+        ADD_DYLD_INFO_RANGE(weak_bind, "Weak Binding Info");
+        ADD_DYLD_INFO_RANGE(lazy_bind, "Lazy Binding Info");
+        ADD_DYLD_INFO_RANGE(export, "Export Info");
+      }
+    }
+
+    if (command->cmd == LC_SYMTAB) {
+      assert(__linkedit_segment);
+
+      struct symtab_command *symtab  = (struct symtab_command *) command;
+
+      sink->AddRange("Symbol Table",
+                     __linkedit_segment->vmaddr + symtab->symoff - __linkedit_segment->fileoff,
+                     symtab->nsyms * sizeof(struct nlist_64),
+                     symtab->symoff,
+                     symtab->nsyms * sizeof(struct nlist_64));
+
+      sink->AddRange("String Table",
+                     __linkedit_segment->vmaddr + symtab->stroff - __linkedit_segment->fileoff,
+                     symtab->strsize,
+                     symtab->stroff,
+                     symtab->strsize);
+    }
+
+    if (command->cmd == LC_DYSYMTAB) {
+      assert(__linkedit_segment);
+
+      struct dysymtab_command *dysymtab = (struct dysymtab_command *) command;
+
+      #define ADD_DYSYM_RANGE(desc, offset, num, entry_type) \
+      sink->AddRange(desc, \
+                     __linkedit_segment->vmaddr + dysymtab-> offset - __linkedit_segment->fileoff, \
+                     dysymtab-> num * sizeof(entry_type), \
+                     dysymtab-> offset, \
+                     dysymtab-> num * sizeof(entry_type))
+
+      ADD_DYSYM_RANGE("Table of Contents", tocoff, ntoc, struct dylib_table_of_contents);
+      ADD_DYSYM_RANGE("Module Table", modtaboff, nmodtab, struct dylib_module_64);
+      ADD_DYSYM_RANGE("Referenced Symbol Table", extrefsymoff, nextrefsyms, struct dylib_reference);
+      ADD_DYSYM_RANGE("Indirect Symbol Table", indirectsymoff, nindirectsyms, uint32_t);
+      ADD_DYSYM_RANGE("External Relocation Entries", extreloff, nextrel, struct relocation_info);
+      ADD_DYSYM_RANGE("Local Relocation Entries", locreloff, nlocrel, struct relocation_info);
+    }
+
+    #define CHECK_LINKEDIT_DATA_COMMAND(lc, desc) \
+    if (command->cmd == lc) { \
+      assert(__linkedit_segment); \
+      struct linkedit_data_command *linkedit_data = (struct linkedit_data_command *) command; \
+      sink->AddRange(desc, \
+                     __linkedit_segment->vmaddr + linkedit_data->dataoff - __linkedit_segment->fileoff, \
+                     linkedit_data->datasize, \
+                     linkedit_data->dataoff, \
+                     linkedit_data->datasize); \
+    }
+
+    CHECK_LINKEDIT_DATA_COMMAND(LC_CODE_SIGNATURE, "Code Signature");
+    CHECK_LINKEDIT_DATA_COMMAND(LC_SEGMENT_SPLIT_INFO, "Segment Split Info");
+    CHECK_LINKEDIT_DATA_COMMAND(LC_FUNCTION_STARTS, "Function Start Addresses");
+    CHECK_LINKEDIT_DATA_COMMAND(LC_DATA_IN_CODE, "Table of Non-instructions");
+    CHECK_LINKEDIT_DATA_COMMAND(LC_DYLIB_CODE_SIGN_DRS, "Code Signing DRs");
+    CHECK_LINKEDIT_DATA_COMMAND(LC_LINKER_OPTIMIZATION_HINT, "Optimizatio nHints");
   }
 
   return true;
