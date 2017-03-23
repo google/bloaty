@@ -20,8 +20,12 @@
 
 #ifdef __APPLE__
   #include <mach-o/loader.h>
+  #include <mach-o/fat.h>
   #include <mach-o/nlist.h>
   #include <mach-o/reloc.h>
+
+  #include <machine/endian.h>
+  #define be32toh(x) OSSwapBigToHostInt32(x)
 #endif
 
 // There are several programs that offer useful information about
@@ -84,7 +88,27 @@ static std::string str_from_char(const char *s, size_t maxlen) {
 }
 
 static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
-  struct mach_header_64 *header = (struct mach_header_64 *) sink->input_file().data().data();
+  const uint8_t *raw_data = (const uint8_t *) sink->input_file().data().data();
+  uint32_t magic = *(uint32_t *) raw_data;
+
+  uint32_t offset = 0; // file offset for 64 bit in fat binaries (0 for 64 bit native)
+
+  if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+    struct fat_header *fat_header = (struct fat_header *) raw_data;
+    struct fat_arch *arch = (struct fat_arch *) (fat_header + 1);
+
+    for (uint32_t i = 0; i < be32toh(fat_header->nfat_arch); i++, arch++) {
+      if (be32toh(arch->cputype) & CPU_ARCH_ABI64) {
+        offset = be32toh(arch->offset);
+      } else {
+        sink->AddRange("[Non-64bit arch in fat binary]", 0, 0, be32toh(arch->offset), be32toh(arch->size));
+      }
+    }
+
+    assert(offset);
+  }
+
+  struct mach_header_64 *header = (struct mach_header_64 *) (raw_data + offset);
 
   // advance past mach header to get to first load command
   struct load_command *command = (struct load_command *) (header + 1);
@@ -157,7 +181,7 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
         struct dyld_info_command *dyld_info = (struct dyld_info_command *) command;
 
         #define ADD_DYLD_INFO_RANGE(section, desc) \
-        sink->AddRange(desc, \
+        sink->AddRange(SEG_LINKEDIT "," desc, \
                        __linkedit_segment->vmaddr + dyld_info-> section##_off - __linkedit_segment->fileoff, \
                        dyld_info-> section##_size, \
                        dyld_info-> section##_off, \
@@ -176,13 +200,13 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
 
       struct symtab_command *symtab  = (struct symtab_command *) command;
 
-      sink->AddRange("Symbol Table",
+      sink->AddRange(SEG_LINKEDIT ",Symbol Table",
                      __linkedit_segment->vmaddr + symtab->symoff - __linkedit_segment->fileoff,
                      symtab->nsyms * sizeof(struct nlist_64),
                      symtab->symoff,
                      symtab->nsyms * sizeof(struct nlist_64));
 
-      sink->AddRange("String Table",
+      sink->AddRange(SEG_LINKEDIT ",String Table",
                      __linkedit_segment->vmaddr + symtab->stroff - __linkedit_segment->fileoff,
                      symtab->strsize,
                      symtab->stroff,
@@ -195,7 +219,7 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
       struct dysymtab_command *dysymtab = (struct dysymtab_command *) command;
 
       #define ADD_DYSYM_RANGE(desc, offset, num, entry_type) \
-      sink->AddRange(desc, \
+      sink->AddRange(SEG_LINKEDIT "," desc, \
                      __linkedit_segment->vmaddr + dysymtab-> offset - __linkedit_segment->fileoff, \
                      dysymtab-> num * sizeof(entry_type), \
                      dysymtab-> offset, \
@@ -213,7 +237,7 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
     if (command->cmd == lc) { \
       assert(__linkedit_segment); \
       struct linkedit_data_command *linkedit_data = (struct linkedit_data_command *) command; \
-      sink->AddRange(desc, \
+      sink->AddRange(SEG_LINKEDIT "," desc, \
                      __linkedit_segment->vmaddr + linkedit_data->dataoff - __linkedit_segment->fileoff, \
                      linkedit_data->datasize, \
                      linkedit_data->dataoff, \
@@ -260,15 +284,17 @@ class MachOFileHandler : public FileHandler {
 };
 
 std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
-  struct mach_header_64 *header = (struct mach_header_64 *) file.data().data();
+  uint32_t magic = *(uint32_t *) file.data().data();
 
-  // 32 bit and fat binaries are effectively deprecated, don't bother
+  // 32 bit binaries are effectively deprecated, don't bother
   // note check for MH_CIGAM_64 is unneccessary as long as this tool is executed on
   //   the same architecture as the target binary
-  // too allow checking for target binaries complied for a different architecture (e.g. checking ARM
+  // check for FAT_CIGAM *is* neccessary since fat header is always big-endian and would read FAT_CIGAM on Intel
+  // to allow checking for target binaries complied for a different architecture (e.g. checking ARM
   //   binaries on Intel), corresponding changes also need to be made to swap byte-order when
   //   reading sizes and offsets from load commands
-  if (header->magic == MH_MAGIC_64) { 
+  // for fat binaries, reports info on 64 bit binary (file size and offsets relative to only the 64 bit part)
+  if (magic == MH_MAGIC_64 || magic == FAT_CIGAM || magic == FAT_MAGIC) {
     return std::unique_ptr<FileHandler>(new MachOFileHandler);
   }
 
