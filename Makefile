@@ -26,7 +26,7 @@ third_party/re2/obj/libre2.a: third_party/re2/Makefile
 third%party/re2/Makefile third%party/re2/re2/re2.h third%party/googletest/CMakeLists.txt third%party/libFuzzer/build.sh: .gitmodules
 	git submodule init && git submodule update
 	@# Ensure .gitmodules cannot be newer
-	touch .gitmodules -r $@
+	touch -r .gitmodules $@
 
 clean:
 	rm -f bloaty src/*.o src/*.a
