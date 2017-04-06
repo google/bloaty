@@ -22,9 +22,6 @@
 #include <stdlib.h>
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
-#ifdef __FreeBSD__
-#include <sys/endian.h>
-#endif
 
 #include <memory>
 #include <set>
@@ -396,9 +393,6 @@ inline bool IsLittleEndian() {
   return *(char*)&x == 1;
 }
 
-// These are more efficient but appear not to exist on OS X.
-#if defined(__GNUC__) && !defined(__APPLE__)
-
 template <class T, size_t size> struct ByteSwapper { T operator()(T val); };
 
 template <class T>
@@ -409,53 +403,26 @@ struct ByteSwapper<T, 1> {
 template <class T>
 struct ByteSwapper<T, 2> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap16(val);
-#else
-    return __bswap_16(val);
-#endif
+    return __builtin_bswap16(val);
   }
 };
 
 template <class T>
 struct ByteSwapper<T, 4> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap32(val);
-#else
-    return __bswap_32(val);
-#endif
+    return __builtin_bswap32(val);
   }
 };
 
 template <class T>
 struct ByteSwapper<T, 8> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap64(val);
-#else
-    return __bswap_64(val);
-#endif
+    return __builtin_bswap64(val);
   }
 };
 
 template <class T>
 T ByteSwap(T val) { return ByteSwapper<T, sizeof(T)>()(val); }
-
-#else
-
-template <class T>
-T ByteSwap(T val) {
-  char from[sizeof(T)];
-  char to[sizeof(T)];
-  T ret;
-  memcpy(&from, &val, sizeof(T));
-  std::reverse_copy(from, from + sizeof(T), to);
-  memcpy(&ret, &to, sizeof(T));
-  return ret;
-}
-
-#endif
 
 }  // namespace bloaty
 
