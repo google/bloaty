@@ -11,4 +11,9 @@ os:
   - linux
   - osx
 
+sudo: required
+
+services:
+  - docker
+
 script: make test

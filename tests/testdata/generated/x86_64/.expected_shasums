@@ -1,0 +1,6 @@
+42b3bf637f9f5b90426d21992715397fd55059727e85a2f33ccd809870e3ca6a  tests/testdata/generated/x86_64/01-empty.o
+b157d8dcd06bee3c76126fd96d421a971de3755c67a046edb2d707ffcc4c8fcd  tests/testdata/generated/x86_64/02-simple.o
+fe957a9b88014bfa59b6789ccb5232bf48934bf591751cdc7688b25947389a08  tests/testdata/generated/x86_64/03-simple.a
+9c713154269306f772058345340278bab10412cc818649ba2b013709bcf83369  tests/testdata/generated/x86_64/04-simple.so
+f3755b8b948caf200c9b5fe944ed1f8de044718a7b7d3f7a42b84610dbf83573  tests/testdata/generated/x86_64/05-binary.bin
+8e1728af2604d80860889a13412f352669fdf2736c4dc8af6d6abc9589f73807  tests/testdata/generated/x86_64/06-diff.a
