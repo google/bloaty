@@ -26,6 +26,8 @@ CC="${CC:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 gcc}"
 AR="${AR:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 ar}"
 echo $CC
 echo $AR
+CC="docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 gcc"
+AR="docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 ar"
 echo Writing output to $OUTPUT_DIR
 echo Working in $TMP
 cd $TMP
