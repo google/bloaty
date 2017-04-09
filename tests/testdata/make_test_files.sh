@@ -21,7 +21,7 @@ fi
 cd $1
 OUTPUT_DIR=`pwd`
 TMP=`mktemp -d`
-CFLAGS="${CFLAGS:-}"
+CFLAGS="${CFLAGS:-march=haswell}"
 CC="${CC:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 gcc}"
 AR="${AR:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 ar}"
 echo Writing output to $OUTPUT_DIR
