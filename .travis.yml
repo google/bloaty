@@ -11,8 +11,6 @@ os:
   - linux
   - osx
 
-sudo: required
-
 services:
   - docker
 
