@@ -24,6 +24,8 @@ TMP=`mktemp -d`
 CFLAGS="${CFLAGS:- -march=haswell}"
 CC="${CC:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 gcc}"
 AR="${AR:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 ar}"
+echo $CC
+echo $AR
 echo Writing output to $OUTPUT_DIR
 echo Working in $TMP
 cd $TMP
