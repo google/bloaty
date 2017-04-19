@@ -117,6 +117,12 @@ class RangeSink {
 
   const InputFile& input_file() const { return *file_; }
 
+  // AddRange() and AddFileRange() label the given range with "name".  If this
+  // overlaps with any previously labeled range, the existing mapping takes
+  // precedence.  So any specific labels should be added first, and fallback
+  // labels can be added last for parts of the file that didn't have a specific
+  // label.
+  //
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.

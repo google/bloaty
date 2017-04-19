@@ -1489,12 +1489,12 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  RangeSink sink(&file, DataSource::kSegments, nullptr, maps.base_map());
-  file_handler->ProcessBaseMap(&sink);
+  RangeSink sink(&file, DataSource::kInputFiles, nullptr, maps.base_map());
+  file_handler->ProcessFile({&sink});
   maps.base_map()->file_map()->AddRange(0, file.data().size(), "[None]");
 
   do {
-    CHECK_RETURN(file_handler->ProcessFile(sink_ptrs, &filename));
+    CHECK_RETURN(file_handler->ProcessFile(sink_ptrs));
   } while (!file_handler->IsDone());
 
   maps.ComputeRollup(filename, filename_position_, rollup);

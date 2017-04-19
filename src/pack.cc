@@ -17,12 +17,7 @@
 namespace bloaty {
 
 class PackFileHandler : public FileHandler {
-  bool ProcessBaseMap(RangeSink* sink) override {
-    return false;
-  }
-
-  bool ProcessFile(const std::vector<RangeSink*>& sinks,
-                   std::string* filename) override {
+  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:

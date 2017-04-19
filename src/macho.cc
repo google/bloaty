@@ -206,11 +206,10 @@ static bool ParseMachOSections(RangeSink* sink) {
 }
 
 class MachOFileHandler : public FileHandler {
-  bool ProcessFile(const std::vector<RangeSink*>& sinks,
-                   std::string* filename) override {
+  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
-        case DataSource::kBase:
+        case DataSource::kInputFiles:
           return ParseMachOSegments(sink);
         case DataSource::kSegments:
           CHECK_RETURN(ParseMachOSegments(sink));

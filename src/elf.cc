@@ -838,11 +838,10 @@ static bool ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
 }  // namespace
 
 class ElfFileHandler : public FileHandler {
-  bool ProcessFile(const std::vector<RangeSink*>& sinks,
-                   std::string* filename) override {
+  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
-        case DataSource::kBase:
+        case DataSource::kInputFiles:
           if (IsObjectFile(sink->input_file().data())) {
             return DoReadELFSections(sink, kReportBySectionName);
           } else {
