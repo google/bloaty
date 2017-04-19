@@ -838,19 +838,18 @@ static bool ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
 }  // namespace
 
 class ElfFileHandler : public FileHandler {
-  bool ProcessBaseMap(RangeSink* sink) override {
-    if (IsObjectFile(sink->input_file().data())) {
-      return DoReadELFSections(sink, kReportBySectionName);
-    } else {
-      // Slightly more complete for executables, but not present in object
-      // files.
-      return ReadELFSegments(sink);
-    }
-  }
-
-  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  bool ProcessFile(const std::vector<RangeSink*>& sinks,
+                   std::string* filename) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
+        case DataSource::kBase:
+          if (IsObjectFile(sink->input_file().data())) {
+            return DoReadELFSections(sink, kReportBySectionName);
+          } else {
+            // Slightly more complete for executables, but not present in object
+            // files.
+            return ReadELFSegments(sink);
+          }
         case DataSource::kSegments:
           CHECK_RETURN(ReadELFSegments(sink));
           break;

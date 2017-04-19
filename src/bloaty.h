@@ -42,12 +42,17 @@ typedef re2::StringPiece StringPiece;
 class MemoryMap;
 
 enum class DataSource {
-  kArchiveMembers,
-  kCompileUnits,
-  kInlines,
-  kSections,
-  kSegments,
-  kSymbols,
+  // src/pack.cc depends on kInputFiles being the smallest number.
+  kInputFiles = 0,
+
+  // The order of these is not significant, but these numbers are persisted
+  // in our pack files, so they must not change.
+  kArchiveMembers = 1,
+  kCompileUnits = 2,
+  kInlines = 3,
+  kSections = 4,
+  kSegments = 5,
+  kSymbols = 6,
 };
 
 class InputFile {
@@ -58,9 +63,15 @@ class InputFile {
   const std::string& filename() const { return filename_; }
   StringPiece data() const { return data_; }
 
+  // Allows data sources to change the reported input file name.
+  // This is only intended to be used by pack files.
+  void SetFilename(const std::string& filename) {
+    filename_ = filename;
+  }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(InputFile);
-  const std::string filename_;
+  std::string filename_;
 
  protected:
   StringPiece data_;
@@ -93,7 +104,17 @@ class RangeSink {
             const MemoryMap* translator, MemoryMap* map);
   ~RangeSink();
 
-  DataSource data_source() const { return data_source_; }
+  // Returns the data source that is expected for this RangeSink.  Clients
+  // use this to determine what kind of info to parse from the input file and
+  // push to the sink.
+  //
+  // kInputFiles is special-cased a bit.  When you call RangeSink::Add*() for
+  // a kInputFiles sink, Bloaty won't pay attention to the name you pass, it
+  // will just use input_file().filename() instead.  So you can make your
+  // kInputFiles handler just delegate to any other handler you have that will
+  // definitely cover 100% of the input file (probably segments or sections).
+  const DataSource data_source() const { return data_source_; }
+
   const InputFile& input_file() const { return *file_; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
@@ -115,7 +136,8 @@ class RangeSink {
                  file_range.size());
   }
 
-  // The VM-only functions below may not be used to populate the base map!
+  // The VM-only functions below may not be used if
+  // data_source() == kInputFiles!
 
   // Adds a region to the memory map.  It should not overlap any previous
   // region added with Add(), but it should overlap the base memory map.
@@ -155,15 +177,21 @@ class FileHandler {
  public:
   virtual ~FileHandler() {}
 
-  virtual bool ProcessBaseMap(RangeSink* sink) = 0;
-
   // Process this file, pushing data to |sinks| as appropriate for each data
-  // source.
+  // source.  The first sink in |sinks| will be for kInputFiles, and this *must*
+  // be populated before any other sink.  The other sinks can be populated in
+  // any order.
   virtual bool ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+
+  // Returns true if there are no more files to process.  Will only be called
+  // after processing the first file, so you can unconditionally return true
+  // if this FileHandler only processes one file at a time.
+  virtual bool IsDone() { return true; }
 };
 
 std::unique_ptr<FileHandler> TryOpenELFFile(const InputFile& file);
 std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file);
+std::unique_ptr<FileHandler> TryOpenPackFile(const InputFile& file);
 
 namespace dwarf {
 

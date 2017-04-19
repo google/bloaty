@@ -6,11 +6,12 @@
 CXXFLAGS=-std=c++11 -W -Wall -Wno-sign-compare -g -I third_party/re2 -I. -Isrc
 RE2_H=third_party/re2/re2/re2.h
 RE2_A=third_party/re2/obj/libre2.a
+LEVELDB_A=third_party/leveldb/out-static/libleveldb.a
 
-bloaty: src/main.cc src/libbloaty.a $(RE2_A)
+bloaty: src/main.cc src/libbloaty.a $(RE2_A) $(LEVELDB_A)
 	$(CXX) $(GC_SECTIONS) $(CXXFLAGS) -O2 -o $@ $^ -lpthread
 
-OBJS=src/bloaty.o src/dwarf.o src/elf.o src/macho.o
+OBJS=src/bloaty.o src/dwarf.o src/elf.o src/macho.o src/pack.o
 
 $(OBJS): %.o : %.cc src/bloaty.h src/dwarf_constants.h $(RE2_H)
 	$(CXX) $(CXXFLAGS) -O2 -c -o $@ $<
@@ -21,9 +22,12 @@ src/libbloaty.a: $(OBJS)
 third_party/re2/obj/libre2.a: third_party/re2/Makefile
 	$(MAKE) -C third_party/re2 CPPFLAGS="-ffunction-sections -fdata-sections -g"
 
+third_party/leveldb/out-static/libleveldb.a: third_party/leveldb/Makefile
+	$(MAKE) -C third_party/leveldb CPPFLAGS="-ffunction-sections -fdata-sections -g" out-static/libleveldb.a
+
 # These targets share a pattern match to coerce make into only executing once
 # See this discussion: http://stackoverflow.com/a/3077254/1780018
-third%party/re2/Makefile third%party/re2/re2/re2.h third%party/googletest/CMakeLists.txt third%party/libFuzzer/build.sh: .gitmodules
+third%party/re2/Makefile third%party/re2/re2/re2.h third%party/googletest/CMakeLists.txt third%party/libFuzzer/build.sh third%party/leveldb/Makefile: .gitmodules
 	git submodule init && git submodule update
 	@# Ensure .gitmodules cannot be newer
 	touch -r .gitmodules $@

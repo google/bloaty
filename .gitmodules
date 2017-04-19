@@ -7,3 +7,6 @@
 [submodule "third_party/libFuzzer"]
 	path = third_party/libFuzzer
 	url = https://chromium.googlesource.com/chromium/llvm-project/llvm/lib/Fuzzer
+[submodule "third_party/leveldb"]
+	path = third_party/leveldb
+	url = https://github.com/google/leveldb.git

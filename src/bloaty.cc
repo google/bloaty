@@ -1385,8 +1385,12 @@ ConfiguredDataSource* Bloaty::FindDataSource(const std::string& name) const {
 }
 
 bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
-  const std::string& filename = file.filename();
-  auto file_handler = TryOpenELFFile(file);
+  std::string filename = file.filename();
+  auto file_handler = TryOpenPackFile(file);
+
+  if (!file_handler.get()) {
+    file_handler = TryOpenELFFile(file);
+  }
 
   if (!file_handler.get()) {
     file_handler = TryOpenMachOFile(file);
@@ -1473,10 +1477,6 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
 
   } maps;
 
-  RangeSink sink(&file, DataSource::kSegments, nullptr, maps.base_map());
-  file_handler->ProcessBaseMap(&sink);
-  maps.base_map()->file_map()->AddRange(0, file.data().size(), "[None]");
-
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
 
@@ -1489,7 +1489,13 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  CHECK_RETURN(file_handler->ProcessFile(sink_ptrs));
+  RangeSink sink(&file, DataSource::kSegments, nullptr, maps.base_map());
+  file_handler->ProcessBaseMap(&sink);
+  maps.base_map()->file_map()->AddRange(0, file.data().size(), "[None]");
+
+  do {
+    CHECK_RETURN(file_handler->ProcessFile(sink_ptrs, &filename));
+  } while (!file_handler->IsDone());
 
   maps.ComputeRollup(filename, filename_position_, rollup);
   if (verbose_level > 0) {

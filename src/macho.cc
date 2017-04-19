@@ -206,13 +206,12 @@ static bool ParseMachOSections(RangeSink* sink) {
 }
 
 class MachOFileHandler : public FileHandler {
-  bool ProcessBaseMap(RangeSink* sink) override {
-    return ParseMachOSegments(sink);
-  }
-
-  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  bool ProcessFile(const std::vector<RangeSink*>& sinks,
+                   std::string* filename) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
+        case DataSource::kBase:
+          return ParseMachOSegments(sink);
         case DataSource::kSegments:
           CHECK_RETURN(ParseMachOSegments(sink));
           break;
