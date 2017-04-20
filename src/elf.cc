@@ -742,11 +742,6 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
           }
         }
 
-        if (report_by == kReportByFilename) {
-          // Cover unmapped parts of the file.
-          sink->AddFileRange(filename, elf.entire_file());
-        }
-
         return true;
       });
 }
