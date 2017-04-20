@@ -174,6 +174,12 @@ struct File {
   StringPiece debug_abbrev;
   StringPiece debug_aranges;
   StringPiece debug_line;
+  StringPiece zdebug_info;
+  StringPiece zdebug_types;
+  StringPiece zdebug_str;
+  StringPiece zdebug_abbrev;
+  StringPiece zdebug_aranges;
+  StringPiece zdebug_line;
 };
 
 }  // namespace dwarf

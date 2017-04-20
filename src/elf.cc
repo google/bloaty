@@ -829,6 +829,16 @@ static bool ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
       dwarf->debug_abbrev = section.contents();
     } else if (name == ".debug_line") {
       dwarf->debug_line = section.contents();
+    } else if (name == ".zdebug_aranges") {
+      dwarf->zdebug_aranges = section.contents();
+    } else if (name == ".zdebug_str") {
+      dwarf->zdebug_str = section.contents();
+    } else if (name == ".zdebug_info") {
+      dwarf->zdebug_info = section.contents();
+    } else if (name == ".zdebug_abbrev") {
+      dwarf->zdebug_abbrev = section.contents();
+    } else if (name == ".zdebug_line") {
+      dwarf->zdebug_line = section.contents();
     }
   }
 
