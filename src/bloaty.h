@@ -22,9 +22,6 @@
 #include <stdlib.h>
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
-#ifdef __FreeBSD__
-#include <sys/endian.h>
-#endif
 
 #include <memory>
 #include <set>
@@ -396,9 +393,16 @@ inline bool IsLittleEndian() {
   return *(char*)&x == 1;
 }
 
-// These are more efficient but appear not to exist on OS X.
-#if defined(__GNUC__) && !defined(__APPLE__)
-
+// It seems like it would be simpler to just specialize on:
+//   template <class T> T ByteSwap(T val);
+//   template <> T ByteSwap<uint16>(T val) { /* ... */ }
+//   template <> T ByteSwap<uint32>(T val) { /* ... */ }
+//   // etc...
+//
+// But this doesn't work out so well.  Consider that on LP32, uint32 could
+// be either "unsigned int" or "unsigned long".  Specializing ByteSwap<uint32>
+// will leave one of those two unspecialized.  C++ is annoying in this regard.
+// Our approach here handles both cases with just one specialization.
 template <class T, size_t size> struct ByteSwapper { T operator()(T val); };
 
 template <class T>
@@ -409,53 +413,37 @@ struct ByteSwapper<T, 1> {
 template <class T>
 struct ByteSwapper<T, 2> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap16(val);
-#else
-    return __bswap_16(val);
-#endif
+    return ((val & 0xff) << 8) |
+        ((val & 0xff00) >> 8);
   }
 };
 
 template <class T>
 struct ByteSwapper<T, 4> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap32(val);
-#else
-    return __bswap_32(val);
-#endif
+    return ((val & 0xff) << 24) |
+        ((val & 0xff00) << 8) |
+        ((val & 0xff0000ULL) >> 8) |
+        ((val & 0xff000000ULL) >> 24);
   }
 };
 
 template <class T>
 struct ByteSwapper<T, 8> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap64(val);
-#else
-    return __bswap_64(val);
-#endif
+    return ((val & 0xff) << 56) |
+        ((val & 0xff00) << 40) |
+        ((val & 0xff0000) << 24) |
+        ((val & 0xff000000) << 8) |
+        ((val & 0xff00000000ULL) >> 8) |
+        ((val & 0xff0000000000ULL) >> 24) |
+        ((val & 0xff000000000000ULL) >> 40) |
+        ((val & 0xff00000000000000ULL) >> 56);
   }
 };
 
 template <class T>
 T ByteSwap(T val) { return ByteSwapper<T, sizeof(T)>()(val); }
-
-#else
-
-template <class T>
-T ByteSwap(T val) {
-  char from[sizeof(T)];
-  char to[sizeof(T)];
-  T ret;
-  memcpy(&from, &val, sizeof(T));
-  std::reverse_copy(from, from + sizeof(T), to);
-  memcpy(&ret, &to, sizeof(T));
-  return ret;
-}
-
-#endif
 
 }  // namespace bloaty
 
