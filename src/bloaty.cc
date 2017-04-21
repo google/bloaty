@@ -52,6 +52,9 @@
   }
 #define CHECK_RETURN(call) if (!(call)) { return false; }
 
+using std::isnan;
+using std::isinf;
+
 namespace bloaty {
 
 size_t max_label_len = 80;
