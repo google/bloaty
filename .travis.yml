@@ -11,4 +11,12 @@ os:
   - linux
   - osx
 
+services:
+  - docker
+
+before_install:
+  - docker pull gcc:4.9
+  - docker images
+  - docker run gcc:4.9 gcc -march=native -Q --help=target
+
 script: make test

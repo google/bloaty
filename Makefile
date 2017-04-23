@@ -11,6 +11,7 @@ bloaty: src/main.cc src/libbloaty.a $(RE2_A)
 	$(CXX) $(GC_SECTIONS) $(CXXFLAGS) -O2 -o $@ $^ -lpthread
 
 OBJS=src/bloaty.o src/dwarf.o src/elf.o src/macho.o
+GENERATED_TEST_TARGETS=x86_64
 
 $(OBJS): %.o : %.cc src/bloaty.h src/dwarf_constants.h $(RE2_H)
 	$(CXX) $(CXXFLAGS) -O2 -c -o $@ $<
@@ -53,12 +54,18 @@ $(TESTOBJS): %.test.o : %.cc src/bloaty.h src/dwarf_constants.h $(RE2_H)
 src/libbloaty-test.a: $(TESTOBJS)
 	ar rcs $@ $^
 
-test: tests/range_map_test tests/bloaty_test tests/bloaty_misc_test
+tests/testdata/generated/$(GENERATED_TEST_TARGETS)/.marker: tests/testdata/make_test_files.sh
+	tests/testdata/make_test_files.sh $(dir $@)
+	tests/testdata/check_shas.sh $(dir $@)
+	touch $@
+
+test: tests/range_map_test tests/bloaty_test tests/bloaty_misc_test tests/testdata/generated/x86_64/.marker
 	TOP=`pwd`; \
 	tests/range_map_test && \
 	(cd tests/testdata/linux-x86_64 && $$TOP/tests/bloaty_test) && \
 	(cd tests/testdata/linux-x86 && $$TOP/tests/bloaty_test) && \
-	(cd tests/testdata/misc && $$TOP/tests/bloaty_misc_test)
+	(cd tests/testdata/generated/x86_64 && $$TOP/tests/bloaty_test) && \
+	(cd tests/testdata/misc && $$TOP/tests/bloaty_misc_test) 
 
 tests/range_map_test: tests/range_map_test.cc $(TESTLIBS)
 	$(CXX) $(CXXFLAGS) $(TESTFLAGS) -o $@ $^ -lpthread

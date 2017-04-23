@@ -21,7 +21,13 @@ fi
 cd $1
 OUTPUT_DIR=`pwd`
 TMP=`mktemp -d`
-CC="${CC:-cc}"
+CFLAGS="${CFLAGS:- -march=haswell}"
+CC="${CC:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 gcc}"
+AR="${AR:-docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 ar}"
+echo $CC
+echo $AR
+CC="docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 gcc"
+AR="docker run -v ${TMP}:/sources -u 1000 -w /sources gcc:4.9 ar"
 echo Writing output to $OUTPUT_DIR
 echo Working in $TMP
 cd $TMP
@@ -36,7 +42,7 @@ function make_tmp_obj() {
   CONTENTS="$2"
   CFILE=`basename $1`.c
   echo "$CONTENTS" > $CFILE
-  $CC -g -fPIC -o $FILE -c $CFILE
+  $CC $CFLAGS -g -fPIC -o $FILE -c $CFILE
 }
 
 function make_obj() {
@@ -49,21 +55,21 @@ function make_obj() {
 function make_ar() {
   FILE=$1
   shift
-  ar rcs $FILE "$@"
+  $AR Drcs $FILE "$@"
   publish $FILE
 }
 
 function make_so() {
   FILE=$1
   shift
-  $CC -g -shared -o $FILE "$@"
+  $CC $CFLAGS -g -shared -o $FILE "$@"
   publish $FILE
 }
 
 function make_binary() {
   FILE=$1
   shift
-  $CC -o $FILE "$@"
+  $CC $CFLAGS -o $FILE "$@"
   publish $FILE
 }
 
