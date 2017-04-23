@@ -257,3 +257,19 @@ TEST_F(BloatyTest, DiffMode) {
     std::make_tuple("foo_y", 4, 0)
   });
 }
+
+TEST_F(BloatyTest, MangledOption) {
+  std::string file = "07-mangled.o";
+  uint64_t size;
+  ASSERT_TRUE(GetFileSize(file, &size));
+
+  // Expect first pass to be the unmangled version.
+  RunBloaty({"bloaty", "-d", "symbols", file});
+  AssertChildren(*top_row_, {
+                                std::make_tuple("func", 15, 15),
+                            });
+
+  // Now expect the mangled one.
+  RunBloaty({"bloaty", "-d", "symbols", "--no-demangle", file});
+  AssertChildrenContainSymbols(*top_row_, std::set<std::string>({"_Z4funcj"}));
+}
