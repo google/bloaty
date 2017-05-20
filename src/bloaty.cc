@@ -1115,33 +1115,10 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 
 // MemoryMap ///////////////////////////////////////////////////////////////////
 
-// Contains a RangeMap for VM space and file space.
+MemoryMap::MemoryMap(DataSource source, std::unique_ptr<NameMunger>&& munger)
+    : source_(source), munger_(std::move(munger)) {}
 
-class MemoryMap {
- public:
-  MemoryMap(std::unique_ptr<NameMunger>&& munger) : munger_(std::move(munger)) {}
-  virtual ~MemoryMap() {}
-
-  bool FindAtAddr(uint64_t vmaddr, std::string* name) const;
-  bool FindContainingAddr(uint64_t vmaddr, uint64_t* start,
-                          std::string* name) const;
-
-  const RangeMap* file_map() const { return &file_map_; }
-  const RangeMap* vm_map() const { return &vm_map_; }
-  RangeMap* file_map() { return &file_map_; }
-  RangeMap* vm_map() { return &vm_map_; }
-
- protected:
-  std::string ApplyNameRegexes(StringPiece name);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
-  friend class RangeSink;
-
-  RangeMap vm_map_;
-  RangeMap file_map_;
-  std::unique_ptr<NameMunger> munger_;
-};
+MemoryMap::~MemoryMap() {}
 
 std::string MemoryMap::ApplyNameRegexes(StringPiece name) {
   return munger_ ? munger_->Munge(name) : std::string(name.as_string());
@@ -1403,7 +1380,10 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
 
   struct Maps {
    public:
-    Maps() : base_map_(nullptr) { PushMap(&base_map_); }
+    Maps()
+        : base_map_(DataSource::kInputFiles, nullptr) {
+      PushMap(&base_map_);
+    }
 
     void PushAndOwnMap(MemoryMap* map) {
       maps_.emplace_back(map);
@@ -1482,7 +1462,7 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
 
   for (size_t i = 0; i < sources_.size(); i++) {
     auto& source = sources_[i];
-    auto map = new MemoryMap(std::move(source.munger));
+    auto map = new MemoryMap(source.source, std::move(source.munger));
     maps.PushAndOwnMap(map);
     sinks.push_back(std::unique_ptr<RangeSink>(
         new RangeSink(&file, source.source, maps.base_map(), map)));
@@ -1545,6 +1525,8 @@ Options:
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
                    Defaults to 20.
+  -p <filename>    Write a packfile to <filename>.  This can be used as an
+                   input file for a subsequent invocation.
   -r <regex>       Add regex to the list of regexes.
                    Format for regex is:
                      SOURCE:s/PATTERN/REPLACEMENT/
@@ -1583,6 +1565,7 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
 
   RE2 regex_pattern("(\\w+)\\:s/(.*)/(.*)/");
   bool base_files = false;
+  std::string packfile_output;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) {

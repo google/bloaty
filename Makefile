@@ -74,7 +74,7 @@ tests/bloaty_misc_test: tests/bloaty_misc_test.cc $(TESTLIBS)
 	$(CXX) $(CXXFLAGS) $(TESTFLAGS) -o $@ $^ -lpthread
 
 third_party/googletest/googlemock/gtest/libgtest_main.a: third_party/googletest/CMakeLists.txt
-	cd third_party/googletest && cmake . && $(MAKE)
+	cd third_party/googletest/googletest && cmake . && $(MAKE)
 
 ## Fuzzing #####################################################################
 

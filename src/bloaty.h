@@ -40,6 +40,7 @@ namespace bloaty {
 typedef re2::StringPiece StringPiece;
 
 class MemoryMap;
+class NameMunger;
 
 enum class DataSource {
   // src/pack.cc depends on kInputFiles being the smallest number.
@@ -370,6 +371,38 @@ class RangeMap {
 
   Entry* TryGet(uint64_t addr, uint64_t* start, uint64_t* size) const;
   const std::string* TryGetExactly(uint64_t addr, uint64_t* size) const;
+};
+
+
+// MemoryMap ///////////////////////////////////////////////////////////////////
+
+// Contains a RangeMap for VM space and file space.
+
+class MemoryMap {
+ public:
+  MemoryMap(DataSource source, std::unique_ptr<NameMunger>&& munger);
+  virtual ~MemoryMap();
+
+  bool FindAtAddr(uint64_t vmaddr, std::string* name) const;
+  bool FindContainingAddr(uint64_t vmaddr, uint64_t* start,
+                          std::string* name) const;
+
+  DataSource source() const { return source_; }
+  const RangeMap* file_map() const { return &file_map_; }
+  const RangeMap* vm_map() const { return &vm_map_; }
+  RangeMap* file_map() { return &file_map_; }
+  RangeMap* vm_map() { return &vm_map_; }
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
+  friend class RangeSink;
+
+  std::string ApplyNameRegexes(StringPiece name);
+
+  DataSource source_;
+  RangeMap vm_map_;
+  RangeMap file_map_;
+  std::unique_ptr<NameMunger> munger_;
 };
 
 

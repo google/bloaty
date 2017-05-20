@@ -12,9 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// A pack file stores the parsed results from reading one or more input files.
+// This lets users store the results of parsing in a way that is easy to do
+// further processing on later.
+//
+// We use an SSTable file to store the data.  This provides random access so
+// that we only need to scan the parts of the file corresponding to the "-d"
+// options the user passes.
+
 #include "bloaty.h"
 
 namespace bloaty {
+
+// We pack several values into the key and value.
+struct Key {
+  DataSource data_source;
+  std::string filename;
+  uint64_t start_address;
+
+  void Pack(std::string* serialized) const {}
+  void Unpack(StringPiece serialized) {}
+};
+
+struct Value {
+  int64_t range_size;
+  std::string label;
+
+  // Only for DataSource::kSegments and DataSource::kSections.
+  uint64_t file_start_address;
+  int64_t file_size;
+
+  void Pack(std::string* serialized) const {}
+  void Unpack(StringPiece serialized) {}
+};
+
 
 class PackFileHandler : public FileHandler {
   bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
@@ -37,6 +68,10 @@ class PackFileHandler : public FileHandler {
 
 std::unique_ptr<FileHandler> TryOpenPackFile(const InputFile& file) {
   return nullptr;
+}
+
+bool WritePackFile(std::vector<MemoryMap*> maps) {
+  return false;
 }
 
 }  // namespace
