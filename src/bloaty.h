@@ -371,6 +371,7 @@ struct RollupOutput {
   RollupOutput() : toplevel_row_("TOTAL") {}
   const RollupRow& toplevel_row() { return toplevel_row_; }
   void Print(std::ostream* out) const;
+  void AbbreviateToFit(size_t width);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
@@ -378,9 +379,11 @@ struct RollupOutput {
 
   size_t longest_label_;
   RollupRow toplevel_row_;
+  std::vector<std::string> abbrevs_;
 
   void PrintRow(const RollupRow& row, size_t indent, std::ostream* out) const;
   void PrintTree(const RollupRow& row, size_t indent, std::ostream* out) const;
+  static void CollectNames(RollupRow* row, std::vector<std::string*>* names);
 };
 
 bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,

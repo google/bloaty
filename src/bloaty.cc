@@ -815,6 +815,63 @@ void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
   }
 }
 
+void RollupOutput::CollectNames(RollupRow* row,
+                                std::vector<std::string*>* names) {
+  names->push_back(&row->name);
+  for (auto& child : row->sorted_children) {
+    CollectNames(&child, names);
+  }
+}
+
+void RollupOutput::AbbreviateToFit(size_t width) {
+  std::vector<std::string*> names;
+  std::string best_prefix;
+  int best_prefix_weight = 0;
+  CollectNames(&toplevel_row_, &names);
+  std::unordered_set<const std::string*> have_prefix;
+
+  while (1) {
+    size_t saw_overwide = false;
+    for (auto name : names) {
+      if (name->size() > width) {
+        saw_overwide = true;
+        break;
+      }
+    }
+    if (!saw_overwide) {
+      return;
+    }
+
+    size_t n = 1;
+    while (have_prefix.size() > 1) {
+      char ch = (*have_prefix.begin())->at(n);
+      bool all_same = true;
+      for (auto name : have_prefix) {
+        if (name->at(n) != ch) {
+          if (all_same) {
+            int weight = (n - 1) * have_prefix.size();
+            if (weight > best_prefix_weight) {
+              best_prefix = name->substr(0, n - 1);
+              best_prefix_weight = weight;
+            }
+            all_same = false;
+          }
+        }
+      }
+    }
+
+    // Remove the best prefix from all strings that have it.
+    std::string replace_with =
+        std::string("[") + std::to_string(abbrevs_.size()) + "]";
+    abbrevs_.push_back(best_prefix);
+    for (auto name : names) {
+      if (name->compare(0, best_prefix.length(), best_prefix) == 0) {
+        name->replace(0, best_prefix.length(), replace_with);
+      }
+    }
+  }
+}
+
 void RollupOutput::Print(std::ostream* out) const {
   *out << "     VM SIZE    ";
   PrintSpaces(longest_label_, out);
@@ -866,6 +923,15 @@ void RollupOutput::Print(std::ostream* out) const {
 
   // The "TOTAL" row comes after all other rows.
   PrintRow(toplevel_row_, 0, out);
+
+  if (abbrevs_.size() > 0) {
+    *out << "\n";
+    *out << "  Abbreviations:\n";
+    int i = 0;
+    for (const auto& abbrev : abbrevs_) {
+      *out << "  [" << i++ << "]: " << abbrev << "\n";
+    }
+  }
 }
 
 
@@ -1660,6 +1726,7 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
   }
 
   CHECK_RETURN(bloaty.ScanAndRollup(output));
+  output->AbbreviateToFit(max_label_len);
   return true;
 }
 
