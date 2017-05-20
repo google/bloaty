@@ -13,13 +13,14 @@
 // limitations under the License.
 
 #include <array>
-#include <cmath>
 #include <cinttypes>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <string>
@@ -117,7 +118,7 @@ class RankComparator {
 };
 
 template <class Func>
-RankComparator<Func> MakeRankComparator(Func func) {
+constexpr RankComparator<Func> MakeRankComparator(Func func) {
   return RankComparator<Func>(func);
 }
 
@@ -196,14 +197,14 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 class NameStripper {
  public:
   bool StripName(const std::string& name) {
-    if (name[name.size() - 1] != ')') {
-      // (anonymous namespace)::ctype_w
-      stripped_ = &name;
-      return false;
-    }
-
     int nesting = 0;
     for (size_t n = name.size() - 1; n < name.size(); --n) {
+      if (name[n] == ':' && nesting == 0) {
+        // (anonymous namespace)::ctype_w
+        stripped_ = &name;
+        return false;
+      }
+
       if (name[n] == '(') {
         if (--nesting == 0) {
           storage_ = name.substr(0, n);
@@ -672,6 +673,124 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
 }
 
 
+// SuffixArray /////////////////////////////////////////////////////////////////
+
+// A generalized enhanced suffix array
+//   https://en.wikipedia.org/wiki/Suffix_array
+//
+// Generalized means it holds suffixes from multiple source strings.  Enhanced
+// means that in addition to the suffix array proper, it also can contain other
+// arrays such as the "lcp" array (longest common prefix) and others.
+
+class SuffixArray {
+ public:
+  size_t size() const { return array_.size(); }
+
+  // You may only call this when the object is first constructed.  Once any
+  // other methods are called it may no longer be called.
+  void AddString(StringPiece str) {
+    assert(array_.empty());
+    strings_.push_back(str);
+  }
+
+  std::pair<StringPiece, size_t> GetSuffix(size_t i) {
+    Entry e = entry(i);
+    return std::make_pair(GetStringFromEntry(e), e.str);
+  }
+
+  uint32_t GetLcp(size_t i) {
+    return lcp_[i];
+  }
+
+  void ComputeArray();
+  void ComputeLcp();
+
+ private:
+  struct Entry {
+    // This suffix is strings_[str].substr(ofs).
+    Entry(uint32_t str_, uint32_t ofs_) : str(str_), ofs(ofs_) {}
+    uint32_t str;
+    uint32_t ofs;
+  };
+
+  Entry entry(size_t i) { return array_[i]; }
+
+  StringPiece GetStringFromEntry(Entry entry) {
+    return strings_[entry.str].substr(entry.ofs);
+  }
+
+  std::vector<StringPiece> strings_;
+
+  std::vector<Entry> array_;
+  std::vector<uint32_t> lcp_;
+};
+
+void SuffixArray::ComputeArray() {
+  assert(array_.empty());
+
+  // This is a naive, O(n^2 lg n) algorithm.
+  // Several O(n) algorithms exist, but they are much, much more complicated.
+  // The fastest known algorithm is described by Nong, Zhang & Chan (2009):
+  //   Linear Suffix Array Construction by Almost Pure Induced-Sorting
+  // We can replace this with a faster algorithm if/when it is an issue.
+  for (size_t i = 0; i < strings_.size(); i++) {
+    StringPiece str = strings_[i];
+    for (size_t j = 0; j < str.size(); j++) {
+      char last_ch = 0;
+      if (j > 0) last_ch = str[j - 1];
+      if (j == 0 || last_ch == '/' || last_ch == '<') {
+        array_.push_back(Entry(i, j));
+      }
+    }
+  }
+
+  std::sort(array_.begin(), array_.end(), [this](Entry a, Entry b) {
+    return GetStringFromEntry(a) < GetStringFromEntry(b);
+  });
+}
+
+void SuffixArray::ComputeLcp() {
+  assert(!array_.empty());
+  assert(lcp_.empty());
+
+  // This is a naive, O(n^2) algorithm.
+  // Several O(n) algorithms exist, but they are much, much more complicated.
+  // The fastest known O(n) algorithm is described by Fischer (2011):
+  //   Inducing the LCP-Array
+  // We can replace this with a faster algorithm if/when it is an issue.
+  lcp_.resize(array_.size());
+  StringPiece last = GetStringFromEntry(entry(0));
+  for (size_t i = 1; i < array_.size(); i++) {
+    StringPiece curr = GetStringFromEntry(entry(i));
+    size_t limit = std::min(curr.size(), last.size());
+    size_t j;
+    int nesting = 0;
+    size_t nesting_start = 0;
+    for (j = 0; j < limit; j++) {
+      if (curr[j] != last[j]) {
+        break;
+      }
+      if (curr[j] == ',' && nesting == 0) {
+        break;
+      }
+      if (curr[j] == '<' || curr[j] == '(') {
+        if (nesting++ == 0) {
+          nesting_start = j;
+        }
+      }
+      if ((curr[j] == '>' || curr[j] == ')') && --nesting < 0) {
+        break;
+      }
+    }
+    if (nesting > 0) {
+      j = nesting_start;
+    }
+    lcp_[i] = j;
+    last = curr;
+  }
+}
+
+
 // RollupOutput ////////////////////////////////////////////////////////////////
 
 // RollupOutput represents rollup data after we have applied output massaging
@@ -815,6 +934,79 @@ void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
   }
 }
 
+void RollupOutput::CollectNames(RollupRow* row,
+                                std::vector<std::string*>* names) {
+  names->push_back(&row->name);
+  for (auto& child : row->sorted_children) {
+    CollectNames(&child, names);
+  }
+}
+
+void RollupOutput::AbbreviateToFit(size_t width) {
+  std::vector<std::string*> names;
+  std::string best_prefix;
+  CollectNames(&toplevel_row_, &names);
+  SuffixArray suffixes;
+
+  for (size_t i = 0; i < names.size(); i++) {
+    suffixes.AddString(*names[i]);
+  }
+
+  suffixes.ComputeArray();
+  suffixes.ComputeLcp();
+
+  struct Abbrev {
+    Abbrev(size_t weight_, StringPiece str_)
+        : weight(weight_),
+          str(str_.data(),
+          str_.size()) {}
+    bool operator <(const Abbrev& b) const { return weight < b.weight; }
+    size_t weight;
+    std::string str;
+  };
+
+  std::priority_queue<Abbrev> abbrevs;
+  std::vector<size_t> start_indexes;
+
+  for (size_t i = 0; i < suffixes.size(); i++) {
+    size_t lcp = suffixes.GetLcp(i);
+    std::cout << "Suffix: " << suffixes.GetSuffix(i).first << ", lcp: " << lcp << "\n";
+    if (start_indexes.empty() || lcp > suffixes.GetLcp(start_indexes.back())) {
+      start_indexes.push_back(i);
+    }
+    while (lcp < suffixes.GetLcp(start_indexes.back())) {
+      size_t index = start_indexes.back();
+      size_t len = suffixes.GetLcp(index);
+      start_indexes.pop_back();
+      size_t weight = (i - index + 1) * len * len;
+      std::cout << "Weight: " << weight << "\n";
+      if (weight > 0) {
+        StringPiece substr = suffixes.GetSuffix(index).first.substr(0, len);
+        abbrevs.emplace(weight, substr);
+      }
+    }
+  }
+
+  char ch = 'A';
+  while (!abbrevs.empty()) {
+    const std::string abbrev_text = abbrevs.top().str;
+    abbrevs.pop();
+    if (abbrev_text.size() < 30) {
+      continue;
+    }
+    std::string replacement(1, ch);
+    abbrevs_.emplace_back(replacement, abbrev_text);
+    ch++;
+    for (const auto& name : names) {
+      size_t pos;
+      while ((pos = name->find(abbrev_text)) != std::string::npos) {
+        name->replace(pos, abbrev_text.size(), replacement);
+      }
+    }
+    std::cout << "Abbrev: " << abbrevs.top().str << ", weight:" << abbrevs.top().weight << "\n";
+  }
+}
+
 void RollupOutput::Print(std::ostream* out) const {
   *out << "     VM SIZE    ";
   PrintSpaces(longest_label_, out);
@@ -866,6 +1058,15 @@ void RollupOutput::Print(std::ostream* out) const {
 
   // The "TOTAL" row comes after all other rows.
   PrintRow(toplevel_row_, 0, out);
+
+  if (abbrevs_.size() > 0) {
+    *out << "\n";
+    *out << "  Abbreviations:\n";
+    int i = 0;
+    for (const auto& abbrev : abbrevs_) {
+      *out << "     " << abbrev.first << ": " << abbrev.second << "\n";
+    }
+  }
 }
 
 
@@ -1660,6 +1861,7 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
   }
 
   CHECK_RETURN(bloaty.ScanAndRollup(output));
+  output->AbbreviateToFit(max_label_len);
   return true;
 }
 
