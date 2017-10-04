@@ -7,6 +7,10 @@ add_subdirectory(third_party/re2)
 include_directories(third_party/re2)
 
 include_directories(.)
+set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-sign-compare")
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+
 add_executable(bloaty
     src/bloaty.cc
     src/dwarf.cc
@@ -15,5 +19,3 @@ add_executable(bloaty
     src/main.cc
     )
 target_link_libraries(bloaty re2)
-set(CMAKE_CXX_FLAGS "-std=c++11")
-
