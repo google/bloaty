@@ -67,6 +67,8 @@ class InputFile {
 
 class InputFileFactory {
  public:
+  virtual ~InputFileFactory() {}
+
   // Returns nullptr if the file could not be opened.
   virtual std::unique_ptr<InputFile> TryOpenFile(
       const std::string& filename) const = 0;
