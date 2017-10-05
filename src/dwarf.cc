@@ -155,7 +155,7 @@ typename std::enable_if<std::is_signed<T>::value, bool>::type ReadLEB128(
 bool SkipLEB128(string_view* data) {
   size_t limit =
       std::min(static_cast<size_t>(data->size()), static_cast<size_t>(10));
-  for (int i = 0; i < limit; i++) {
+  for (size_t i = 0; i < limit; i++) {
     if (((*data)[i] & 0x80) == 0) {
       data->remove_prefix(i + 1);
       return true;
@@ -967,7 +967,7 @@ class FormReader<bool> : public FormReaderBase<FormReader<bool>> {
       : Base(reader, data), val_(val) {}
 
   template <class Func>
-  static bool GetFunctionForForm(const DIEReader& reader, uint8_t form,
+  static bool GetFunctionForForm(const DIEReader& /*reader*/, uint8_t form,
                                  Func func) {
     switch (form) {
       case DW_FORM_flag:
@@ -1006,7 +1006,7 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
   typedef void type;
   using Base::data_;
 
-  FormReader(const DIEReader& reader, string_view data, void* val)
+  FormReader(const DIEReader& reader, string_view data, void* /*val*/)
       : Base(reader, data) {}
 
   template <class Func>
@@ -1246,13 +1246,13 @@ class FixedAttrReader {
   // this class).  If we want to be more restrictive about this later, we could
   // let users specify that only certain forms should be allowed.
   template <size_t N>
-  FixedAttrReader(DIEReader* reader, const DwarfAttribute (&attributes)[N]) {
+  FixedAttrReader(DIEReader* /*reader*/, const DwarfAttribute (&attributes)[N]) {
     static_assert(N == sizeof...(Args), "must match number of template params");
     std::copy(std::begin(attributes), std::end(attributes),
               std::begin(attributes_));
   }
 
-  FixedAttrReader(DIEReader* reader,
+  FixedAttrReader(DIEReader* /*reader*/,
                   std::initializer_list<DwarfAttribute> attributes) {
     assert(attributes.size() == sizeof...(Args));
     std::copy(std::begin(attributes), std::end(attributes),

@@ -23,7 +23,7 @@ namespace bloaty {
 
 class RangeMapTest : public ::testing::Test {
  protected:
-  void CheckConsistencyFor(const bloaty::RangeMap& map) {
+  void CheckConsistencyFor(const bloaty::RangeMap& /*map*/) {
     uint64_t last_end = 0;
     for (const auto& entry : map_.mappings_) {
       ASSERT_GT(entry.second.end, entry.first);

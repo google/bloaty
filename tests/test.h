@@ -119,7 +119,7 @@ class BloatyTest : public ::testing::Test {
   }
 
   void AssertBloatyFails(const std::vector<std::string>& strings,
-                         const std::string& msg_regex) {
+                         const std::string& /*msg_regex*/) {
     // TODO(haberman): verify msg_regex by making all errors logged to a
     // standard place.
     ASSERT_FALSE(TryRunBloaty(strings));

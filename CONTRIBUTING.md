@@ -33,8 +33,8 @@ purpose.
 
 ### Legal Requirements
 Before we can use your code, you must sign the [Google
-Individual Contributor License Agreement]
-(https://cla.developers.google.com/about/google-individual)
+Individual Contributor License
+Agreement](https://cla.developers.google.com/about/google-individual)
 (CLA), which you can do online. The CLA is necessary mainly
 because you own the copyright to your changes, even after
 your contribution becomes part of our codebase, so we need
@@ -49,5 +49,5 @@ into our codebase.
 ### The small print
 Contributions made by corporations are covered by a
 different agreement than the one above, the [Software Grant
-and Corporate Contributor License Agreement]
-(https://cla.developers.google.com/about/google-corporate).
+and Corporate Contributor License
+Agreement](https://cla.developers.google.com/about/google-corporate).

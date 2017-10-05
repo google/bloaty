@@ -8,7 +8,7 @@ include_directories(third_party/re2)
 include_directories(.)
 include_directories(src)
 include_directories(third_party/abseil-cpp)
-set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-sign-compare")
+set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
