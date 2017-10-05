@@ -1780,7 +1780,11 @@ static bool ReadDWARFDebugInfo(const dwarf::File& file,
 bool ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
                            RangeSink* sink) {
   if (!file.debug_info.size()) {
-    fprintf(stderr, "bloaty: missing debug info\n");
+    if (file.zdebug_info.size()) {
+      fprintf(stderr, "bloaty: can't read compressed debug info: \n");
+    } else {
+      fprintf(stderr, "bloaty: missing debug info\n");
+    }
     return false;
   }
 
@@ -1805,7 +1809,11 @@ static std::string LineInfoKey(const std::string& file, uint32_t line,
 bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line) {
   if (!file.debug_info.size() || !file.debug_line.size()) {
-    fprintf(stderr, "bloaty: missing debug info\n");
+    if (file.zdebug_info.size() && file.zdebug_line.size()) {
+      fprintf(stderr, "bloaty: can't read compressed debug info: \n");
+    } else {
+      fprintf(stderr, "bloaty: missing debug info\n");
+    }
     return false;
   }
 
