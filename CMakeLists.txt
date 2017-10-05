@@ -11,6 +11,16 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
+# All of this is to add -pthread, which is required by re2 (not us).
+find_package(Threads REQUIRED)
+if(THREADS_HAVE_PTHREAD_ARG)
+  set_property(TARGET my_app PROPERTY COMPILE_OPTIONS "-pthread")
+  set_property(TARGET my_app PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
+endif()
+if(CMAKE_THREAD_LIBS_INIT)
+  target_link_libraries(my_app "${CMAKE_THREAD_LIBS_INIT}")
+endif()
+
 add_library(libbloaty
     src/bloaty.cc
     src/dwarf.cc
