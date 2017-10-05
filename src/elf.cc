@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <string>
 #include <iostream>
 #include "absl/strings/string_view.h"
@@ -404,7 +405,7 @@ class ArFile {
  public:
   ArFile(string_view data)
       : magic_(data.substr(0, kMagicSize)),
-        contents_(data.substr(kMagicSize)) {}
+        contents_(data.substr(std::min<size_t>(data.size(), kMagicSize))) {}
 
   bool IsOpen() const { return magic() == string_view(kMagic); }
 
