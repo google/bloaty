@@ -24,11 +24,13 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "bloaty.h"
 #include "dwarf_constants.h"
 #include "re2/re2.h"
 
 using namespace dwarf2reader;
+using absl::string_view;
 
 static size_t AlignUpTo(size_t offset, size_t granularity) {
   // Granularity must be a power of two.
@@ -43,7 +45,7 @@ int DivRoundUp(int n, int d) {
 }
 
 #define CHECK_RETURN(call) if (!(call)) { return false; }
-#define CHECK_RETURN_STRINGPIECE(call) if (!(call)) { return StringPiece(); }
+#define CHECK_RETURN_STRINGPIECE(call) if (!(call)) { return string_view(); }
 
 
 // Low-level Parsing Routines //////////////////////////////////////////////////
@@ -53,27 +55,27 @@ int DivRoundUp(int n, int d) {
 // is layered on top of these.
 
 template <class T>
-bool ReadMemcpy(StringPiece* data, T* val) {
+bool ReadMemcpy(string_view* data, T* val) {
   CHECK_RETURN(data->size() >= sizeof(T));
   memcpy(val, data->data(), sizeof(T));
   data->remove_prefix(sizeof(T));
   return true;
 }
 
-bool ReadPiece(size_t bytes, StringPiece* data, StringPiece* val) {
+bool ReadPiece(size_t bytes, string_view* data, string_view* val) {
   CHECK_RETURN(data->size() >= bytes);
   *val = data->substr(0, bytes);
   data->remove_prefix(bytes);
   return true;
 }
 
-bool SkipBytes(size_t bytes, StringPiece* data) {
+bool SkipBytes(size_t bytes, string_view* data) {
   CHECK_RETURN(data->size() >= bytes);
   data->remove_prefix(bytes);
   return true;
 }
 
-bool ReadNullTerminated(StringPiece* data, StringPiece* val) {
+bool ReadNullTerminated(string_view* data, string_view* val) {
   const char* nullz =
       static_cast<const char*>(memchr(data->data(), '\0', data->size()));
 
@@ -91,7 +93,7 @@ bool ReadNullTerminated(StringPiece* data, StringPiece* val) {
 
 template <class T>
 typename std::enable_if<std::is_unsigned<T>::value, bool>::type ReadLEB128(
-    StringPiece* data, T* out) {
+    string_view* data, T* out) {
   uint64_t ret = 0;
   int shift = 0;
   int maxshift = 70;
@@ -119,7 +121,7 @@ typename std::enable_if<std::is_unsigned<T>::value, bool>::type ReadLEB128(
 
 template <class T>
 typename std::enable_if<std::is_signed<T>::value, bool>::type ReadLEB128(
-    StringPiece* data, T* out) {
+    string_view* data, T* out) {
   int64_t ret = 0;
   int shift = 0;
   int maxshift = 70;
@@ -150,7 +152,7 @@ typename std::enable_if<std::is_signed<T>::value, bool>::type ReadLEB128(
   return false;
 }
 
-bool SkipLEB128(StringPiece* data) {
+bool SkipLEB128(string_view* data) {
   size_t limit =
       std::min(static_cast<size_t>(data->size()), static_cast<size_t>(10));
   for (size_t i = 0; i < limit; i++) {
@@ -182,7 +184,7 @@ struct CompilationUnitSizes {
 
   // Reads a DWARF offset based on whether we are reading dwarf32 or dwarf64
   // format.
-  bool ReadDWARFOffset(StringPiece* data, uint64_t* ofs) const {
+  bool ReadDWARFOffset(string_view* data, uint64_t* ofs) const {
     if (dwarf64) {
       return ReadMemcpy(data, ofs);
     } else {
@@ -194,7 +196,7 @@ struct CompilationUnitSizes {
   }
 
   // Reads an address according to the expected address_size.
-  bool ReadAddress(StringPiece* data, uint64_t* addr) const {
+  bool ReadAddress(string_view* data, uint64_t* addr) const {
     if (address_size == 8) {
       return ReadMemcpy(data, addr);
     } else if (address_size == 4) {
@@ -215,7 +217,7 @@ struct CompilationUnitSizes {
   //
   // Stores the range for this section in |data| and all of the remaining data
   // in |next|.
-  bool ReadInitialLength(StringPiece* data, StringPiece* next) {
+  bool ReadInitialLength(string_view* data, string_view* next) {
     uint64_t len;
     uint32_t len32;
     CHECK_RETURN(ReadMemcpy(data, &len32));
@@ -253,7 +255,7 @@ class AbbrevTable {
  public:
   // Reads abbreviations until a terminating abbreviation is seen.  Returns
   // false if there is a parse error or a premature EOF.
-  bool ReadAbbrevs(StringPiece data);
+  bool ReadAbbrevs(string_view data);
 
   // In a DWARF abbreviation, each attribute has a name and a form.
   struct Attribute {
@@ -290,7 +292,7 @@ class AbbrevTable {
   std::unordered_map<uint32_t, Abbrev> abbrev_;
 };
 
-bool AbbrevTable::ReadAbbrevs(StringPiece data) {
+bool AbbrevTable::ReadAbbrevs(string_view data) {
   while (true) {
     uint32_t code;
     CHECK_RETURN(ReadLEB128(&data, &code));
@@ -347,18 +349,18 @@ bool AbbrevTable::ReadAbbrevs(StringPiece data) {
 class StringTable {
  public:
   // Construct with the debug_str data from a DWARF file.
-  StringTable(StringPiece debug_str) : debug_str_(debug_str) {}
+  StringTable(string_view debug_str) : debug_str_(debug_str) {}
 
   // Read a string from the table.
-  bool ReadEntry(size_t ofs, StringPiece* val) const;
+  bool ReadEntry(size_t ofs, string_view* val) const;
 
  private:
-  StringPiece debug_str_;
+  string_view debug_str_;
 };
 
-bool StringTable::ReadEntry(size_t ofs, StringPiece* val) const {
+bool StringTable::ReadEntry(size_t ofs, string_view* val) const {
   CHECK_RETURN(ofs < debug_str_.size());
-  StringPiece str = debug_str_.substr(ofs);
+  string_view str = debug_str_.substr(ofs);
   CHECK_RETURN(ReadNullTerminated(&str, val));
   return true;
 }
@@ -370,7 +372,7 @@ bool StringTable::ReadEntry(size_t ofs, StringPiece* val) const {
 
 class AddressRanges {
  public:
-  AddressRanges(StringPiece data) : section_(data), next_unit_(data) {}
+  AddressRanges(string_view data) : section_(data), next_unit_(data) {}
 
   // Offset into .debug_info for the current compilation unit.
   uint64_t debug_info_offset() { return debug_info_offset_; }
@@ -390,9 +392,9 @@ class AddressRanges {
 
  private:
   CompilationUnitSizes sizes_;
-  StringPiece section_;
-  StringPiece unit_remaining_;
-  StringPiece next_unit_;
+  string_view section_;
+  string_view unit_remaining_;
+  string_view next_unit_;
   uint64_t debug_info_offset_;
   uint64_t address_;
   uint64_t length_;
@@ -507,13 +509,13 @@ class DIEReader {
   // APIs for our friends to use to update our state.
 
   // Call to get the current read head where attributes should be parsed.
-  StringPiece ReadAttributesBegin() {
+  string_view ReadAttributesBegin() {
     assert(state_ == State::kReadyToReadAttributes);
     return remaining_;
   }
 
   // When some data has been parsed, this updates our read head.
-  bool ReadAttributesEnd(StringPiece remaining, uint64_t sibling) {
+  bool ReadAttributesEnd(string_view remaining, uint64_t sibling) {
     assert(state_ == State::kReadyToReadAttributes);
     if (remaining.data() == nullptr) {
       state_ = State::kError;
@@ -528,7 +530,7 @@ class DIEReader {
 
   // Internal APIs.
 
-  bool ReadCompilationUnitHeader(StringPiece data);
+  bool ReadCompilationUnitHeader(string_view data);
   bool ReadCode();
 
   enum class State {
@@ -546,14 +548,14 @@ class DIEReader {
   const AbbrevTable::Abbrev* current_abbrev_;
 
   // Our current read position.
-  StringPiece remaining_;
+  string_view remaining_;
   uint64_t sibling_offset_;
 
   // The read position of the next entry at each level, or size()==0 for levels
   // where we don't know (because we're not at the top-level and the previous
   // DIE didn't include DW_AT_sibling).  Length of this array indicates the
   // current depth.
-  StringPiece next_unit_;
+  string_view next_unit_;
 
   // All of the AbbrevTables we've read from .debug_abbrev, indexed by their
   // offset within .debug_abbrev.
@@ -563,7 +565,7 @@ class DIEReader {
   Section section_;
 
   // Information about the current compilation unit.
-  StringPiece unit_data_;
+  string_view unit_data_;
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
 
@@ -584,7 +586,7 @@ class DIEReader {
 bool DIEReader::ReadCode() {
   uint32_t code;
   state_ = State::kError;
-  StringPiece data = remaining_;
+  string_view data = remaining_;
 
   CHECK_RETURN(ReadLEB128(&data, &code));
 
@@ -625,7 +627,7 @@ bool DIEReader::NextDIE() {
 }
 
 bool DIEReader::SeekToCompilationUnit(Section section, uint64_t offset) {
-  StringPiece data;
+  string_view data;
   section_ = section;
 
   if (section == Section::kDebugInfo) {
@@ -642,14 +644,14 @@ bool DIEReader::SeekToCompilationUnit(Section section, uint64_t offset) {
   return true;
 }
 
-bool DIEReader::ReadCompilationUnitHeader(StringPiece data) {
+bool DIEReader::ReadCompilationUnitHeader(string_view data) {
   if (data.size() == 0) {
     state_ = State::kEof;
     return false;
   }
 
-  StringPiece unit_data = data;
-  StringPiece next_unit;
+  string_view unit_data = data;
+  string_view next_unit;
   unit_sizes_.ReadInitialLength(&data, &next_unit);
 
   uint16_t version;
@@ -667,7 +669,7 @@ bool DIEReader::ReadCompilationUnitHeader(StringPiece data) {
   // If we haven't already read abbreviations for this debug_abbrev_offset, we
   // need to do so now.
   if (unit_abbrev_->IsEmpty()) {
-    StringPiece abbrev_data = dwarf_.debug_abbrev;
+    string_view abbrev_data = dwarf_.debug_abbrev;
     abbrev_data.remove_prefix(debug_abbrev_offset);
     CHECK_RETURN(unit_abbrev_->ReadAbbrevs(abbrev_data));
   }
@@ -706,13 +708,13 @@ bool DIEReader::ReadCompilationUnitHeader(StringPiece data) {
 // is not concerned with any possible *semantic* differences between the forms.
 // For example, DW_FORM_block and DW_FORM_exprloc both represent delimited
 // sections of the input, so this code treats them identically (both map to
-// StringPiece) even though DW_FORM_exprloc carries extra semantic meaning about
+// string_view) even though DW_FORM_exprloc carries extra semantic meaning about
 // the *interpretation* of those bytes.
 
 // The type of the decoding function yielded from all GetFunctionForForm()
 // functions.  The return value indicates the data that remains after we parsed
 // our value out.  If return_value.data() == nullptr, there was an error.
-typedef StringPiece FormDecodeFunc(const DIEReader& reader, StringPiece data,
+typedef string_view FormDecodeFunc(const DIEReader& reader, string_view data,
                                    void* val);
 
 // Helper to get decoding function as a function pointer.
@@ -729,31 +731,31 @@ FormDecodeFunc* GetFormDecodeFunc(uint8_t form, CompilationUnitSizes sizes) {
 template <class Derived>
 class FormReaderBase {
  public:
-  FormReaderBase(const DIEReader& reader, StringPiece data)
+  FormReaderBase(const DIEReader& reader, string_view data)
       : reader_(reader), data_(data) {}
 
-  StringPiece data() const { return data_; }
+  string_view data() const { return data_; }
 
  protected:
   const DIEReader& reader_;
-  StringPiece data_;
+  string_view data_;
 
   // Function for parsing a specific, known form.  This function compiles into
   // extremely tight/optimized code for parsing this specific form into one
   // specific C++ type.
   template <bool (Derived::*mf)()>
-  static StringPiece ReadAttr(const DIEReader& reader, StringPiece data,
+  static string_view ReadAttr(const DIEReader& reader, string_view data,
                               void* val) {
     Derived form_reader(reader, data,
                         static_cast<typename Derived::type*>(val));
-    if ((form_reader.*mf)() == false) { return StringPiece(); }
+    if ((form_reader.*mf)() == false) { return string_view(); }
     return form_reader.data();
   }
 
   // Function for parsing the "indirect" form, which only gives you the concrete
   // form when you see the data.  This compiles into a switch() statement based
   // on the form we parse.
-  static StringPiece ReadIndirect(const DIEReader& reader, StringPiece data,
+  static string_view ReadIndirect(const DIEReader& reader, string_view data,
                                   void* value) {
     uint16_t form;
     CHECK_RETURN_STRINGPIECE(ReadLEB128(&data, &form));
@@ -768,20 +770,20 @@ class FormReaderBase {
   }
 };
 
-// FormReader for StringPiece.  We accept the true string forms (DW_FORM_string
+// FormReader for string_view.  We accept the true string forms (DW_FORM_string
 // and DW_FORM_strp) as well as a number of other forms that contain delimited
 // string data.  We also accept the generic/opaque DW_FORM_data* types; the
-// StringPiece can store the uninterpreted data which can then be interpreted by
+// string_view can store the uninterpreted data which can then be interpreted by
 // a higher layer.
 template <>
-class FormReader<StringPiece> : public FormReaderBase<FormReader<StringPiece>> {
+class FormReader<string_view> : public FormReaderBase<FormReader<string_view>> {
  public:
   typedef FormReader ME;
   typedef FormReaderBase<ME> Base;
-  typedef StringPiece type;
+  typedef string_view type;
   using Base::data_;
 
-  FormReader(const DIEReader& reader, StringPiece data, StringPiece* val)
+  FormReader(const DIEReader& reader, string_view data, string_view* val)
       : Base(reader, data), val_(val) {}
 
   template <class Func>
@@ -821,7 +823,7 @@ class FormReader<StringPiece> : public FormReaderBase<FormReader<StringPiece>> {
   }
 
  private:
-  StringPiece* val_;
+  string_view* val_;
 
   template <size_t N>
   bool ReadFixed() {
@@ -869,7 +871,7 @@ class FormReader<T, typename std::enable_if<std::is_integral<T>::value>::type>
   typedef T type;
   using Base::data_;
 
-  FormReader(const DIEReader& reader, StringPiece data, T* val)
+  FormReader(const DIEReader& reader, string_view data, T* val)
       : Base(reader, data), val_(val) {}
 
   template <class Func>
@@ -961,7 +963,7 @@ class FormReader<bool> : public FormReaderBase<FormReader<bool>> {
   typedef bool type;
   using Base::data_;
 
-  FormReader(const DIEReader& reader, StringPiece data, bool* val)
+  FormReader(const DIEReader& reader, string_view data, bool* val)
       : Base(reader, data), val_(val) {}
 
   template <class Func>
@@ -1004,7 +1006,7 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
   typedef void type;
   using Base::data_;
 
-  FormReader(const DIEReader& reader, StringPiece data, void* /*val*/)
+  FormReader(const DIEReader& reader, string_view data, void* /*val*/)
       : Base(reader, data) {}
 
   template <class Func>
@@ -1143,7 +1145,7 @@ class ActionBuf {
                                  CompilationUnitSizes sizes, void* data,
                                  bool* has);
 
-  StringPiece ReadAttributes(const DIEReader& reader, StringPiece data) const;
+  string_view ReadAttributes(const DIEReader& reader, string_view data) const;
 
  private:
   std::vector<AttrAction> action_list_;
@@ -1206,8 +1208,8 @@ ActionBuf::IndexedAction ActionBuf::GetAction(uint16_t attr_name,
 
 // The fast path function that reads all attributes by simply calling a list of
 // function pointers to super-specialized functions.
-StringPiece ActionBuf::ReadAttributes(const DIEReader& reader,
-                                      StringPiece data) const {
+string_view ActionBuf::ReadAttributes(const DIEReader& reader,
+                                      string_view data) const {
   for (const auto& action : action_list_) {
     assert(action.func);
     data = action.func(reader, data, action.data);
@@ -1263,7 +1265,7 @@ class FixedAttrReader {
   // If we wanted to allow some parameters to be optional, we could support
   // having params have an optional<> type.
   bool ReadAttributes(DIEReader* reader) {
-    StringPiece data = reader->ReadAttributesBegin();
+    string_view data = reader->ReadAttributesBegin();
 
     // Clear all existing attributes.
     values_ = std::tuple<Args...>();
@@ -1393,7 +1395,7 @@ class LineInfoReader {
   };
 
   struct FileName {
-    StringPiece name;
+    string_view name;
     uint32_t directory_index;
     uint64_t modified_time;
     uint64_t file_size;
@@ -1403,7 +1405,7 @@ class LineInfoReader {
   bool ReadLineInfo();
   const LineInfo& lineinfo() const { return info_; }
   const FileName& filename(size_t i) const { return file_names_[i]; }
-  StringPiece include_directory(size_t i) const {
+  string_view include_directory(size_t i) const {
     return include_directories_[i];
   }
 
@@ -1420,12 +1422,12 @@ class LineInfoReader {
   const File& file_;
 
   CompilationUnitSizes sizes_;
-  std::vector<StringPiece> include_directories_;
+  std::vector<string_view> include_directories_;
   std::vector<FileName> file_names_;
   std::vector<uint8_t> standard_opcode_lengths_;
 
-  StringPiece program_;
-  StringPiece remaining_;
+  string_view program_;
+  string_view remaining_;
 
   // Whether we are in a "shadow" part of the bytecode program.  Sometimes parts
   // of the line info program make it into the final binary even though the
@@ -1465,7 +1467,7 @@ class LineInfoReader {
 
 bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   CHECK_RETURN(file_.debug_line.size() > offset);
-  StringPiece data = file_.debug_line.substr(offset);
+  string_view data = file_.debug_line.substr(offset);
   program_ = data;
 
   uint16_t version;
@@ -1475,7 +1477,7 @@ bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   CHECK_RETURN(ReadMemcpy(&data, &version));
   CHECK_RETURN(sizes_.ReadDWARFOffset(&data, &header_length));
 
-  StringPiece program = data.substr(header_length);
+  string_view program = data.substr(header_length);
 
   CHECK_RETURN(ReadMemcpy(&data, &params_.minimum_instruction_length));
   if (version == 4) {
@@ -1498,10 +1500,10 @@ bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   include_directories_.clear();
 
   // Implicit current directory entry.
-  include_directories_.push_back(StringPiece());
+  include_directories_.push_back(string_view());
 
   while (true) {
-    StringPiece dir;
+    string_view dir;
     CHECK_RETURN(ReadNullTerminated(&data, &dir));
     if (dir.size() == 0) {
       break;
@@ -1542,7 +1544,7 @@ bool LineInfoReader::ReadLineInfo() {
   // Final step of DW_LNE_end_sequence.
   info_.end_sequence = false;
 
-  StringPiece data = remaining_;
+  string_view data = remaining_;
 
   while (true) {
     if (data.size() == 0) {
@@ -1711,14 +1713,14 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
           die_reader_.GetTag() == DW_TAG_compile_unit &&
           attr_reader_.ReadAttributes(&die_reader_) &&
           attr_reader_.HasAttribute<0>()) {
-        return attr_reader_.GetAttribute<0>().as_string();
+        return std::string(attr_reader_.GetAttribute<0>());
       } else {
         return missing_;
       }
     }
 
     dwarf::DIEReader die_reader_;
-    dwarf::FixedAttrReader<StringPiece> attr_reader_;
+    dwarf::FixedAttrReader<string_view> attr_reader_;
     std::unordered_map<uint64_t, std::string> map_;
     std::string missing_;
   } map(file);
@@ -1743,7 +1745,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 static bool ReadDWARFDebugInfo(const dwarf::File& file,
                                const SymbolTable& symtab, RangeSink* sink) {
   dwarf::DIEReader die_reader(file);
-  dwarf::FixedAttrReader<StringPiece, StringPiece, uint64_t, uint64_t>
+  dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t>
       attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
                                 DW_AT_high_pc});
 
@@ -1751,7 +1753,7 @@ static bool ReadDWARFDebugInfo(const dwarf::File& file,
 
   do {
     CHECK_RETURN(attr_reader.ReadAttributes(&die_reader));
-    std::string name = attr_reader.GetAttribute<0>().as_string();
+    std::string name = std::string(attr_reader.GetAttribute<0>());
     if (name.empty()) {
       continue;
     }
@@ -1823,13 +1825,13 @@ bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
       if (ret.empty()) {
         const dwarf::LineInfoReader::FileName& filename =
             reader_.filename(index);
-        StringPiece directory =
+        string_view directory =
             reader_.include_directory(filename.directory_index);
-        ret = directory.as_string();
+        ret = std::string(directory);
         if (!ret.empty()) {
           ret += "/";
         }
-        ret += filename.name.as_string();
+        ret += std::string(filename.name);
       }
       return ret;
     }
