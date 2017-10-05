@@ -11,16 +11,6 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
-# All of this is to add -pthread, which is required by re2 (not us).
-find_package(Threads REQUIRED)
-if(THREADS_HAVE_PTHREAD_ARG)
-  set_property(TARGET bloaty PROPERTY COMPILE_OPTIONS "-pthread")
-  set_property(TARGET bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
-endif()
-if(CMAKE_THREAD_LIBS_INIT)
-  target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
-endif()
-
 add_library(libbloaty
     src/bloaty.cc
     src/dwarf.cc
@@ -30,6 +20,16 @@ add_library(libbloaty
 
 add_executable(bloaty src/main.cc)
 target_link_libraries(bloaty libbloaty re2)
+
+# All of this is to add -pthread, which is required by re2 (not us).
+find_package(Threads REQUIRED)
+if(THREADS_HAVE_PTHREAD_ARG)
+  set_property(TARGET bloaty PROPERTY COMPILE_OPTIONS "-pthread")
+  set_property(TARGET bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
+endif()
+if(CMAKE_THREAD_LIBS_INIT)
+  target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
+endif()
 
 enable_testing()
 
