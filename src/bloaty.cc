@@ -38,10 +38,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/strings/string_view.h"
 #include "re2/re2.h"
 #include <assert.h>
 
 #include "bloaty.h"
+
+using absl::string_view;
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -344,7 +347,7 @@ class NameMunger {
   // applied in sequence.
   void AddRegex(const std::string& regex, const std::string& replacement);
 
-  std::string Munge(StringPiece name) const;
+  std::string Munge(string_view name) const;
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
@@ -352,12 +355,12 @@ class NameMunger {
 };
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
-  std::unique_ptr<RE2> re2(new RE2(StringPiece(regex)));
+  std::unique_ptr<RE2> re2(new RE2(re2::StringPiece(regex)));
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
-std::string NameMunger::Munge(StringPiece name) const {
-  std::string ret(name.as_string());
+std::string NameMunger::Munge(string_view name) const {
+  std::string ret(name);
 
   for (const auto& pair : regexes_) {
     if (RE2::Replace(&ret, *pair.first, pair.second)) {
@@ -1132,7 +1135,7 @@ class MemoryMap {
   RangeMap* vm_map() { return &vm_map_; }
 
  protected:
-  std::string ApplyNameRegexes(StringPiece name);
+  std::string ApplyNameRegexes(string_view name);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
@@ -1143,8 +1146,8 @@ class MemoryMap {
   std::unique_ptr<NameMunger> munger_;
 };
 
-std::string MemoryMap::ApplyNameRegexes(StringPiece name) {
-  return munger_ ? munger_->Munge(name) : std::string(name.as_string());
+std::string MemoryMap::ApplyNameRegexes(string_view name) {
+  return munger_ ? munger_->Munge(name) : std::string(name);
 }
 
 
@@ -1187,7 +1190,7 @@ bool MmapInputFile::Open() {
     return false;
   }
 
-  data_.set(map, buf.st_size);
+  data_ = string_view(map, buf.st_size);
   return true;
 }
 
@@ -1222,7 +1225,7 @@ RangeSink::RangeSink(const InputFile* file, DataSource data_source,
 
 RangeSink::~RangeSink() {}
 
-void RangeSink::AddFileRange(StringPiece name, uint64_t fileoff,
+void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
                              uint64_t filesize) {
   if (verbose_level > 2) {
     fprintf(stderr, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
@@ -1262,7 +1265,7 @@ void RangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
   AddVMRange(vmaddr, vmsize, name);
 }
 
-void RangeSink::AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
+void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
                          uint64_t fileoff, uint64_t filesize) {
   if (verbose_level > 2) {
     fprintf(stderr, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
@@ -1458,7 +1461,7 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
       return ret;
     }
 
-    void PrintMapRow(StringPiece str, uint64_t start, uint64_t end) {
+    void PrintMapRow(string_view str, uint64_t start, uint64_t end) {
       printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
              str.data());
     }

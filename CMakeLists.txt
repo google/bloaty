@@ -7,6 +7,7 @@ include_directories(third_party/re2)
 
 include_directories(.)
 include_directories(src)
+include_directories(third_party/abseil-cpp)
 set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
@@ -16,6 +17,11 @@ add_library(libbloaty
     src/dwarf.cc
     src/elf.cc
     src/macho.cc
+    # Until Abseil has a proper CMake build system
+    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+    third_party/abseil-cpp/absl/strings/ascii.cc
+    third_party/abseil-cpp/absl/strings/internal/memutil.cc
+    third_party/abseil-cpp/absl/strings/string_view.cc
     )
 
 add_executable(bloaty src/main.cc)
