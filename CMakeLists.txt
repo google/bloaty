@@ -14,11 +14,11 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 # All of this is to add -pthread, which is required by re2 (not us).
 find_package(Threads REQUIRED)
 if(THREADS_HAVE_PTHREAD_ARG)
-  set_property(TARGET Bloaty PROPERTY COMPILE_OPTIONS "-pthread")
-  set_property(TARGET Bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
+  set_property(TARGET bloaty PROPERTY COMPILE_OPTIONS "-pthread")
+  set_property(TARGET bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
 endif()
 if(CMAKE_THREAD_LIBS_INIT)
-  target_link_libraries(Bloaty "${CMAKE_THREAD_LIBS_INIT}")
+  target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
 endif()
 
 add_library(libbloaty
