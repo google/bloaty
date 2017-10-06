@@ -372,17 +372,42 @@ struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
   const RollupRow& toplevel_row() { return toplevel_row_; }
-  void Print(std::ostream* out) const;
+  void PrettyPrint(std::ostream* out) const;
+  void PrintToCSV(std::ostream* out) const;
+
+  void Print(std::ostream* out) const {
+    if (csv_) {
+      PrintToCSV(out);
+    } else {
+      PrettyPrint(out);
+    }
+  }
+
+  void SetCSV(bool csv) { csv_ = csv; }
+
+  void AddDataSourceName(absl::string_view name) {
+    source_names_.emplace_back(std::string(name));
+  }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
 
+  bool csv_ = false;
   size_t longest_label_;
+  std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
 
-  void PrintRow(const RollupRow& row, size_t indent, std::ostream* out) const;
-  void PrintTree(const RollupRow& row, size_t indent, std::ostream* out) const;
+  void PrettyPrintRow(const RollupRow& row, size_t indent,
+                      std::ostream* out) const;
+  void PrettyPrintTree(const RollupRow& row, size_t indent,
+                       std::ostream* out) const;
+  void PrintRowToCSV(const RollupRow& row,
+                     absl::string_view parent_labels,
+                     std::ostream* out) const;
+  void PrintTreeToCSV(const RollupRow& row,
+                      absl::string_view parent_labels,
+                      std::ostream* out) const;
 };
 
 bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,

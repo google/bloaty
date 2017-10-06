@@ -38,6 +38,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "re2/re2.h"
 #include <assert.h>
@@ -104,6 +105,32 @@ int SignOf(long val) {
     return 1;
   } else {
     return 0;
+  }
+}
+
+std::string CSVEscape(string_view str) {
+  bool need_escape = false;
+
+  for (char ch : str) {
+    if (ch == '"' || ch == ',') {
+      need_escape = true;
+      break;
+    }
+  }
+
+  if (need_escape) {
+    std::string ret = "\"";
+    for (char ch : str) {
+      if (ch == '"') {
+        ret += "\"\"";
+      } else {
+        ret += ch;
+      }
+    }
+    ret += "\"";
+    return ret;
+  } else {
+    return std::string(str);
   }
 }
 
@@ -777,8 +804,8 @@ std::string PercentString(double percent, bool diff_mode) {
   }
 }
 
-void RollupOutput::PrintRow(const RollupRow& row, size_t indent,
-                            std::ostream* out) const {
+void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
+                                  std::ostream* out) const {
   *out << FixedWidthString("", indent) << " "
        << PercentString(row.vmpercent, row.diff_mode) << " "
        << SiPrint(row.vmsize, row.diff_mode) << " "
@@ -787,10 +814,10 @@ void RollupOutput::PrintRow(const RollupRow& row, size_t indent,
        << PercentString(row.filepercent, row.diff_mode) << "\n";
 }
 
-void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
-                             std::ostream* out) const {
+void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
+                                   std::ostream* out) const {
   // Rows are printed before their sub-rows.
-  PrintRow(row, indent, out);
+  PrettyPrintRow(row, indent, out);
 
   // For now we don't print "confounding" sub-entries.  For example, if we're
   // doing a two-level analysis "-d section,symbol", and a section is growing
@@ -801,24 +828,24 @@ void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
 
   if (row.vmsize > 0 || row.filesize > 0) {
     for (const auto& child : row.sorted_children) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, out);
     }
   }
 
   if (row.vmsize < 0 || row.filesize < 0) {
     for (const auto& child : row.shrinking) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, out);
     }
   }
 
   if ((row.vmsize < 0) != (row.filesize < 0)) {
     for (const auto& child : row.mixed) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, out);
     }
   }
 }
 
-void RollupOutput::Print(std::ostream* out) const {
+void RollupOutput::PrettyPrint(std::ostream* out) const {
   *out << "     VM SIZE    ";
   PrintSpaces(longest_label_, out);
   *out << "    FILE SIZE";
@@ -837,7 +864,7 @@ void RollupOutput::Print(std::ostream* out) const {
   }
 
   for (const auto& child : toplevel_row_.sorted_children) {
-    PrintTree(child, 0, out);
+    PrettyPrintTree(child, 0, out);
   }
 
   if (toplevel_row_.diff_mode) {
@@ -848,7 +875,7 @@ void RollupOutput::Print(std::ostream* out) const {
       *out << " --------------";
       *out << "\n";
       for (const auto& child : toplevel_row_.shrinking) {
-        PrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, out);
       }
     }
 
@@ -859,7 +886,7 @@ void RollupOutput::Print(std::ostream* out) const {
       *out << " +-+-+-+-+-+-+-";
       *out << "\n";
       for (const auto& child : toplevel_row_.mixed) {
-        PrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, out);
       }
     }
 
@@ -868,9 +895,64 @@ void RollupOutput::Print(std::ostream* out) const {
   }
 
   // The "TOTAL" row comes after all other rows.
-  PrintRow(toplevel_row_, 0, out);
+  PrettyPrintRow(toplevel_row_, 0, out);
 }
 
+void RollupOutput::PrintRowToCSV(const RollupRow& row,
+                                 string_view parent_labels,
+                                 std::ostream* out) const {
+  if (parent_labels.size() > 0) {
+    *out << parent_labels << ",";
+  }
+
+  *out << absl::StrJoin(std::make_tuple(CSVEscape(row.name),
+                                        row.vmsize,
+                                        row.filesize),
+                        ",") << "\n";
+}
+
+void RollupOutput::PrintTreeToCSV(const RollupRow& row,
+                                  string_view parent_labels,
+                                  std::ostream* out) const {
+  if (row.sorted_children.size() > 0 ||
+      row.shrinking.size() > 0 ||
+      row.mixed.size() > 0) {
+    std::string labels;
+    if (parent_labels.size() > 0) {
+      labels = absl::StrJoin(
+          std::make_tuple(parent_labels, CSVEscape(row.name)), ",");
+    } else {
+      labels = CSVEscape(row.name);
+    }
+    for (const auto& child_row : row.sorted_children) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+    for (const auto& child_row : row.shrinking) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+    for (const auto& child_row : row.mixed) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+  } else {
+    PrintRowToCSV(row, parent_labels, out);
+  }
+}
+
+void RollupOutput::PrintToCSV(std::ostream* out) const {
+  std::vector<std::string> names(source_names_);
+  names.push_back("vmsize");
+  names.push_back("filesize");
+  *out << absl::StrJoin(names, ",") << "\n";
+  for (const auto& child_row : toplevel_row_.sorted_children) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+  for (const auto& child_row : toplevel_row_.shrinking) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+  for (const auto& child_row : toplevel_row_.mixed) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+}
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
@@ -1538,6 +1620,7 @@ USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
+  --csv            Output in CSV format instead of human-readable.
   -d <sources>     Comma-separated list of sources to scan.
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
@@ -1588,6 +1671,8 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
         return false;
       }
       base_files = true;
+    } else if (strcmp(argv[i], "--csv") == 0) {
+      output->SetCSV(true);
     } else if (strcmp(argv[i], "-d") == 0) {
       if (!CheckNextArg(i, argc, "-d")) {
         return false;
@@ -1596,6 +1681,7 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
       Split(argv[++i], ',', &names);
       for (const auto& name : names) {
         CHECK_RETURN(bloaty.AddDataSource(name));
+        output->AddDataSourceName(name);
       }
     } else if (strcmp(argv[i], "-r") == 0) {
       std::string source_name, regex, substitution;
