@@ -307,6 +307,7 @@ Demangler::~Demangler() {
 }
 
 std::string Demangler::Demangle(const std::string& symbol) {
+  return symbol;
   const char *writeptr = symbol.c_str();
   const char *writeend = writeptr + symbol.size();
 
@@ -828,9 +829,10 @@ void RollupOutput::AbbreviateToFit(size_t width) {
   std::string best_prefix;
   int best_prefix_weight = 0;
   CollectNames(&toplevel_row_, &names);
-  std::unordered_set<const std::string*> have_prefix;
 
   while (1) {
+    printf("Yo!\n");
+    sleep(1);
     size_t saw_overwide = false;
     for (auto name : names) {
       if (name->size() > width) {
@@ -842,23 +844,33 @@ void RollupOutput::AbbreviateToFit(size_t width) {
       return;
     }
 
-    size_t n = 1;
+    size_t n = 0;
+    std::unordered_set<const std::string*> have_prefix;
+    std::copy(names.begin(), names.end(), std::inserter(have_prefix ,have_prefix.end()));
     while (have_prefix.size() > 1) {
-      char ch = (*have_prefix.begin())->at(n);
-      bool all_same = true;
-      for (auto name : have_prefix) {
-        if (name->at(n) != ch) {
-          if (all_same) {
-            int weight = (n - 1) * have_prefix.size();
-            if (weight > best_prefix_weight) {
-              best_prefix = name->substr(0, n - 1);
-              best_prefix_weight = weight;
-            }
-            all_same = false;
-          }
+      const std::string* str0 = *have_prefix.begin();
+      char ch = str0->at(n);
+      if (true /*ch == '/'*/) {
+        int weight = n * have_prefix.size();
+        if (weight > best_prefix_weight) {
+          best_prefix = str0->substr(0, n);
+          best_prefix_weight = weight;
+          printf("Try prefix: %s\n", best_prefix.c_str());
+          printf("Try prefix weight: %d\n", best_prefix_weight);
         }
       }
+      for (auto it = have_prefix.begin(); it != have_prefix.end();) {
+	printf("Str: %s\n", (*it)->c_str());
+        if ((*it)->at(n) != ch) {
+          it = have_prefix.erase(it); // previously this was something like m_map.erase(it++);
+        } else {
+          ++it;
+        }
+      }
+      n++;
     }
+    printf("Best prefix: %s\n", best_prefix.c_str());
+    printf("Best prefix weight: %d\n", best_prefix_weight);
 
     // Remove the best prefix from all strings that have it.
     std::string replace_with =
