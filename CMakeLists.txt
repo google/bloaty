@@ -63,7 +63,6 @@ if(BUILD_TESTING)
   target_link_libraries(fuzz_test libbloaty re2 "${CMAKE_THREAD_LIBS_INIT}")
 
   file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
-  MESSAGE( STATUS "fuzz_corpus:         " ${fuzz_corpus} )
 
   add_test(NAME range_map_test COMMAND range_map_test)
   add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
