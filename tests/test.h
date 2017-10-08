@@ -106,7 +106,7 @@ class BloatyTest : public ::testing::Test {
     if (bloaty::BloatyMain(strings.size(), StrArr(strings).get(), factory,
                            output_.get())) {
       CheckConsistency();
-      output_->Print(&std::cerr);
+      output_->PrettyPrint(&std::cerr);
       return true;
     } else {
       std::cerr << "Bloaty returned error." << "\n";

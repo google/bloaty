@@ -19,8 +19,11 @@ add_library(libbloaty
     src/macho.cc
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+    third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
     third_party/abseil-cpp/absl/strings/ascii.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
+    third_party/abseil-cpp/absl/strings/numbers.cc
+    third_party/abseil-cpp/absl/strings/str_cat.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
     )
 
