@@ -15,11 +15,15 @@
 #include "bloaty.h"
 #include "strarr.h"
 
+#include "absl/strings/string_view.h"
+
+using absl::string_view;
+
 namespace bloaty {
 
 class StringPieceInputFile : public InputFile {
  public:
-  StringPieceInputFile(StringPiece data)
+  StringPieceInputFile(string_view data)
       : InputFile("fake_StringPieceInputFile_file") {
     data_ = data;
   }
@@ -27,9 +31,9 @@ class StringPieceInputFile : public InputFile {
 
 class StringPieceInputFileFactory : public InputFileFactory {
  public:
-  StringPieceInputFileFactory(StringPiece data) : data_(data) {}
+  StringPieceInputFileFactory(string_view data) : data_(data) {}
  private:
-  StringPiece data_;
+  string_view data_;
   std::unique_ptr<InputFile> TryOpenFile(
       const std::string& filename) const override {
     return std::unique_ptr<InputFile>(new StringPieceInputFile(data_));
@@ -47,7 +51,7 @@ void RunBloaty(const InputFileFactory& factory,
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   const char *data2 = reinterpret_cast<const char*>(data);
-  bloaty::StringPieceInputFileFactory factory(bloaty::StringPiece(data2, size));
+  bloaty::StringPieceInputFileFactory factory(string_view(data2, size));
 
   // Try all of the data sources.
   RunBloaty(factory, "segments");
