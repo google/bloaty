@@ -1,6 +1,5 @@
 language: cpp
 
-sudo: required  # only required for dist: trusty
 dist: trusty
 
 compiler:
@@ -11,4 +10,4 @@ os:
   - linux
   - osx
 
-script: make test
+script: mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Debug .. && make -j4 && make test

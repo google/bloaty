@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <string>
 #include <iostream>
+#include "absl/strings/string_view.h"
 #include "re2/re2.h"
 #include "third_party/freebsd_elf/elf.h"
 #include "bloaty.h"
@@ -22,6 +24,7 @@
 #include <limits.h>
 #include <stdlib.h>
 
+using absl::string_view;
 
 #define CHECK_RETURN(call) if (!(call)) { return false; }
 
@@ -41,12 +44,11 @@ struct NullFunc {
   T operator()(T val) { return val; }
 };
 
-bool StringPieceToSize(StringPiece str, size_t* out) {
+bool StringViewToSize(string_view str, size_t* out) {
   char *end = nullptr;
   *out = strtoul(str.data(), &end, 10);
   return end != str.data() && *out != ULONG_MAX;
 }
-
 
 // ElfFile /////////////////////////////////////////////////////////////////////
 
@@ -54,17 +56,17 @@ bool StringPieceToSize(StringPiece str, size_t* out) {
 
 class ElfFile {
  public:
-  ElfFile(StringPiece data) : data_(data) {
+  ElfFile(string_view data) : data_(data) {
     ok_ = Initialize();
   }
 
   bool IsOpen() { return ok_; }
 
   // Regions of the file where different headers live.
-  StringPiece entire_file() const { return data_; }
-  StringPiece header_region() const { return header_region_; }
-  StringPiece section_headers() const { return section_headers_; }
-  StringPiece segment_headers() const { return segment_headers_; }
+  string_view entire_file() const { return data_; }
+  string_view header_region() const { return header_region_; }
+  string_view section_headers() const { return section_headers_; }
+  string_view segment_headers() const { return segment_headers_; }
 
   const Elf64_Ehdr& header() const { return header_; }
   Elf64_Xword section_count() const { return section_count_; }
@@ -74,22 +76,22 @@ class ElfFile {
   class Segment {
    public:
     const Elf64_Phdr& header() const { return header_; }
-    StringPiece contents() const { return contents_; }
+    string_view contents() const { return contents_; }
 
    private:
     friend class ElfFile;
     Elf64_Phdr header_;
-    StringPiece contents_;
+    string_view contents_;
   };
 
   // Represents an ELF section (.text, .data, .bss, etc.)
   class Section {
    public:
     const Elf64_Shdr& header() const { return header_; }
-    StringPiece contents() const { return contents_; }
+    string_view contents() const { return contents_; }
 
     // If header().sh_type == SHT_STRTAB.
-    bool ReadName(Elf64_Word index, StringPiece* name) const;
+    bool ReadName(Elf64_Word index, string_view* name) const;
 
     // If header().sh_type == SHT_SYMTAB
     Elf64_Word GetSymbolCount() const;
@@ -99,7 +101,7 @@ class ElfFile {
     friend class ElfFile;
     const ElfFile* elf_;
     Elf64_Shdr header_;
-    StringPiece contents_;
+    string_view contents_;
   };
 
   bool ReadSegment(Elf64_Word index, Segment* segment) const;
@@ -113,7 +115,7 @@ class ElfFile {
 
   bool Initialize();
 
-  bool SetRegion(size_t start, size_t n, StringPiece* out) const {
+  bool SetRegion(size_t start, size_t n, string_view* out) const {
     CHECK_RETURN(start + n <= data_.size());
     *out = data_.substr(start, n);
     return true;
@@ -123,7 +125,7 @@ class ElfFile {
   // conversion and 32->64 bit conversion, when necessary.
   class StructReader {
    public:
-    StructReader(const ElfFile& elf, StringPiece data)
+    StructReader(const ElfFile& elf, string_view data)
         : elf_(elf), data_(data) {}
 
     template <class T32, class T64, class Munger>
@@ -137,7 +139,7 @@ class ElfFile {
 
    private:
     const ElfFile& elf_;
-    StringPiece data_;
+    string_view data_;
 
     template <class T32, class T64, class Munger>
     bool ReadFallback(size_t offset, T64* out) const;
@@ -158,13 +160,13 @@ class ElfFile {
   bool ok_;
   bool is_64bit_;
   bool is_native_endian_;
-  StringPiece data_;
+  string_view data_;
   Elf64_Ehdr header_;
   Elf64_Xword section_count_;
   Elf64_Xword section_string_index_;
-  StringPiece header_region_;
-  StringPiece section_headers_;
-  StringPiece segment_headers_;
+  string_view header_region_;
+  string_view section_headers_;
+  string_view segment_headers_;
 };
 
 // ELF uses different structure definitions for 32/64 bit files.  The sizes of
@@ -258,14 +260,14 @@ bool ElfFile::StructReader::ReadFallback(size_t offset, T64* out) const {
   return true;
 }
 
-bool ElfFile::Section::ReadName(Elf64_Word index, StringPiece* name) const {
+bool ElfFile::Section::ReadName(Elf64_Word index, string_view* name) const {
   assert(header().sh_type == SHT_STRTAB);
 
   if (index == SHN_UNDEF || index >= contents_.size()) {
     return false;
   }
 
-  name->set(contents_.data(), contents_.size());
+  *name = string_view(contents_.data(), contents_.size());
   name->remove_prefix(index);
 
   const char* null_pos =
@@ -379,7 +381,7 @@ bool ElfFile::ReadSection(Elf64_Word index, Section* section) const {
       header_.e_shoff + header_.e_shentsize * index, ShdrMunger(), header));
 
   if (header->sh_type == SHT_NOBITS) {
-    section->contents_ = StringPiece();
+    section->contents_ = string_view();
   } else {
     CHECK_RETURN(
         SetRegion(header->sh_offset, header->sh_size, &section->contents_));
@@ -401,14 +403,14 @@ bool ElfFile::ReadSection(Elf64_Word index, Section* section) const {
 
 class ArFile {
  public:
-  ArFile(StringPiece data)
+  ArFile(string_view data)
       : magic_(data.substr(0, kMagicSize)),
-        contents_(data.substr(kMagicSize)) {}
+        contents_(data.substr(std::min<size_t>(data.size(), kMagicSize))) {}
 
-  bool IsOpen() const { return magic() == StringPiece(kMagic); }
+  bool IsOpen() const { return magic() == string_view(kMagic); }
 
-  StringPiece magic() const { return magic_; }
-  StringPiece contents() const { return contents_; }
+  string_view magic() const { return magic_; }
+  string_view contents() const { return contents_; }
 
   struct MemberFile {
     enum {
@@ -416,10 +418,10 @@ class ArFile {
       kLongFilenameTable,  // Stores long filenames, users should ignore.
       kNormal,             // Regular data file.
     } file_type;
-    StringPiece filename;  // Only when file_type == kNormal
+    string_view filename;  // Only when file_type == kNormal
     size_t size;
-    StringPiece header;
-    StringPiece contents;
+    string_view header;
+    string_view contents;
   };
 
   class MemberReader {
@@ -429,20 +431,20 @@ class ArFile {
     bool IsEof() const { return remaining_.size() == 0; }
 
    private:
-    bool Consume(size_t n, StringPiece* field) {
+    bool Consume(size_t n, string_view* field) {
       CHECK_RETURN(remaining_.size() >= n);
       *field = remaining_.substr(0, n);
       remaining_.remove_prefix(n);
       return true;
     }
 
-    StringPiece long_filenames_;
-    StringPiece remaining_;
+    string_view long_filenames_;
+    string_view remaining_;
   };
 
  private:
-  const StringPiece magic_;
-  const StringPiece contents_;
+  const string_view magic_;
+  const string_view contents_;
 
   static constexpr const char* kMagic = "!<arch>\n";
   static constexpr int kMagicSize = 8;
@@ -466,9 +468,9 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
   const Header* header = reinterpret_cast<const Header*>(remaining_.data());
   CHECK_RETURN(Consume(sizeof(Header), &file->header));
 
-  StringPiece file_id(&header->file_id[0], sizeof(header->file_id));
-  StringPiece size_str(&header->size[0], sizeof(header->size));
-  CHECK_RETURN(StringPieceToSize(size_str, &file->size));
+  string_view file_id(&header->file_id[0], sizeof(header->file_id));
+  string_view size_str(&header->size[0], sizeof(header->size));
+  CHECK_RETURN(StringViewToSize(size_str, &file->size));
   CHECK_RETURN(Consume(file->size, &file->contents));
   file->file_type = MemberFile::kNormal;
 
@@ -481,7 +483,7 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
       long_filenames_ = file->contents;
     } else if (isdigit(file_id[1])) {
       size_t offset;
-      CHECK_RETURN(StringPieceToSize(file_id.substr(1), &offset));
+      CHECK_RETURN(StringViewToSize(file_id.substr(1), &offset));
       size_t end = long_filenames_.find('/', offset);
 
       if (end == std::string::npos) {
@@ -507,14 +509,14 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
   return true;
 }
 
-void MaybeAddFileRange(RangeSink* sink, StringPiece label, StringPiece range) {
+void MaybeAddFileRange(RangeSink* sink, string_view label, string_view range) {
   if (sink) {
     sink->AddFileRange(label, range);
   }
 }
 
 template <class Func>
-bool OnElfFile(const ElfFile& elf, StringPiece filename,
+bool OnElfFile(const ElfFile& elf, string_view filename,
                unsigned long index_base, RangeSink* sink, Func func) {
   CHECK_RETURN(func(elf, filename, index_base));
 
@@ -599,12 +601,12 @@ static uint64_t ToVMAddr(size_t addr, long ndx, bool is_object) {
   }
 }
 
-static bool IsArchiveFile(StringPiece data) {
+static bool IsArchiveFile(string_view data) {
   ArFile ar(data);
   return ar.IsOpen();
 }
 
-static bool IsObjectFile(StringPiece data) {
+static bool IsObjectFile(string_view data) {
   ElfFile elf(data);
   return IsArchiveFile(data) || (elf.IsOpen() && elf.header().e_type == ET_REL);
 }
@@ -623,7 +625,7 @@ static bool CheckNotObject(const char* source, RangeSink* sink) {
 static bool ReadELFSymbols(const InputFile& file, RangeSink* sink,
                            SymbolTable* table) {
   bool is_object = IsObjectFile(file.data());
-  return ForEachElf(file, sink, [=](const ElfFile& elf, StringPiece /*filename*/,
+  return ForEachElf(file, sink, [=](const ElfFile& elf, string_view /*filename*/,
                                     uint32_t index_base) {
     for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
       ElfFile::Section section;
@@ -643,7 +645,7 @@ static bool ReadELFSymbols(const InputFile& file, RangeSink* sink,
 
       for (Elf64_Word i = 1; i < symbol_count; i++) {
         Elf64_Sym sym;
-        StringPiece name;
+        string_view name;
         CHECK_RETURN(section.ReadSymbol(i, &sym));
 
         int type = ELF64_ST_TYPE(sym.st_info);
@@ -661,7 +663,7 @@ static bool ReadELFSymbols(const InputFile& file, RangeSink* sink,
         uint64_t full_addr =
             ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
         if (sink) {
-          sink->AddVMRangeAllowAlias(full_addr, sym.st_size, name.as_string());
+          sink->AddVMRangeAllowAlias(full_addr, sym.st_size, std::string(name));
         }
         if (table) {
           table->insert(
@@ -684,7 +686,7 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
   bool is_object = IsObjectFile(sink->input_file().data());
   return ForEachElf(
       sink->input_file(), sink,
-      [=](const ElfFile& elf, StringPiece filename, uint32_t index_base) {
+      [=](const ElfFile& elf, string_view filename, uint32_t index_base) {
         if (elf.section_count() == 0) {
           return true;
         }
@@ -704,7 +706,7 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
             return true;
           }
 
-          StringPiece name;
+          string_view name;
           CHECK_RETURN(section_names.ReadName(header.sh_name, &name));
 
           auto addr = header.sh_addr;
@@ -712,12 +714,12 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
           auto filesize = (header.sh_type == SHT_NOBITS) ? 0 : size;
           auto vmsize = (header.sh_flags & SHF_ALLOC) ? size : 0;
 
-          StringPiece contents = section.contents().substr(0, filesize);
+          string_view contents = section.contents().substr(0, filesize);
 
           uint64_t full_addr = ToVMAddr(addr, index_base + i, is_object);
 
           if (report_by == kReportByFlags) {
-            name_from_flags = name.as_string();
+            name_from_flags = std::string(name);
 
             name_from_flags = "Section [";
 
@@ -759,7 +761,7 @@ static bool ReadELFSegments(RangeSink* sink) {
   }
 
   return ForEachElf(sink->input_file(), sink, [=](const ElfFile& elf,
-                                                  StringPiece /*filename*/,
+                                                  string_view /*filename*/,
                                                   uint32_t /*index_base*/) {
     for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
       ElfFile::Segment segment;
@@ -811,7 +813,7 @@ static bool ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
       return true;
     }
 
-    StringPiece name;
+    string_view name;
     CHECK_RETURN(section_names.ReadName(header.sh_name, &name));
 
     if (name == ".debug_aranges") {
