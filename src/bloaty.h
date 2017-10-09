@@ -372,7 +372,6 @@ struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
   const RollupRow& toplevel_row() { return toplevel_row_; }
-  void Print(std::ostream* out) const;
   void PrettyPrint(std::ostream* out) const;
   void PrintToCSV(std::ostream* out) const;
   void AbbreviateToFit(size_t width);

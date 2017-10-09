@@ -718,12 +718,12 @@ class SuffixArray {
 
   // You may only call this when the object is first constructed.  Once any
   // other methods are called it may no longer be called.
-  void AddString(StringPiece str) {
+  void AddString(string_view str) {
     assert(array_.empty());
     strings_.push_back(str);
   }
 
-  std::pair<StringPiece, size_t> GetSuffix(size_t i) {
+  std::pair<string_view, size_t> GetSuffix(size_t i) {
     Entry e = entry(i);
     return std::make_pair(GetStringFromEntry(e), e.str);
   }
@@ -745,11 +745,11 @@ class SuffixArray {
 
   Entry entry(size_t i) { return array_[i]; }
 
-  StringPiece GetStringFromEntry(Entry entry) {
+  string_view GetStringFromEntry(Entry entry) {
     return strings_[entry.str].substr(entry.ofs);
   }
 
-  std::vector<StringPiece> strings_;
+  std::vector<string_view> strings_;
 
   std::vector<Entry> array_;
   std::vector<uint32_t> lcp_;
@@ -764,7 +764,7 @@ void SuffixArray::ComputeArray() {
   //   Linear Suffix Array Construction by Almost Pure Induced-Sorting
   // We can replace this with a faster algorithm if/when it is an issue.
   for (size_t i = 0; i < strings_.size(); i++) {
-    StringPiece str = strings_[i];
+    string_view str = strings_[i];
     for (size_t j = 0; j < str.size(); j++) {
       char last_ch = 0;
       if (j > 0) last_ch = str[j - 1];
@@ -789,9 +789,9 @@ void SuffixArray::ComputeLcp() {
   //   Inducing the LCP-Array
   // We can replace this with a faster algorithm if/when it is an issue.
   lcp_.resize(array_.size());
-  StringPiece last = GetStringFromEntry(entry(0));
+  string_view last = GetStringFromEntry(entry(0));
   for (size_t i = 1; i < array_.size(); i++) {
-    StringPiece curr = GetStringFromEntry(entry(i));
+    string_view curr = GetStringFromEntry(entry(i));
     size_t limit = std::min(curr.size(), last.size());
     size_t j;
     int nesting = 0;
@@ -986,7 +986,7 @@ void RollupOutput::AbbreviateToFit(size_t width) {
   suffixes.ComputeLcp();
 
   struct Abbrev {
-    Abbrev(size_t weight_, StringPiece str_)
+    Abbrev(size_t weight_, string_view str_)
         : weight(weight_),
           str(str_.data(),
           str_.size()) {}
@@ -1011,7 +1011,7 @@ void RollupOutput::AbbreviateToFit(size_t width) {
       size_t weight = (i - index + 1) * len * len;
       std::cout << "Weight: " << weight << "\n";
       if (weight > 0) {
-        StringPiece substr = suffixes.GetSuffix(index).first.substr(0, len);
+        string_view substr = suffixes.GetSuffix(index).first.substr(0, len);
         abbrevs.emplace(weight, substr);
       }
     }
@@ -1092,7 +1092,6 @@ void RollupOutput::PrettyPrint(std::ostream* out) const {
   if (abbrevs_.size() > 0) {
     *out << "\n";
     *out << "  Abbreviations:\n";
-    int i = 0;
     for (const auto& abbrev : abbrevs_) {
       *out << "     " << abbrev.first << ": " << abbrev.second << "\n";
     }
