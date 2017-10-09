@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "re2/re2.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
@@ -36,8 +37,6 @@
   void operator=(const class_name&) = delete;
 
 namespace bloaty {
-
-typedef re2::StringPiece StringPiece;
 
 class MemoryMap;
 
@@ -56,18 +55,20 @@ class InputFile {
   virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }
-  StringPiece data() const { return data_; }
+  absl::string_view data() const { return data_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(InputFile);
   const std::string filename_;
 
  protected:
-  StringPiece data_;
+  absl::string_view data_;
 };
 
 class InputFileFactory {
  public:
+  virtual ~InputFileFactory() {}
+
   // Returns nullptr if the file could not be opened.
   virtual std::unique_ptr<InputFile> TryOpenFile(
       const std::string& filename) const = 0;
@@ -99,18 +100,19 @@ class RangeSink {
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
+  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
                 uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
-                      StringPiece file_range) {
+  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
+                      absl::string_view file_range) {
     AddRange(name, vmaddr, vmsize, file_range.data() - file_->data().data(),
              file_range.size());
   }
 
-  void AddFileRange(StringPiece name, uint64_t fileoff, uint64_t filesize);
+  void AddFileRange(absl::string_view name,
+                    uint64_t fileoff, uint64_t filesize);
 
-  void AddFileRange(StringPiece name, StringPiece file_range) {
+  void AddFileRange(absl::string_view name, absl::string_view file_range) {
     AddFileRange(name, file_range.data() - file_->data().data(),
                  file_range.size());
   }
@@ -168,17 +170,17 @@ std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file);
 namespace dwarf {
 
 struct File {
-  StringPiece debug_info;
-  StringPiece debug_types;
-  StringPiece debug_str;
-  StringPiece debug_abbrev;
-  StringPiece debug_aranges;
-  StringPiece debug_line;
+  absl::string_view debug_info;
+  absl::string_view debug_types;
+  absl::string_view debug_str;
+  absl::string_view debug_abbrev;
+  absl::string_view debug_aranges;
+  absl::string_view debug_line;
 };
 
 }  // namespace dwarf
 
-typedef std::map<StringPiece, std::pair<uint64_t, uint64_t>> SymbolTable;
+typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
@@ -370,19 +372,46 @@ struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
   const RollupRow& toplevel_row() { return toplevel_row_; }
-  void Print(std::ostream* out) const;
+  void PrettyPrint(std::ostream* out) const;
+  void PrintToCSV(std::ostream* out) const;
   void AbbreviateToFit(size_t width);
+
+  void Print(std::ostream* out) const {
+    if (csv_) {
+      PrintToCSV(out);
+    } else {
+      PrettyPrint(out);
+    }
+  }
+
+  void SetCSV(bool csv) { csv_ = csv; }
+
+  void AddDataSourceName(absl::string_view name) {
+    source_names_.emplace_back(std::string(name));
+  }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
 
+  bool csv_ = false;
   size_t longest_label_;
+  std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
-  std::vector<std::string> abbrevs_;
+  std::vector<std::pair<std::string, std::string>> abbrevs_;
 
   void PrintRow(const RollupRow& row, size_t indent, std::ostream* out) const;
   void PrintTree(const RollupRow& row, size_t indent, std::ostream* out) const;
+  void PrettyPrintRow(const RollupRow& row, size_t indent,
+                      std::ostream* out) const;
+  void PrettyPrintTree(const RollupRow& row, size_t indent,
+                       std::ostream* out) const;
+  void PrintRowToCSV(const RollupRow& row,
+                     absl::string_view parent_labels,
+                     std::ostream* out) const;
+  void PrintTreeToCSV(const RollupRow& row,
+                      absl::string_view parent_labels,
+                      std::ostream* out) const;
   static void CollectNames(RollupRow* row, std::vector<std::string*>* names);
 };
 

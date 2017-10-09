@@ -13,13 +13,14 @@
 // limitations under the License.
 
 #include <array>
-#include <cmath>
 #include <cinttypes>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <string>
@@ -38,10 +39,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 #include "re2/re2.h"
 #include <assert.h>
 
 #include "bloaty.h"
+
+using absl::string_view;
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -104,6 +109,32 @@ int SignOf(long val) {
   }
 }
 
+std::string CSVEscape(string_view str) {
+  bool need_escape = false;
+
+  for (char ch : str) {
+    if (ch == '"' || ch == ',') {
+      need_escape = true;
+      break;
+    }
+  }
+
+  if (need_escape) {
+    std::string ret = "\"";
+    for (char ch : str) {
+      if (ch == '"') {
+        ret += "\"\"";
+      } else {
+        ret += ch;
+      }
+    }
+    ret += "\"";
+    return ret;
+  } else {
+    return std::string(str);
+  }
+}
+
 template <class Func>
 class RankComparator {
  public:
@@ -117,7 +148,7 @@ class RankComparator {
 };
 
 template <class Func>
-RankComparator<Func> MakeRankComparator(Func func) {
+constexpr RankComparator<Func> MakeRankComparator(Func func) {
   return RankComparator<Func>(func);
 }
 
@@ -196,14 +227,14 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 class NameStripper {
  public:
   bool StripName(const std::string& name) {
-    if (name[name.size() - 1] != ')') {
-      // (anonymous namespace)::ctype_w
-      stripped_ = &name;
-      return false;
-    }
-
     int nesting = 0;
     for (size_t n = name.size() - 1; n < name.size(); --n) {
+      if (name[n] == ':' && nesting == 0) {
+        // (anonymous namespace)::ctype_w
+        stripped_ = &name;
+        return false;
+      }
+
       if (name[n] == '(') {
         if (--nesting == 0) {
           storage_ = name.substr(0, n);
@@ -345,7 +376,7 @@ class NameMunger {
   // applied in sequence.
   void AddRegex(const std::string& regex, const std::string& replacement);
 
-  std::string Munge(StringPiece name) const;
+  std::string Munge(string_view name) const;
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
@@ -353,12 +384,12 @@ class NameMunger {
 };
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
-  std::unique_ptr<RE2> re2(new RE2(StringPiece(regex)));
+  std::unique_ptr<RE2> re2(new RE2(regex));
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
-std::string NameMunger::Munge(StringPiece name) const {
-  std::string ret(name.as_string());
+std::string NameMunger::Munge(string_view name) const {
+  std::string ret(name);
 
   for (const auto& pair : regexes_) {
     if (RE2::Replace(&ret, *pair.first, pair.second)) {
@@ -673,6 +704,124 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
 }
 
 
+// SuffixArray /////////////////////////////////////////////////////////////////
+
+// A generalized enhanced suffix array
+//   https://en.wikipedia.org/wiki/Suffix_array
+//
+// Generalized means it holds suffixes from multiple source strings.  Enhanced
+// means that in addition to the suffix array proper, it also can contain other
+// arrays such as the "lcp" array (longest common prefix) and others.
+
+class SuffixArray {
+ public:
+  size_t size() const { return array_.size(); }
+
+  // You may only call this when the object is first constructed.  Once any
+  // other methods are called it may no longer be called.
+  void AddString(string_view str) {
+    assert(array_.empty());
+    strings_.push_back(str);
+  }
+
+  std::pair<string_view, size_t> GetSuffix(size_t i) {
+    Entry e = entry(i);
+    return std::make_pair(GetStringFromEntry(e), e.str);
+  }
+
+  uint32_t GetLcp(size_t i) {
+    return lcp_[i];
+  }
+
+  void ComputeArray();
+  void ComputeLcp();
+
+ private:
+  struct Entry {
+    // This suffix is strings_[str].substr(ofs).
+    Entry(uint32_t str_, uint32_t ofs_) : str(str_), ofs(ofs_) {}
+    uint32_t str;
+    uint32_t ofs;
+  };
+
+  Entry entry(size_t i) { return array_[i]; }
+
+  string_view GetStringFromEntry(Entry entry) {
+    return strings_[entry.str].substr(entry.ofs);
+  }
+
+  std::vector<string_view> strings_;
+
+  std::vector<Entry> array_;
+  std::vector<uint32_t> lcp_;
+};
+
+void SuffixArray::ComputeArray() {
+  assert(array_.empty());
+
+  // This is a naive, O(n^2 lg n) algorithm.
+  // Several O(n) algorithms exist, but they are much, much more complicated.
+  // The fastest known algorithm is described by Nong, Zhang & Chan (2009):
+  //   Linear Suffix Array Construction by Almost Pure Induced-Sorting
+  // We can replace this with a faster algorithm if/when it is an issue.
+  for (size_t i = 0; i < strings_.size(); i++) {
+    string_view str = strings_[i];
+    for (size_t j = 0; j < str.size(); j++) {
+      char last_ch = 0;
+      if (j > 0) last_ch = str[j - 1];
+      if (j == 0 || last_ch == '/' || last_ch == '<') {
+        array_.push_back(Entry(i, j));
+      }
+    }
+  }
+
+  std::sort(array_.begin(), array_.end(), [this](Entry a, Entry b) {
+    return GetStringFromEntry(a) < GetStringFromEntry(b);
+  });
+}
+
+void SuffixArray::ComputeLcp() {
+  assert(!array_.empty());
+  assert(lcp_.empty());
+
+  // This is a naive, O(n^2) algorithm.
+  // Several O(n) algorithms exist, but they are much, much more complicated.
+  // The fastest known O(n) algorithm is described by Fischer (2011):
+  //   Inducing the LCP-Array
+  // We can replace this with a faster algorithm if/when it is an issue.
+  lcp_.resize(array_.size());
+  string_view last = GetStringFromEntry(entry(0));
+  for (size_t i = 1; i < array_.size(); i++) {
+    string_view curr = GetStringFromEntry(entry(i));
+    size_t limit = std::min(curr.size(), last.size());
+    size_t j;
+    int nesting = 0;
+    size_t nesting_start = 0;
+    for (j = 0; j < limit; j++) {
+      if (curr[j] != last[j]) {
+        break;
+      }
+      if (curr[j] == ',' && nesting == 0) {
+        break;
+      }
+      if (curr[j] == '<' || curr[j] == '(') {
+        if (nesting++ == 0) {
+          nesting_start = j;
+        }
+      }
+      if ((curr[j] == '>' || curr[j] == ')') && --nesting < 0) {
+        break;
+      }
+    }
+    if (nesting > 0) {
+      j = nesting_start;
+    }
+    lcp_[i] = j;
+    last = curr;
+  }
+}
+
+
 // RollupOutput ////////////////////////////////////////////////////////////////
 
 // RollupOutput represents rollup data after we have applied output massaging
@@ -775,8 +924,8 @@ std::string PercentString(double percent, bool diff_mode) {
   }
 }
 
-void RollupOutput::PrintRow(const RollupRow& row, size_t indent,
-                            std::ostream* out) const {
+void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
+                                  std::ostream* out) const {
   *out << FixedWidthString("", indent) << " "
        << PercentString(row.vmpercent, row.diff_mode) << " "
        << SiPrint(row.vmsize, row.diff_mode) << " "
@@ -785,10 +934,10 @@ void RollupOutput::PrintRow(const RollupRow& row, size_t indent,
        << PercentString(row.filepercent, row.diff_mode) << "\n";
 }
 
-void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
-                             std::ostream* out) const {
+void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
+                                   std::ostream* out) const {
   // Rows are printed before their sub-rows.
-  PrintRow(row, indent, out);
+  PrettyPrintRow(row, indent, out);
 
   // For now we don't print "confounding" sub-entries.  For example, if we're
   // doing a two-level analysis "-d section,symbol", and a section is growing
@@ -799,19 +948,19 @@ void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
 
   if (row.vmsize > 0 || row.filesize > 0) {
     for (const auto& child : row.sorted_children) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, out);
     }
   }
 
   if (row.vmsize < 0 || row.filesize < 0) {
     for (const auto& child : row.shrinking) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, out);
     }
   }
 
   if ((row.vmsize < 0) != (row.filesize < 0)) {
     for (const auto& child : row.mixed) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, out);
     }
   }
 }
@@ -827,64 +976,69 @@ void RollupOutput::CollectNames(RollupRow* row,
 void RollupOutput::AbbreviateToFit(size_t width) {
   std::vector<std::string*> names;
   std::string best_prefix;
-  int best_prefix_weight = 0;
   CollectNames(&toplevel_row_, &names);
+  SuffixArray suffixes;
 
-  while (1) {
-    printf("Yo!\n");
-    sleep(1);
-    size_t saw_overwide = false;
-    for (auto name : names) {
-      if (name->size() > width) {
-        saw_overwide = true;
-        break;
-      }
-    }
-    if (!saw_overwide) {
-      return;
-    }
+  for (size_t i = 0; i < names.size(); i++) {
+    suffixes.AddString(*names[i]);
+  }
 
-    size_t n = 0;
-    std::unordered_set<const std::string*> have_prefix;
-    std::copy(names.begin(), names.end(), std::inserter(have_prefix ,have_prefix.end()));
-    while (have_prefix.size() > 1) {
-      const std::string* str0 = *have_prefix.begin();
-      char ch = str0->at(n);
-      if (true /*ch == '/'*/) {
-        int weight = n * have_prefix.size();
-        if (weight > best_prefix_weight) {
-          best_prefix = str0->substr(0, n);
-          best_prefix_weight = weight;
-          printf("Try prefix: %s\n", best_prefix.c_str());
-          printf("Try prefix weight: %d\n", best_prefix_weight);
-        }
-      }
-      for (auto it = have_prefix.begin(); it != have_prefix.end();) {
-	printf("Str: %s\n", (*it)->c_str());
-        if ((*it)->at(n) != ch) {
-          it = have_prefix.erase(it); // previously this was something like m_map.erase(it++);
-        } else {
-          ++it;
-        }
-      }
-      n++;
-    }
-    printf("Best prefix: %s\n", best_prefix.c_str());
-    printf("Best prefix weight: %d\n", best_prefix_weight);
+  suffixes.ComputeArray();
+  suffixes.ComputeLcp();
 
-    // Remove the best prefix from all strings that have it.
-    std::string replace_with =
-        std::string("[") + std::to_string(abbrevs_.size()) + "]";
-    abbrevs_.push_back(best_prefix);
-    for (auto name : names) {
-      if (name->compare(0, best_prefix.length(), best_prefix) == 0) {
-        name->replace(0, best_prefix.length(), replace_with);
+  struct Abbrev {
+    Abbrev(size_t weight_, string_view str_)
+        : weight(weight_),
+          str(str_.data(),
+          str_.size()) {}
+    bool operator <(const Abbrev& b) const { return weight < b.weight; }
+    size_t weight;
+    std::string str;
+  };
+
+  std::priority_queue<Abbrev> abbrevs;
+  std::vector<size_t> start_indexes;
+
+  for (size_t i = 0; i < suffixes.size(); i++) {
+    size_t lcp = suffixes.GetLcp(i);
+    std::cout << "Suffix: " << suffixes.GetSuffix(i).first << ", lcp: " << lcp << "\n";
+    if (start_indexes.empty() || lcp > suffixes.GetLcp(start_indexes.back())) {
+      start_indexes.push_back(i);
+    }
+    while (lcp < suffixes.GetLcp(start_indexes.back())) {
+      size_t index = start_indexes.back();
+      size_t len = suffixes.GetLcp(index);
+      start_indexes.pop_back();
+      size_t weight = (i - index + 1) * len * len;
+      std::cout << "Weight: " << weight << "\n";
+      if (weight > 0) {
+        string_view substr = suffixes.GetSuffix(index).first.substr(0, len);
+        abbrevs.emplace(weight, substr);
       }
     }
   }
+
+  char ch = 'A';
+  while (!abbrevs.empty()) {
+    const std::string abbrev_text = abbrevs.top().str;
+    abbrevs.pop();
+    if (abbrev_text.size() < 30) {
+      continue;
+    }
+    std::string replacement(1, ch);
+    abbrevs_.emplace_back(replacement, abbrev_text);
+    ch++;
+    for (const auto& name : names) {
+      size_t pos;
+      while ((pos = name->find(abbrev_text)) != std::string::npos) {
+        name->replace(pos, abbrev_text.size(), replacement);
+      }
+    }
+    std::cout << "Abbrev: " << abbrevs.top().str << ", weight:" << abbrevs.top().weight << "\n";
+  }
 }
 
-void RollupOutput::Print(std::ostream* out) const {
+void RollupOutput::PrettyPrint(std::ostream* out) const {
   *out << "     VM SIZE    ";
   PrintSpaces(longest_label_, out);
   *out << "    FILE SIZE";
@@ -903,7 +1057,7 @@ void RollupOutput::Print(std::ostream* out) const {
   }
 
   for (const auto& child : toplevel_row_.sorted_children) {
-    PrintTree(child, 0, out);
+    PrettyPrintTree(child, 0, out);
   }
 
   if (toplevel_row_.diff_mode) {
@@ -914,7 +1068,7 @@ void RollupOutput::Print(std::ostream* out) const {
       *out << " --------------";
       *out << "\n";
       for (const auto& child : toplevel_row_.shrinking) {
-        PrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, out);
       }
     }
 
@@ -925,7 +1079,7 @@ void RollupOutput::Print(std::ostream* out) const {
       *out << " +-+-+-+-+-+-+-";
       *out << "\n";
       for (const auto& child : toplevel_row_.mixed) {
-        PrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, out);
       }
     }
 
@@ -934,18 +1088,70 @@ void RollupOutput::Print(std::ostream* out) const {
   }
 
   // The "TOTAL" row comes after all other rows.
-  PrintRow(toplevel_row_, 0, out);
+  PrettyPrintRow(toplevel_row_, 0, out);
 
   if (abbrevs_.size() > 0) {
-    *out << "\n";
-    *out << "  Abbreviations:\n";
-    int i = 0;
     for (const auto& abbrev : abbrevs_) {
-      *out << "  [" << i++ << "]: " << abbrev << "\n";
+      *out << "     " << abbrev.first << ": " << abbrev.second << "\n";
     }
   }
 }
 
+void RollupOutput::PrintRowToCSV(const RollupRow& row,
+                                 string_view parent_labels,
+                                 std::ostream* out) const {
+  if (parent_labels.size() > 0) {
+    *out << parent_labels << ",";
+  }
+
+  *out << absl::StrJoin(std::make_tuple(CSVEscape(row.name),
+                                        row.vmsize,
+                                        row.filesize),
+                        ",") << "\n";
+}
+
+void RollupOutput::PrintTreeToCSV(const RollupRow& row,
+                                  string_view parent_labels,
+                                  std::ostream* out) const {
+  if (row.sorted_children.size() > 0 ||
+      row.shrinking.size() > 0 ||
+      row.mixed.size() > 0) {
+    std::string labels;
+    if (parent_labels.size() > 0) {
+      labels = absl::StrJoin(
+          std::make_tuple(parent_labels, CSVEscape(row.name)), ",");
+    } else {
+      labels = CSVEscape(row.name);
+    }
+    for (const auto& child_row : row.sorted_children) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+    for (const auto& child_row : row.shrinking) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+    for (const auto& child_row : row.mixed) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+  } else {
+    PrintRowToCSV(row, parent_labels, out);
+  }
+}
+
+void RollupOutput::PrintToCSV(std::ostream* out) const {
+  std::vector<std::string> names(source_names_);
+  names.push_back("vmsize");
+  names.push_back("filesize");
+  *out << absl::StrJoin(names, ",") << "\n";
+  for (const auto& child_row : toplevel_row_.sorted_children) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+  for (const auto& child_row : toplevel_row_.shrinking) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+  for (const auto& child_row : toplevel_row_.mixed) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+}
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
@@ -1210,7 +1416,7 @@ class MemoryMap {
   RangeMap* vm_map() { return &vm_map_; }
 
  protected:
-  std::string ApplyNameRegexes(StringPiece name);
+  std::string ApplyNameRegexes(string_view name);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
@@ -1221,8 +1427,8 @@ class MemoryMap {
   std::unique_ptr<NameMunger> munger_;
 };
 
-std::string MemoryMap::ApplyNameRegexes(StringPiece name) {
-  return munger_ ? munger_->Munge(name) : std::string(name.as_string());
+std::string MemoryMap::ApplyNameRegexes(string_view name) {
+  return munger_ ? munger_->Munge(name) : std::string(name);
 }
 
 
@@ -1265,7 +1471,7 @@ bool MmapInputFile::Open() {
     return false;
   }
 
-  data_.set(map, buf.st_size);
+  data_ = string_view(map, buf.st_size);
   return true;
 }
 
@@ -1300,7 +1506,7 @@ RangeSink::RangeSink(const InputFile* file, DataSource data_source,
 
 RangeSink::~RangeSink() {}
 
-void RangeSink::AddFileRange(StringPiece name, uint64_t fileoff,
+void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
                              uint64_t filesize) {
   if (verbose_level > 2) {
     fprintf(stderr, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
@@ -1340,7 +1546,7 @@ void RangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
   AddVMRange(vmaddr, vmsize, name);
 }
 
-void RangeSink::AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
+void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
                          uint64_t fileoff, uint64_t filesize) {
   if (verbose_level > 2) {
     fprintf(stderr, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
@@ -1536,7 +1742,7 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
       return ret;
     }
 
-    void PrintMapRow(StringPiece str, uint64_t start, uint64_t end) {
+    void PrintMapRow(string_view str, uint64_t start, uint64_t end) {
       printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
              str.data());
     }
@@ -1613,6 +1819,7 @@ USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
+  --csv            Output in CSV format instead of human-readable.
   -d <sources>     Comma-separated list of sources to scan.
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
@@ -1663,6 +1870,8 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
         return false;
       }
       base_files = true;
+    } else if (strcmp(argv[i], "--csv") == 0) {
+      output->SetCSV(true);
     } else if (strcmp(argv[i], "-d") == 0) {
       if (!CheckNextArg(i, argc, "-d")) {
         return false;
@@ -1671,6 +1880,7 @@ bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
       Split(argv[++i], ',', &names);
       for (const auto& name : names) {
         CHECK_RETURN(bloaty.AddDataSource(name));
+        output->AddDataSourceName(name);
       }
     } else if (strcmp(argv[i], "-r") == 0) {
       std::string source_name, regex, substitution;
