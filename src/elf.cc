@@ -94,7 +94,7 @@ class ElfFile {
     bool ReadName(Elf64_Word index, string_view* name) const;
 
     // If header().sh_type == SHT_SYMTAB
-    Elf64_Word GetSymbolCount() const;
+    bool GetSymbolCount(Elf64_Word* count) const;
     bool ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const;
 
    private:
@@ -116,6 +116,7 @@ class ElfFile {
   bool Initialize();
 
   bool SetRegion(size_t start, size_t n, string_view* out) const {
+    CHECK_RETURN(SIZE_MAX - n > start);
     CHECK_RETURN(start + n <= data_.size());
     *out = data_.substr(start, n);
     return true;
@@ -281,9 +282,11 @@ bool ElfFile::Section::ReadName(Elf64_Word index, string_view* name) const {
   return true;
 }
 
-Elf64_Word ElfFile::Section::GetSymbolCount() const {
+bool ElfFile::Section::GetSymbolCount(Elf64_Word* count) const {
   assert(header().sh_type == SHT_SYMTAB);
-  return contents_.size() / header_.sh_entsize;
+  CHECK_RETURN(header_.sh_entsize > 0);
+  *count = contents_.size() / header_.sh_entsize;
+  return true;
 }
 
 bool ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const {
@@ -363,7 +366,7 @@ bool ElfFile::Initialize() {
 }
 
 bool ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
-  assert(index < header_.e_phnum);
+  CHECK_RETURN(index < header_.e_phnum);
 
   Elf64_Phdr* header = &segment->header_;
   CHECK_RETURN(ReadStruct<Elf32_Phdr>(
@@ -374,7 +377,7 @@ bool ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
 }
 
 bool ElfFile::ReadSection(Elf64_Word index, Section* section) const {
-  assert(index < section_count_);
+  CHECK_RETURN(index < section_count_);
 
   Elf64_Shdr* header = &section->header_;
   CHECK_RETURN(ReadStruct<Elf32_Shdr>(
@@ -635,7 +638,8 @@ static bool ReadELFSymbols(const InputFile& file, RangeSink* sink,
         continue;
       }
 
-      Elf64_Word symbol_count = section.GetSymbolCount();
+      Elf64_Word symbol_count;
+      CHECK_RETURN(section.GetSymbolCount(&symbol_count));
 
       // Find the corresponding section where the strings for the symbol table
       // can be found.

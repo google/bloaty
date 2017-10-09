@@ -55,11 +55,21 @@ if(BUILD_TESTING)
 
   foreach(target ${TEST_TARGETS})
     add_executable(${target} tests/${target}.cc)
-    target_link_libraries(${target} libbloaty re2 gtest_main gmock)
+    target_link_libraries(${target} libbloaty re2 gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
   endforeach(target)
+
+  if($ENV{LIB_FUZZING_ENGINE})
+    add_executable(fuzz_test tests/fuzz_target.cc)
+  else()
+    add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
+  endif()
+  target_link_libraries(fuzz_test libbloaty re2 "${CMAKE_THREAD_LIBS_INIT}")
+
+  file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
 
   add_test(NAME range_map_test COMMAND range_map_test)
   add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
   add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
   add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
+  add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
 endif()

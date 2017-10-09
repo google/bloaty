@@ -670,6 +670,7 @@ bool DIEReader::ReadCompilationUnitHeader(string_view data) {
   // need to do so now.
   if (unit_abbrev_->IsEmpty()) {
     string_view abbrev_data = dwarf_.debug_abbrev;
+    CHECK_RETURN(abbrev_data.size() >= debug_abbrev_offset);
     abbrev_data.remove_prefix(debug_abbrev_offset);
     CHECK_RETURN(unit_abbrev_->ReadAbbrevs(abbrev_data));
   }
@@ -1404,9 +1405,28 @@ class LineInfoReader {
   bool SeekToOffset(uint64_t offset, uint8_t address_size);
   bool ReadLineInfo();
   const LineInfo& lineinfo() const { return info_; }
-  const FileName& filename(size_t i) const { return file_names_[i]; }
+  const FileName& filename(size_t i) const { return filenames_[i]; }
   string_view include_directory(size_t i) const {
     return include_directories_[i];
+  }
+
+  const std::string& GetExpandedFilename(size_t index) {
+    // Generate these lazily.
+    if (expanded_filenames_.empty()) {
+      expanded_filenames_.resize(filenames_.size());
+    }
+
+    auto& ret = expanded_filenames_[index];
+    if (ret.empty()) {
+      const FileName& filename = filenames_[index];
+      string_view directory = include_directories_[filename.directory_index];
+      ret = std::string(directory);
+      if (!ret.empty()) {
+        ret += "/";
+      }
+      ret += std::string(filename.name);
+    }
+    return ret;
   }
 
  private:
@@ -1423,8 +1443,9 @@ class LineInfoReader {
 
   CompilationUnitSizes sizes_;
   std::vector<string_view> include_directories_;
-  std::vector<FileName> file_names_;
+  std::vector<FileName> filenames_;
   std::vector<uint8_t> standard_opcode_lengths_;
+  std::vector<std::string> expanded_filenames_;
 
   string_view program_;
   string_view remaining_;
@@ -1512,10 +1533,11 @@ bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   }
 
   // Read file_names.
-  file_names_.clear();
+  filenames_.clear();
+  expanded_filenames_.clear();
 
   // Filename 0 is unused.
-  file_names_.push_back(FileName());
+  filenames_.push_back(FileName());
   while (true) {
     FileName file_name;
     CHECK_RETURN(ReadNullTerminated(&data, &file_name.name));
@@ -1525,7 +1547,7 @@ bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     CHECK_RETURN(ReadLEB128(&data, &file_name.directory_index));
     CHECK_RETURN(ReadLEB128(&data, &file_name.modified_time));
     CHECK_RETURN(ReadLEB128(&data, &file_name.file_size));
-    file_names_.push_back(file_name);
+    filenames_.push_back(file_name);
   }
 
   info_ = LineInfo(params_.default_is_stmt);
@@ -1595,7 +1617,7 @@ bool LineInfoReader::ReadLineInfo() {
               CHECK_RETURN(ReadLEB128(&data, &file_name.directory_index));
               CHECK_RETURN(ReadLEB128(&data, &file_name.modified_time));
               CHECK_RETURN(ReadLEB128(&data, &file_name.file_size));
-              file_names_.push_back(file_name);
+              filenames_.push_back(file_name);
               break;
             }
             case DW_LNE_set_discriminator:
@@ -1633,6 +1655,7 @@ bool LineInfoReader::ReadLineInfo() {
         case DW_LNS_set_file: {
           uint32_t operand;
           CHECK_RETURN(ReadLEB128(&data, &operand));
+          CHECK_RETURN(operand < filenames_.size());
           info_.file = operand;
           break;
         }
@@ -1804,6 +1827,36 @@ static std::string LineInfoKey(const std::string& file, uint32_t line,
   }
 }
 
+static void ReadDWARFStmtList(bool include_line,
+                              dwarf::LineInfoReader* line_info_reader,
+                              RangeSink* sink) {
+  uint64_t span_startaddr = 0;
+  std::string last_source;
+
+  while (line_info_reader->ReadLineInfo()) {
+    const auto& line_info = line_info_reader->lineinfo();
+    auto addr = line_info.address;
+    auto number = line_info.line;
+    auto name =
+        line_info.end_sequence
+            ? last_source
+            : LineInfoKey(line_info_reader->GetExpandedFilename(line_info.file),
+                          number, include_line);
+    if (!span_startaddr) {
+      span_startaddr = addr;
+    } else if (line_info.end_sequence ||
+        (!last_source.empty() && name != last_source)) {
+      sink->AddVMRange(span_startaddr, addr - span_startaddr, last_source);
+      if (line_info.end_sequence) {
+        span_startaddr = 0;
+      } else {
+        span_startaddr = addr;
+      }
+    }
+    last_source = name;
+  }
+}
+
 bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line) {
   if (!file.debug_info.size() || !file.debug_line.size()) {
@@ -1814,68 +1867,17 @@ bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
   dwarf::DIEReader die_reader(file);
   dwarf::LineInfoReader line_info_reader(file);
   dwarf::FixedAttrReader<uint64_t> attr_reader(&die_reader, {DW_AT_stmt_list});
-  std::unordered_map<uint64_t, std::string> map_;
-  std::string missing_;
-
-  class FilenameMap {
-   public:
-    FilenameMap(const dwarf::LineInfoReader& reader) : reader_(reader) {}
-    const std::string& GetSourceFilename(size_t index) {
-      auto& ret = filenames_[index];
-      if (ret.empty()) {
-        const dwarf::LineInfoReader::FileName& filename =
-            reader_.filename(index);
-        string_view directory =
-            reader_.include_directory(filename.directory_index);
-        ret = std::string(directory);
-        if (!ret.empty()) {
-          ret += "/";
-        }
-        ret += std::string(filename.name);
-      }
-      return ret;
-    }
-
-   private:
-    const dwarf::LineInfoReader& reader_;
-    std::unordered_map<uint32_t, std::string> filenames_;
-  };
 
   die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo);
 
   while (true) {
     CHECK_RETURN(attr_reader.ReadAttributes(&die_reader));
-    FilenameMap map(line_info_reader);
 
-    if (!attr_reader.HasAttribute<0>()) {
-      continue;
-    }
-
-    CHECK_RETURN(line_info_reader.SeekToOffset(attr_reader.GetAttribute<0>(),
-                 die_reader.unit_sizes().address_size));
-    uint64_t span_startaddr = 0;
-    std::string last_source;
-
-    while (line_info_reader.ReadLineInfo()) {
-      const auto& line_info = line_info_reader.lineinfo();
-      auto addr = line_info.address;
-      auto number = line_info.line;
-      auto name = line_info.end_sequence
-                      ? last_source
-                      : LineInfoKey(map.GetSourceFilename(line_info.file),
-                                    number, include_line);
-      if (!span_startaddr) {
-        span_startaddr = addr;
-      } else if (line_info.end_sequence ||
-          (!last_source.empty() && name != last_source)) {
-        sink->AddVMRange(span_startaddr, addr - span_startaddr, last_source);
-        if (line_info.end_sequence) {
-          span_startaddr = 0;
-        } else {
-          span_startaddr = addr;
-        }
-      }
-      last_source = name;
+    if (attr_reader.HasAttribute<0>()) {
+      uint64_t offset = attr_reader.GetAttribute<0>();
+      CHECK_RETURN(line_info_reader.SeekToOffset(
+          offset, die_reader.unit_sizes().address_size));
+      ReadDWARFStmtList(include_line, &line_info_reader, sink);
     }
 
     if (!die_reader.NextCompilationUnit()) {
