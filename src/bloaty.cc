@@ -39,6 +39,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "re2/re2.h"
@@ -338,7 +339,6 @@ Demangler::~Demangler() {
 }
 
 std::string Demangler::Demangle(const std::string& symbol) {
-  return symbol;
   const char *writeptr = symbol.c_str();
   const char *writeend = writeptr + symbol.size();
 
@@ -797,10 +797,13 @@ void SuffixArray::ComputeLcp() {
     size_t j;
     int nesting = 0;
     size_t nesting_start = 0;
+    size_t last_separator = 0;
+
     for (j = 0; j < limit; j++) {
       if (curr[j] != last[j]) {
         break;
       }
+
       if (curr[j] == ',' && nesting == 0) {
         break;
       }
@@ -813,6 +816,7 @@ void SuffixArray::ComputeLcp() {
         break;
       }
     }
+
     if (nesting > 0) {
       j = nesting_start;
     }
@@ -979,8 +983,16 @@ void RollupOutput::AbbreviateToFit(size_t width) {
   CollectNames(&toplevel_row_, &names);
   SuffixArray suffixes;
 
+  bool saw_overfull = false;
   for (size_t i = 0; i < names.size(); i++) {
     suffixes.AddString(*names[i]);
+    if (names[i]->size() > width) {
+      saw_overfull = true;
+    }
+  }
+
+  if (!saw_overfull) {
+    return;
   }
 
   suffixes.ComputeArray();
@@ -1001,39 +1013,51 @@ void RollupOutput::AbbreviateToFit(size_t width) {
 
   for (size_t i = 0; i < suffixes.size(); i++) {
     size_t lcp = suffixes.GetLcp(i);
-    std::cout << "Suffix: " << suffixes.GetSuffix(i).first << ", lcp: " << lcp << "\n";
-    if (start_indexes.empty() || lcp > suffixes.GetLcp(start_indexes.back())) {
-      start_indexes.push_back(i);
-    }
-    while (lcp < suffixes.GetLcp(start_indexes.back())) {
+    std::cout << "i: " << i << ", Suffix: " << suffixes.GetSuffix(i).first << ", lcp: " << lcp << "\n";
+    while (!start_indexes.empty() &&
+           (lcp == 0 || lcp < suffixes.GetLcp(start_indexes.back()))) {
       size_t index = start_indexes.back();
+      std::cout << "Index: " << index << "\n";
       size_t len = suffixes.GetLcp(index);
       start_indexes.pop_back();
-      size_t weight = (i - index + 1) * len * len;
-      std::cout << "Weight: " << weight << "\n";
+      size_t string_count = (i - index + 1);
+      size_t weight = string_count * string_count * len;
+      string_view prefix = suffixes.GetSuffix(index).first.substr(0, len);
+      std::cout << "Prefix: " << prefix << ", Weight: " << weight << "\n";
       if (weight > 0) {
-        string_view substr = suffixes.GetSuffix(index).first.substr(0, len);
-        abbrevs.emplace(weight, substr);
+        abbrevs.emplace(weight, prefix);
       }
+    }
+    if (start_indexes.empty() || lcp > suffixes.GetLcp(start_indexes.back())) {
+      start_indexes.push_back(i);
     }
   }
 
   char ch = 'A';
-  while (!abbrevs.empty()) {
+  while (!abbrevs.empty() && saw_overfull) {
+    saw_overfull = false;
     const std::string abbrev_text = abbrevs.top().str;
     abbrevs.pop();
-    if (abbrev_text.size() < 30) {
-      continue;
-    }
-    std::string replacement(1, ch);
-    abbrevs_.emplace_back(replacement, abbrev_text);
-    ch++;
+    //if (abbrev_text.size() < 30) {
+    //  continue;
+    //}
+    std::string replacement = absl::StrCat("[", string_view(&ch, 1), "]");
+    bool saw = false;
     for (const auto& name : names) {
       size_t pos;
       while ((pos = name->find(abbrev_text)) != std::string::npos) {
+        saw = true;
         name->replace(pos, abbrev_text.size(), replacement);
+        if (name->size() > width) {
+          saw_overfull = true;
+        }
       }
     }
+    if (!saw) {
+      continue;
+    }
+    abbrevs_.emplace_back(replacement, abbrev_text);
+    ch++;
     std::cout << "Abbrev: " << abbrevs.top().str << ", weight:" << abbrevs.top().weight << "\n";
   }
 }
