@@ -226,7 +226,7 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 class NameStripper {
  public:
   bool StripName(const std::string& name) {
-    if (name[name.size() - 1] != ')') {
+    if (!name.empty() && name[name.size() - 1] != ')') {
       // (anonymous namespace)::ctype_w
       stripped_ = &name;
       return false;
