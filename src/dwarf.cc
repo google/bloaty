@@ -1869,7 +1869,7 @@ bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
   dwarf::LineInfoReader line_info_reader(file);
   dwarf::FixedAttrReader<uint64_t> attr_reader(&die_reader, {DW_AT_stmt_list});
 
-  die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo);
+  CHECK_RETURN(die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo));
 
   while (true) {
     CHECK_RETURN(attr_reader.ReadAttributes(&die_reader));
