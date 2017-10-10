@@ -1497,6 +1497,7 @@ bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   CHECK_RETURN(sizes_.ReadInitialLength(&data, nullptr));
   CHECK_RETURN(ReadMemcpy(&data, &version));
   CHECK_RETURN(sizes_.ReadDWARFOffset(&data, &header_length));
+  CHECK_RETURN(data.size() >= header_length);
 
   string_view program = data.substr(header_length);
 
