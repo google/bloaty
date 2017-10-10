@@ -1511,6 +1511,7 @@ bool LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   CHECK_RETURN(ReadMemcpy(&data, &params_.line_base));
   CHECK_RETURN(ReadMemcpy(&data, &params_.line_range));
   CHECK_RETURN(ReadMemcpy(&data, &params_.opcode_base));
+  CHECK_RETURN(params_.line_range > 0);
 
   standard_opcode_lengths_.resize(params_.opcode_base);
   for (size_t i = 1; i < params_.opcode_base; i++) {
