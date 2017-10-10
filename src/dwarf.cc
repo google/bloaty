@@ -102,7 +102,7 @@ typename std::enable_if<std::is_unsigned<T>::value, bool>::type ReadLEB128(
 
   for (; ptr < limit && shift < maxshift; shift += 7) {
     char byte = *(ptr++);
-    ret |= (byte & 0x7f) << shift;
+    ret |= static_cast<uint64_t>(byte & 0x7f) << shift;
     if ((byte & 0x80) == 0) {
       data->remove_prefix(ptr - data->data());
       if (ret > std::numeric_limits<T>::max()) {
