@@ -433,6 +433,7 @@ bool AddressRanges::NextUnit() {
 
   size_t ofs = unit_remaining_.data() - section_.data();
   size_t aligned_ofs = AlignUpTo(ofs, sizes_.address_size * 2);
+  CHECK_RETURN(unit_remaining_.size() >= aligned_ofs - ofs);
   unit_remaining_.remove_prefix(aligned_ofs - ofs);
 
   return true;
