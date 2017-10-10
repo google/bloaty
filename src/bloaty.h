@@ -287,7 +287,7 @@ class RangeMap {
   bool Translate(uint64_t addr, uint64_t *translated) const;
 
   template <class Func>
-  static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
+  static bool ComputeRollup(const std::vector<const RangeMap*>& range_maps,
                             const std::string& filename, int filename_position,
                             Func func);
 

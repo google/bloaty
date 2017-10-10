@@ -24,6 +24,7 @@ int main(int argc, char *argv[]) {
     output.Print(&std::cout);
     return 0;
   } else {
+    std::cerr << "bloaty: unspecified error, exiting\n";
     return 1;
   }
 }

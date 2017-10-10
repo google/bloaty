@@ -108,6 +108,12 @@ int SignOf(long val) {
   }
 }
 
+template <typename A, typename B>
+bool CheckedAdd(A* accum, B val) {
+  // TODO(haberman): add a portable version of this.
+  return !__builtin_add_overflow(*accum, val, accum);
+}
+
 std::string CSVEscape(string_view str) {
   bool need_escape = false;
 
@@ -429,10 +435,10 @@ class Rollup {
  public:
   Rollup() {}
 
-  void AddSizes(const std::vector<std::string> names,
+  bool AddSizes(const std::vector<std::string> names,
                 uint64_t size, bool is_vmsize) {
     // We start at 1 to exclude the base map (see base_map_).
-    AddInternal(names, 1, size, is_vmsize);
+    return AddInternal(names, 1, size, is_vmsize);
   }
 
   // Prints a graphical representation of the rollup.
@@ -487,20 +493,21 @@ class Rollup {
 
   // Adds "size" bytes to the rollup under the label names[i].
   // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
-  void AddInternal(const std::vector<std::string> names, size_t i,
-                   int64_t size, bool is_vmsize) {
+  bool AddInternal(const std::vector<std::string> names, size_t i,
+                   uint64_t size, bool is_vmsize) {
     if (is_vmsize) {
-      vm_total_ += size;
+      CHECK_RETURN(CheckedAdd(&vm_total_, size));
     } else {
-      file_total_ += size;
+      CHECK_RETURN(CheckedAdd(&file_total_, size));
     }
     if (i < names.size()) {
       auto& child = children_[names[i]];
       if (child.get() == nullptr) {
         child.reset(new Rollup());
       }
-      child->AddInternal(names, i + 1, size, is_vmsize);
+      CHECK_RETURN(child->AddInternal(names, i + 1, size, is_vmsize));
     }
+    return true;
   }
 
   static double Percent(ssize_t part, size_t whole) {
@@ -626,13 +633,14 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
   // out to "others_row".
   size_t i = child_rows.size() - 1;
   while (i >= row_limit) {
-    others_row.vmsize += child_rows[i].vmsize;
-    others_row.filesize += child_rows[i].filesize;
+    CHECK_RETURN(CheckedAdd(&others_row.vmsize, child_rows[i].vmsize));
+    CHECK_RETURN(CheckedAdd(&others_row.filesize, child_rows[i].filesize));
     if (base) {
       auto it = base->children_.find(child_rows[i].name);
       if (it != base->children_.end()) {
-        others_base.vm_total_ += it->second->vm_total_;
-        others_base.file_total_ += it->second->file_total_;
+        CHECK_RETURN(CheckedAdd(&others_base.vm_total_, it->second->vm_total_));
+        CHECK_RETURN(
+            CheckedAdd(&others_base.file_total_, it->second->file_total_));
       }
     }
 
@@ -642,8 +650,8 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
 
   if (std::abs(others_row.vmsize) > 0 || std::abs(others_row.filesize) > 0) {
     child_rows.push_back(others_row);
-    others_rollup.vm_total_ += others_row.vmsize;
-    others_rollup.file_total_ += others_row.filesize;
+    CHECK_RETURN(CheckedAdd(&others_rollup.vm_total_, others_row.vmsize));
+    CHECK_RETURN(CheckedAdd(&others_rollup.file_total_, others_row.filesize));
   }
 
   // Sort all rows (including "other") and include sort by name.
@@ -1103,7 +1111,7 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
 }
 
 template <class Func>
-void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
+bool RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
                              const std::string& filename,
                              int filename_position, Func func) {
   assert(range_maps.size() > 0);
@@ -1190,11 +1198,12 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
     }
 
     if (have_data) {
-      func(keys, current, next_break);
+      CHECK_RETURN(func(keys, current, next_break));
     }
 
     current = next_break;
   }
+  return true;
 }
 
 
@@ -1496,16 +1505,21 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
       file_maps_.push_back(map->file_map());
     }
 
-    void ComputeRollup(const std::string& filename, int filename_position,
+    bool ComputeRollup(const std::string& filename, int filename_position,
                        Rollup* rollup) {
-      RangeMap::ComputeRollup(
+      CHECK_RETURN(RangeMap::ComputeRollup(
           vm_maps_, filename, filename_position,
           [=](const std::vector<std::string>& keys, uint64_t addr,
-              uint64_t end) { rollup->AddSizes(keys, end - addr, true); });
-      RangeMap::ComputeRollup(
+              uint64_t end) {
+            return rollup->AddSizes(keys, end - addr, true);
+          }));
+      CHECK_RETURN(RangeMap::ComputeRollup(
           file_maps_, filename, filename_position,
           [=](const std::vector<std::string>& keys, uint64_t addr,
-              uint64_t end) { rollup->AddSizes(keys, end - addr, false); });
+              uint64_t end) {
+            return rollup->AddSizes(keys, end - addr, false);
+          }));
+      return true;
     }
 
     void PrintMaps(const std::vector<const RangeMap*> maps,
@@ -1519,6 +1533,7 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
                                 }
                                 PrintMapRow(KeysToString(keys), addr, end);
                                 last = end;
+                                return true;
                               });
     }
 
@@ -1576,7 +1591,7 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
 
   CHECK_RETURN(file_handler->ProcessFile(sink_ptrs));
 
-  maps.ComputeRollup(filename, filename_position_, rollup);
+  CHECK_RETURN(maps.ComputeRollup(filename, filename_position_, rollup));
   if (verbose_level > 0) {
     fprintf(stderr, "FILE MAP:\n");
     maps.PrintFileMaps(filename, filename_position_);
