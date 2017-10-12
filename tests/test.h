@@ -17,14 +17,15 @@
 
 #include "bloaty.h"
 
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 #include <fstream>
 #include <memory>
+#include <set>
 #include <string>
-#include <unordered_set>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
-#include "gtest/gtest.h"
-#include "gmock/gmock.h"
 
 #include "strarr.h"
 
@@ -179,6 +180,20 @@ class BloatyTest : public ::testing::Test {
 
     // All expected elements must be present.
     ASSERT_EQ(i, children.size());
+  }
+
+  // Don't worry about order, just ensure that the children contains
+  // certain symbols. Also doesn't ignore mangled symbols like _Z4funcj.
+  void
+  AssertChildrenContainSymbols(const bloaty::RollupRow &row,
+                               const std::set<std::string> &expected_children) {
+    std::set<std::string> child_names;
+    for (auto child : row.sorted_children) {
+      child_names.emplace(child.name);
+    }
+    for (auto child_name : expected_children) {
+      ASSERT_TRUE(child_names.find(child_name) != child_names.end());
+    }
   }
 
   const bloaty::RollupRow* FindRow(const std::string& name) {
