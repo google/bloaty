@@ -34,7 +34,7 @@ class StringPieceInputFileFactory : public InputFileFactory {
   StringPieceInputFileFactory(string_view data) : data_(data) {}
  private:
   string_view data_;
-  std::unique_ptr<InputFile> TryOpenFile(
+  std::unique_ptr<InputFile> OpenFile(
       const std::string& /* filename */) const override {
     return std::unique_ptr<InputFile>(new StringPieceInputFile(data_));
   }

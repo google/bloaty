@@ -49,6 +49,21 @@ enum class DataSource {
   kSymbols,
 };
 
+class Error : public std::runtime_error {
+ public:
+  Error(const char* msg, const char* file, int line)
+      : std::runtime_error(msg), file_(file), line_(line) {}
+
+  // TODO(haberman): add these to Bloaty's error message when verbose is
+  // enabled.
+  const char* file() const { return file_; }
+  int line() const { return line_; }
+
+ private:
+  const char* file_;
+  int line_;
+};
+
 class InputFile {
  public:
   InputFile(const std::string& filename) : filename_(filename) {}
@@ -69,14 +84,14 @@ class InputFileFactory {
  public:
   virtual ~InputFileFactory() {}
 
-  // Returns nullptr if the file could not be opened.
-  virtual std::unique_ptr<InputFile> TryOpenFile(
+  // Throws if the file could not be opened.
+  virtual std::unique_ptr<InputFile> OpenFile(
       const std::string& filename) const = 0;
 };
 
 class MmapInputFileFactory : public InputFileFactory {
  public:
-  std::unique_ptr<InputFile> TryOpenFile(
+  std::unique_ptr<InputFile> OpenFile(
       const std::string& filename) const override;
 };
 
@@ -157,11 +172,11 @@ class FileHandler {
  public:
   virtual ~FileHandler() {}
 
-  virtual bool ProcessBaseMap(RangeSink* sink) = 0;
+  virtual void ProcessBaseMap(RangeSink* sink) = 0;
 
   // Process this file, pushing data to |sinks| as appropriate for each data
   // source.
-  virtual bool ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+  virtual void ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
 };
 
 std::unique_ptr<FileHandler> TryOpenELFFile(const InputFile& file);
@@ -184,9 +199,9 @@ typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
-bool ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
+void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
                            RangeSink* sink);
-bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
+void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 
 // LineReader //////////////////////////////////////////////////////////////////
@@ -287,7 +302,7 @@ class RangeMap {
   bool Translate(uint64_t addr, uint64_t *translated) const;
 
   template <class Func>
-  static bool ComputeRollup(const std::vector<const RangeMap*>& range_maps,
+  static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
                             const std::string& filename, int filename_position,
                             Func func);
 
