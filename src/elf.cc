@@ -641,15 +641,13 @@ static bool IsObjectFile(string_view data) {
   return IsArchiveFile(data) || (elf.IsOpen() && elf.header().e_type == ET_REL);
 }
 
-static bool CheckNotObject(const char* source, RangeSink* sink) {
+static void CheckNotObject(const char* source, RangeSink* sink) {
   if (IsObjectFile(sink->input_file().data())) {
-    fprintf(stderr,
-            "bloaty: can't use data source '%s' on object files (only binaries "
-            "and shared libraries)\n",
-            source);
-    return false;
+    THROWF(
+        "can't use data source '$0' on object files (only binaries and shared "
+        "libraries)",
+        source);
   }
-  return true;
 }
 
 static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
