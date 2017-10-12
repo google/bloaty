@@ -117,10 +117,20 @@ int SignOf(long val) {
 
 template <typename A, typename B>
 void CheckedAdd(A* accum, B val) {
-  // TODO(haberman): add a portable version of this.
-  if (__builtin_add_overflow(*accum, val, accum)) {
+  // We've only implemented the portable version for a subset of possible types.
+  static_assert(std::is_signed<A>::value, "requires signed A");
+  static_assert(sizeof(A) == sizeof(B), "requires integers of the same type");
+#if ABSL_HAVE_BUILTIN(__builtin_add_overflow)
+  if (!__builtin_add_overflow(*accum, val, accum)) {
     THROW("integer overflow");
   }
+#else
+  bool safe = *accum < 0 ? (val >= INT_MIN - *accum) : (val <= INT_MAX - *accum);
+  if (!safe) {
+    THROW("integer overflow");
+  }
+  *accum += val;
+#endif
 }
 
 std::string CSVEscape(string_view str) {
