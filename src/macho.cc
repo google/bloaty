@@ -16,6 +16,15 @@
 #include "bloaty.h"
 #include "re2/re2.h"
 
+ABSL_ATTRIBUTE_NORETURN
+static void Throw(const char *str, int line) {
+  throw bloaty::Error(str, __FILE__, line);
+}
+
+#define THROW(msg) Throw(msg, __LINE__)
+#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
+#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
+
 // There are several programs that offer useful information about
 // binaries:
 //
@@ -27,15 +36,13 @@
 // - dsymutil: create .dSYM bundle with DWARF information inside
 // - dwarfdump: dump DWARF debugging information from .o or .dSYM
 
-#define CHECK_RETURN(call) if (!(call)) { return false; }
-
 namespace bloaty {
 
 bool StartsWith(const std::string& haystack, const std::string& needle) {
   return !haystack.compare(0, needle.length(), needle);
 }
 
-static bool ParseMachOSymbols(RangeSink* sink) {
+static void ParseMachOSymbols(RangeSink* sink) {
   std::string cmd = std::string("symbols -noSources -noDemangling ") +
                     sink->input_file().filename();
 
@@ -58,11 +65,9 @@ static bool ParseMachOSymbols(RangeSink* sink) {
       sink->AddVMRange(addr, size, name);
     }
   }
-
-  return true;
 }
 
-static bool ParseMachOSegments(RangeSink* sink) {
+static void ParseMachOSegments(RangeSink* sink) {
   // Load command 2
   //       cmd LC_SEGMENT_64
   //   cmdsize 632
@@ -130,11 +135,9 @@ static bool ParseMachOSegments(RangeSink* sink) {
       }
     }
   }
-
-  return true;
 }
 
-static bool ParseMachOSections(RangeSink* sink) {
+static void ParseMachOSections(RangeSink* sink) {
   // Section
   //   sectname __text
   //    segname __TEXT
@@ -201,37 +204,32 @@ static bool ParseMachOSections(RangeSink* sink) {
       }
     }
   }
-
-  return true;
 }
 
 class MachOFileHandler : public FileHandler {
-  bool ProcessBaseMap(RangeSink* sink) override {
+  void ProcessBaseMap(RangeSink* sink) override {
     return ParseMachOSegments(sink);
   }
 
-  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  void ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
-          CHECK_RETURN(ParseMachOSegments(sink));
+          ParseMachOSegments(sink);
           break;
         case DataSource::kSections:
-          CHECK_RETURN(ParseMachOSections(sink));
+          ParseMachOSections(sink);
           break;
         case DataSource::kSymbols:
-          CHECK_RETURN(ParseMachOSymbols(sink));
+          ParseMachOSymbols(sink);
           break;
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
         case DataSource::kInlines:
         default:
-          fprintf(stderr, "Mach-O doesn't support this data source.\n");
-          return false;
+          THROW("Mach-O doesn't support this data source");
       }
     }
-
-    return true;
   }
 };
 

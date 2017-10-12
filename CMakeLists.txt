@@ -12,19 +12,28 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
+include(CheckCXXCompilerFlag)
+CHECK_CXX_COMPILER_FLAG(-fdiagnostics-color=always SUPPORTS_COLOR_ALWAYS)
+if(SUPPORTS_COLOR_ALWAYS)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
+endif()
+
 add_library(libbloaty
     src/bloaty.cc
     src/dwarf.cc
     src/elf.cc
     src/macho.cc
     # Until Abseil has a proper CMake build system
-    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
+    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
     third_party/abseil-cpp/absl/strings/ascii.cc
+    third_party/abseil-cpp/absl/strings/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
+    third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/numbers.cc
     third_party/abseil-cpp/absl/strings/str_cat.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
+    third_party/abseil-cpp/absl/strings/substitute.cc
     )
 
 add_executable(bloaty src/main.cc)
