@@ -539,7 +539,7 @@ class DIEReader {
 
   // Internal APIs.
 
-  bool ReadCompilationUnitHeader(string_view data);
+  bool ReadCompilationUnitHeader();
   bool ReadCode();
 
   enum class State {
@@ -610,7 +610,7 @@ bool DIEReader::ReadCode() {
 }
 
 bool DIEReader::NextCompilationUnit() {
-  return ReadCompilationUnitHeader(next_unit_);
+  return ReadCompilationUnitHeader();
 }
 
 bool DIEReader::NextDIE() {
@@ -619,26 +619,24 @@ bool DIEReader::NextDIE() {
 }
 
 bool DIEReader::SeekToCompilationUnit(Section section, uint64_t offset) {
-  string_view data;
   section_ = section;
 
   if (section == Section::kDebugInfo) {
-    data = dwarf_.debug_info;
+    next_unit_ = dwarf_.debug_info;
   } else {
-    data = dwarf_.debug_types;
+    next_unit_ = dwarf_.debug_types;
   }
 
-  SkipBytes(offset, &data);
-  return ReadCompilationUnitHeader(data);
+  SkipBytes(offset, &next_unit_);
+  return ReadCompilationUnitHeader();
 }
 
-bool DIEReader::ReadCompilationUnitHeader(string_view data) {
-  if (data.empty()) {
+bool DIEReader::ReadCompilationUnitHeader() {
+  if (next_unit_.empty()) {
     state_ = State::kEof;
     return false;
   }
 
-  string_view next_unit_ = data;
   remaining_ = unit_sizes_.ReadInitialLength(&next_unit_);
 
   uint16_t version = ReadMemcpy<uint16_t>(&remaining_);
@@ -1545,11 +1543,6 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   info_ = LineInfo(params_.default_is_stmt);
   remaining_ = program;
   shadow_ = false;
-
-  for (const auto& name : filenames_) {
-    std::cerr << "filename: " << name.name << "\n";
-  }
-  std::cerr << "Length: " << remaining_.size() << "\n";
 }
 
 bool LineInfoReader::ReadLineInfo() {
@@ -1828,7 +1821,6 @@ static void ReadDWARFStmtList(bool include_line,
             ? last_source
             : LineInfoKey(line_info_reader->GetExpandedFilename(line_info.file),
                           number, include_line);
-    std::cerr << absl::Substitute("line: $0 $1 $2\n", addr, number, name);
     if (!span_startaddr) {
       span_startaddr = addr;
     } else if (line_info.end_sequence ||

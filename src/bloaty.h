@@ -54,6 +54,9 @@ class Error : public std::runtime_error {
   Error(const char* msg, const char* file, int line)
       : std::runtime_error(msg), file_(file), line_(line) {}
 
+  const char* file() const { return file_; }
+  int line() const { return line_; }
+
  private:
   const char *file_;
   int line_;
