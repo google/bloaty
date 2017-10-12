@@ -1758,7 +1758,7 @@ bool BloatyMain(int argc, char* argv[],
   try {
     BloatyDoMain(argc, argv, file_factory, output);
     return true;
-  } catch (const std::exception& e) {
+  } catch (const bloaty::Error& e) {
     fprintf(stderr, "bloaty: %s\n", e.what());
     return false;
   }
