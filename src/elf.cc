@@ -36,6 +36,17 @@ static void Throw(const char *str, int line) {
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 #define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
+namespace {
+
+size_t CheckedAdd(size_t a, size_t b) {
+  if (SIZE_MAX - b < a) {
+    THROW("integer overflow");
+  }
+  return a + b;
+}
+
+}
+
 namespace bloaty {
 
 namespace {
@@ -157,8 +168,8 @@ class ElfFile {
 
     template <class T>
     void Memcpy(size_t offset, T* out) const {
-      size_t end;
-      if (__builtin_add_overflow(offset, sizeof(T), &end) || end > data_.size()) {
+      size_t end = CheckedAdd(offset, sizeof(T));
+      if (end > data_.size()) {
         THROW("can't memcpy that data from ELF file");
       }
       memcpy(out, data_.data() + offset, sizeof(*out));
