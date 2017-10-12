@@ -1,6 +1,8 @@
 cmake_minimum_required (VERSION 2.6)
 project (Bloaty)
 
+option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
+
 set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
 add_subdirectory(third_party/re2)
 include_directories(third_party/re2)
@@ -16,6 +18,11 @@ include(CheckCXXCompilerFlag)
 CHECK_CXX_COMPILER_FLAG(-fdiagnostics-color=always SUPPORTS_COLOR_ALWAYS)
 if(SUPPORTS_COLOR_ALWAYS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
+endif()
+
+if(BLOATY_ENABLE_ASAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+  set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
 endif()
 
 add_library(libbloaty

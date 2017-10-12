@@ -1191,9 +1191,8 @@ ActionBuf::IndexedAction ActionBuf::GetAction(uint16_t attr_name,
       FormDecodeFunc* func = GetFormDecodeFunc<T>(abbrev.attr[i].form, sizes);
 
       if (!func) {
-        fprintf(stderr,
-                "Warning: don't know how to convert form %d to type %s\n",
-                abbrev.attr[i].form, typeid(T).name());
+        THROWF("don't know how to convert form $0 to type $1",
+               abbrev.attr[i].form, typeid(T).name());
       }
 
       return IndexedAction(i, func, data, has);
@@ -1209,11 +1208,7 @@ ActionBuf::IndexedAction ActionBuf::GetAction(uint16_t attr_name,
 string_view ActionBuf::ReadAttributes(const DIEReader& reader,
                                       string_view data) const {
   for (const auto& action : action_list_) {
-    assert(action.func);
     data = action.func(reader, data, action.data);
-    if (data.data() == nullptr) {
-      return data;  // Propagate error.
-    }
     if (action.has) {
       *action.has = true;
     }
@@ -1404,6 +1399,10 @@ class LineInfoReader {
   }
 
   const std::string& GetExpandedFilename(size_t index) {
+    if (index >= filenames_.size()) {
+      THROW("filename index out of range");
+    }
+
     // Generate these lazily.
     if (expanded_filenames_.empty()) {
       expanded_filenames_.resize(filenames_.size());
@@ -1537,6 +1536,9 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     file_name.directory_index = ReadLEB128<uint32_t>(&data);
     file_name.modified_time = ReadLEB128<uint64_t>(&data);
     file_name.file_size = ReadLEB128<uint64_t>(&data);
+    if (file_name.directory_index > include_directories_.size()) {
+      THROW("directory index out of range");
+    }
     filenames_.push_back(file_name);
   }
 
@@ -1603,6 +1605,9 @@ bool LineInfoReader::ReadLineInfo() {
               file_name.directory_index = ReadLEB128<uint32_t>(&data);
               file_name.modified_time = ReadLEB128<uint64_t>(&data);
               file_name.file_size = ReadLEB128<uint64_t>(&data);
+              if (file_name.directory_index > include_directories_.size()) {
+                THROW("directory index out of range");
+              }
               filenames_.push_back(file_name);
               break;
             }
