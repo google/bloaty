@@ -1392,9 +1392,9 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
 // Represents a program execution and associated state.
 
 struct ConfiguredDataSource {
-  ConfiguredDataSource(const DataSourceDefinition& definition)
-      : source(definition.number), munger(new NameMunger()) {}
-  DataSource source;
+  ConfiguredDataSource(const DataSourceDefinition& definition_)
+      : definition(definition_), munger(new NameMunger()) {}
+  const DataSourceDefinition& definition;
   std::unique_ptr<NameMunger> munger;
 };
 
@@ -1581,12 +1581,11 @@ void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
 
-  for (size_t i = 0; i < sources_.size(); i++) {
-    auto& source = sources_[i];
+  for (auto& source : sources_) {
     auto map = new MemoryMap(std::move(source.munger));
     maps.PushAndOwnMap(map);
     sinks.push_back(std::unique_ptr<RangeSink>(
-        new RangeSink(&file, source.source, maps.base_map(), map)));
+        new RangeSink(&file, source.definition.number, maps.base_map(), map)));
     sink_ptrs.push_back(sinks.back().get());
   }
 
@@ -1604,6 +1603,10 @@ void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
 void Bloaty::ScanAndRollup(RollupOutput* output) {
   if (input_files_.empty()) {
     THROW("no filename specified");
+  }
+
+  for (auto& source : sources_) {
+    output->AddDataSourceName(source.definition.name);
   }
 
   Rollup rollup;
@@ -1689,7 +1692,6 @@ static void BloatyDoMain(int argc, char* argv[],
       Split(argv[++i], ',', &names);
       for (const auto& name : names) {
         bloaty.AddDataSource(name);
-        output->AddDataSourceName(name);
       }
     } else if (strcmp(argv[i], "-r") == 0) {
       CheckNextArg(i, argc, "-r");
