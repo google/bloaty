@@ -17,20 +17,27 @@ This is not an official Google product.
 
 ## Building Bloaty
 
+Bloaty uses CMake to build.  All dependencies are included as Git submodules.
 To build, simply run:
 
 ```
-$ make
+$ cmake .
+$ make -j6
 ```
 
-Bloaty depends on RE2, so the Makefile will download it
-(via a Git submodule) and build that also.
-
-To run the tests (requires that `cmake` is installed and
-available on your path) run:
+To run tests, type:
 
 ```
 $ make test
+```
+
+All the normal CMake features are available, like out-of-source builds:
+
+```
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make -j6
 ```
 
 ## Running Bloaty
