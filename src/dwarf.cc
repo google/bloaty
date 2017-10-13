@@ -119,23 +119,26 @@ void SkipNullTerminated(string_view* data) {
 
 // Parses the LEB128 format defined by DWARF (both signed and unsigned
 // versions).
+//
+// Bloaty doesn't actually use any LEB128's for signed values at the moment.
+// So while this attempts to implement the DWARF spec correctly with respect
+// to signed values, this isn't actually tested/exercised right now.
 
-template <class T>
-typename std::enable_if<std::is_unsigned<T>::value, T>::type ReadLEB128(
-    string_view* data) {
+uint64_t ReadLEB128Internal(bool is_signed, string_view* data) {
   uint64_t ret = 0;
   int shift = 0;
   int maxshift = 70;
   const char* ptr = data->data();
   const char* limit = ptr + data->size();
 
-  for (; ptr < limit && shift < maxshift; shift += 7) {
+  while (ptr < limit && shift < maxshift) {
     char byte = *(ptr++);
     ret |= static_cast<uint64_t>(byte & 0x7f) << shift;
+    shift += 7;
     if ((byte & 0x80) == 0) {
       data->remove_prefix(ptr - data->data());
-      if (ret > std::numeric_limits<T>::max()) {
-        THROW("DWARF data contained larger LEB128 than we were expecting");
+      if (is_signed && (byte & 0x40)) {
+        ret |= -(1LL << shift);
       }
       return ret;
     }
@@ -144,33 +147,16 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type ReadLEB128(
   THROW("corrupt DWARF data, unterminated LEB128");
 }
 
-template <class T>
-typename std::enable_if<std::is_signed<T>::value, T>::type ReadLEB128(
-    string_view* data) {
-  int64_t ret = 0;
-  int shift = 0;
-  int maxshift = 70;
-  const char* ptr = data->data();
-  const char* limit = ptr + data->size();
-
-  while (ptr < limit && shift < maxshift) {
-    char byte = *(ptr++);
-    ret |= (byte & 0x7f) << shift;
-    shift += 7;
-    if ((byte & 0x80) == 0) {
-      data->remove_prefix(ptr - data->data());
-      if (byte & 0x40) {
-        ret |= -(1 << shift);
-      }
-      if (ret > std::numeric_limits<T>::max() ||
-          ret < std::numeric_limits<T>::min()) {
-        THROW("DWARF data contained larger LEB128 than we were expecting");
-      }
-      return ret;
-    }
+template <typename T>
+T ReadLEB128(string_view* data) {
+  typedef typename std::conditional<std::is_signed<T>::value, int64_t,
+                                    uint64_t>::type Int64Type;
+  Int64Type val = ReadLEB128Internal(std::is_signed<T>::value, data);
+  if (val > std::numeric_limits<T>::max() ||
+      val < std::numeric_limits<T>::min()) {
+    THROW("DWARF data contained larger LEB128 than we were expecting");
   }
-
-  THROW("corrupt DWARF data, unterminated LEB128");
+  return static_cast<T>(val);
 }
 
 void SkipLEB128(string_view* data) {
