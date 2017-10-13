@@ -138,7 +138,7 @@ uint64_t ReadLEB128Internal(bool is_signed, string_view* data) {
     if ((byte & 0x80) == 0) {
       data->remove_prefix(ptr - data->data());
       if (is_signed && (byte & 0x40)) {
-        ret |= -(1LL << shift);
+        ret |= -(1ULL << shift);
       }
       return ret;
     }
