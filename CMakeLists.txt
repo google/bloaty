@@ -11,6 +11,12 @@ if(NOT CMAKE_BUILD_TYPE)
       FORCE)
 endif()
 
+# Check out Git submodules.
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
+  execute_process (COMMAND git submodule update --init --recursive
+                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
 set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
 add_subdirectory(third_party/re2)
 include_directories(third_party/re2)
@@ -22,12 +28,6 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
-
-# Check out Git submodules.
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
-  execute_process (COMMAND git submodule update --init --recursive
-                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-endif()
 
 # When using Ninja, compiler output won't be colorized without this.
 include(CheckCXXCompilerFlag)
