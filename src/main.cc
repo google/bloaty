@@ -13,18 +13,38 @@
 // limitations under the License.
 
 #include "bloaty.h"
+#include "bloaty.pb.h"
 
 #include <iostream>
 
 int main(int argc, char *argv[]) {
+  bloaty::Options options;
+  bloaty::OutputOptions output_options;
+  std::string error;
+  if (!bloaty::ParseOptions(argc, argv, &options, &output_options, &error)) {
+    if (!error.empty()) {
+      fprintf(stderr, "bloaty: %s\n", error.c_str());
+    }
+    return 1;
+  }
+
   bloaty::RollupOutput output;
   bloaty::MmapInputFileFactory mmap_factory;
-  bool ok = bloaty::BloatyMain(argc, argv, mmap_factory, &output);
-  if (ok) {
-    output.Print(&std::cout);
-    return 0;
-  } else {
-    std::cerr << "bloaty: unspecified error, exiting\n";
+  if (!bloaty::BloatyMain(options, mmap_factory, &output, &error)) {
+    if (!error.empty()) {
+      fprintf(stderr, "bloaty: %s\n", error.c_str());
+    }
     return 1;
+  }
+
+  switch (output_options.output_format) {
+    case bloaty::OutputFormat::kPrettyPrint:
+      output.PrettyPrint(&std::cout);
+      break;
+    case bloaty::OutputFormat::kCSV:
+      output.PrintToCSV(&std::cout);
+      break;
+    default:
+      BLOATY_UNREACHABLE();
   }
 }

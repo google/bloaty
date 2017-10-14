@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "bloaty.h"
+#include "bloaty.pb.h"
 #include "strarr.h"
 
 #include "absl/strings/string_view.h"
@@ -43,8 +44,11 @@ class StringPieceInputFileFactory : public InputFileFactory {
 void RunBloaty(const InputFileFactory& factory,
                const std::string& data_source) {
   bloaty::RollupOutput output;
-  StrArr args({"bloaty", "-d", data_source, "dummy_filename"});
-  bloaty::BloatyMain(args.size(), args.get(), factory, &output);
+  bloaty::Options options;
+  std::string error;
+  options.add_data_source(data_source);
+  options.add_filename("dummy_filename");
+  bloaty::BloatyMain(options, factory, &output, &error);
 }
 
 }  // namespace bloaty

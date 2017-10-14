@@ -35,10 +35,15 @@
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
   class_name(const class_name&) = delete; \
   void operator=(const class_name&) = delete;
+#define BLOATY_UNREACHABLE() do { \
+  assert(false); \
+  __builtin_unreachable(); \
+} while (0)
 
 namespace bloaty {
 
 class MemoryMap;
+class Options;
 
 enum class DataSource {
   kArchiveMembers,
@@ -390,16 +395,6 @@ struct RollupOutput {
   void PrettyPrint(std::ostream* out) const;
   void PrintToCSV(std::ostream* out) const;
 
-  void Print(std::ostream* out) const {
-    if (csv_) {
-      PrintToCSV(out);
-    } else {
-      PrettyPrint(out);
-    }
-  }
-
-  void SetCSV(bool csv) { csv_ = csv; }
-
   void AddDataSourceName(absl::string_view name) {
     source_names_.emplace_back(std::string(name));
   }
@@ -408,7 +403,6 @@ struct RollupOutput {
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
 
-  bool csv_ = false;
   size_t longest_label_;
   std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
@@ -425,8 +419,20 @@ struct RollupOutput {
                       std::ostream* out) const;
 };
 
-bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
-                RollupOutput* output);
+enum class OutputFormat {
+  kPrettyPrint,
+  kCSV,
+};
+
+struct OutputOptions {
+  OutputFormat output_format = OutputFormat::kPrettyPrint;
+  int max_label_len = 80;
+};
+
+bool ParseOptions(int argc, char* argv[], Options* options,
+                  OutputOptions* output_options, std::string* error);
+bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
+                RollupOutput* output, std::string* error);
 
 // Endianness utilities ////////////////////////////////////////////////////////
 

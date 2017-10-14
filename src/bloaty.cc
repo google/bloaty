@@ -45,6 +45,7 @@
 #include <assert.h>
 
 #include "bloaty.h"
+#include "bloaty.pb.h"
 
 using absl::string_view;
 
@@ -67,10 +68,7 @@ namespace bloaty {
 
 size_t max_label_len = 80;
 int verbose_level = 0;
-
-enum class SortBy {
-  kVM, kFile, kBoth
-} sortby = SortBy::kBoth;
+Options::SortBy sortby = Options::SORTBY_BOTH;
 
 struct DataSourceDefinition {
   DataSource number;
@@ -604,13 +602,13 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row,
       [](const RollupRow& row) {
         int64_t val_to_rank;
         switch (sortby) {
-          case SortBy::kVM:
+          case Options::SORTBY_VMSIZE:
             val_to_rank = std::abs(row.vmsize);
             break;
-          case SortBy::kFile:
+          case Options::SORTBY_FILESIZE:
             val_to_rank = std::abs(row.filesize);
             break;
-          case SortBy::kBoth:
+          case Options::SORTBY_BOTH:
             val_to_rank =
                 std::max(std::abs(row.vmsize), std::abs(row.filesize));
             break;
@@ -1670,98 +1668,115 @@ void Split(const std::string& str, char delim, std::vector<std::string>* out) {
   }
 }
 
-static void BloatyDoMain(int argc, char* argv[],
-                         const InputFileFactory& file_factory,
-                         RollupOutput* output) {
-  bloaty::Bloaty bloaty(file_factory);
-
-  RE2 regex_pattern("(\\w+)\\:s/(.*)/(.*)/");
-  bool base_files = false;
+bool ParseOptions(int argc, char* argv[], Options* options,
+                  OutputOptions* output_options, std::string* error) {
+  bool saw_separator = false;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) {
-      if (base_files) {
-        THROWF("'--' option should only be specified once");
+      if (saw_separator) {
+        error->assign("'--' option should only be specified once");
+        return false;
       }
-      base_files = true;
+      saw_separator = true;
     } else if (strcmp(argv[i], "--csv") == 0) {
-      output->SetCSV(true);
+      output_options->output_format = OutputFormat::kCSV;
     } else if (strcmp(argv[i], "-d") == 0) {
       CheckNextArg(i, argc, "-d");
       std::vector<std::string> names;
       Split(argv[++i], ',', &names);
       for (const auto& name : names) {
-        bloaty.AddDataSource(name);
+        options->add_data_source(name);
       }
-    } else if (strcmp(argv[i], "-r") == 0) {
-      CheckNextArg(i, argc, "-r");
-      std::string source_name, regex, substitution;
-      if (!RE2::FullMatch(argv[++i], regex_pattern,
-                          &source_name, &regex, &substitution)) {
-        THROWF(
-            "Bad format for regex, should be: source:s/pattern/replacement/, "
-            "got $0",
-            argv[i]);
-      }
-
-      auto source = bloaty.FindDataSource(source_name);
-      if (!source) {
-        THROWF("data source '$0' not found in previous -d option", source_name);
-      }
-
-      source->munger->AddRegex(regex, substitution);
     } else if (strcmp(argv[i], "-n") == 0) {
       CheckNextArg(i, argc, "-n");
-      bloaty.SetRowLimit(strtod(argv[++i], NULL));
+      options->set_max_rows_per_level(strtod(argv[++i], NULL));
     } else if (strcmp(argv[i], "-s") == 0) {
       CheckNextArg(i, argc, "-s");
       i++;
       if (strcmp(argv[i], "vm") == 0) {
-        sortby = SortBy::kVM;
+        options->set_sort_by(Options::SORTBY_VMSIZE);
       } else if (strcmp(argv[i], "file") == 0) {
-        sortby = SortBy::kFile;
+        options->set_sort_by(Options::SORTBY_FILESIZE);
       } else if (strcmp(argv[i], "both") == 0) {
-        sortby = SortBy::kBoth;
+        options->set_sort_by(Options::SORTBY_BOTH);
       } else {
-        THROWF("unknown value for -s: $0", argv[i]);
+        *error = absl::Substitute("unknown value for -s: $0", argv[i]);
+        return false;
       }
     } else if (strcmp(argv[i], "-v") == 0) {
-      verbose_level = 1;
+      options->set_verbose_level(1);
     } else if (strcmp(argv[i], "-vv") == 0) {
-      verbose_level = 2;
+      options->set_verbose_level(2);
     } else if (strcmp(argv[i], "-vvv") == 0) {
-      verbose_level = 3;
+      options->set_verbose_level(3);
     } else if (strcmp(argv[i], "-w") == 0) {
-      max_label_len = SIZE_MAX;
+      output_options->max_label_len = INT_MAX;
+      // TODO(haberman): move this out of the guts of the aggregation, make it a
+      // post-processing pass so the user can call output.ClampLabelLen(x).
+      max_label_len = INT_MAX;
     } else if (strcmp(argv[i], "--list-sources") == 0) {
-      bloaty.PrintDataSources();
-      return;
+      for (const auto& source : data_sources) {
+        fprintf(stderr, "%s\n", source.name);
+      }
+      return false;
     } else if (strcmp(argv[i], "--help") == 0) {
       fputs(usage, stderr);
-      return;
+      return false;
     } else if (argv[i][0] == '-') {
-      THROWF("Unknown option: $0", argv[i]);
+      error->assign(absl::Substitute("Unknown option: $0", argv[i]));
+      return false;
     } else {
-      bloaty.AddFilename(argv[i], base_files);
+      if (saw_separator) {
+        options->add_base_filename(argv[i]);
+      } else {
+        options->add_filename(argv[i]);
+      }
     }
   }
 
-  if (bloaty.GetSourceCount() == 0) {
+  if (options->data_source_size() == 0) {
     // Default when no sources are specified.
-    bloaty.AddDataSource("sections");
+    options->add_data_source("sections");
   }
+
+  return true;
+}
+
+void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
+                  RollupOutput* output) {
+  bloaty::Bloaty bloaty(file_factory);
+
+  if (options.filename_size() == 0) {
+    THROW("must specify at least one file");
+  }
+
+  for (auto& filename : options.filename()) {
+    bloaty.AddFilename(filename, false);
+  }
+
+  for (auto& base_filename : options.base_filename()) {
+    bloaty.AddFilename(base_filename, true);
+  }
+
+  for (const auto& data_source : options.data_source()) {
+    bloaty.AddDataSource(data_source);
+  }
+
+  sortby = options.sort_by();
+  verbose_level = options.verbose_level();
+  bloaty.SetRowLimit(options.max_rows_per_level());
 
   bloaty.ScanAndRollup(output);
 }
 
-bool BloatyMain(int argc, char* argv[],
-                         const InputFileFactory& file_factory,
-                         RollupOutput* output) {
+bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
+                RollupOutput* output, std::string* error) {
   try {
-    BloatyDoMain(argc, argv, file_factory, output);
+    BloatyDoMain(options, file_factory, output);
     return true;
   } catch (const bloaty::Error& e) {
-    fprintf(stderr, "bloaty: %s\n", e.what());
+    error->assign(e.what());
     return false;
   }
 }

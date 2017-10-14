@@ -1,9 +1,11 @@
 cmake_minimum_required (VERSION 2.6)
 project (Bloaty)
 
+# Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
 option(BLOATY_ENABLE_UBSAN "Enable undefined behavior sanitizer." OFF)
 
+# Set default build type.
 if(NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to 'RelWithDebInfo' as none was specified.")
   set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
@@ -17,13 +19,21 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
+# Add third_party libraries, disabling as much as we can of their builds.
 set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
+set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
+set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
 add_subdirectory(third_party/re2)
-include_directories(third_party/re2)
+add_subdirectory(third_party/protobuf/cmake)
 
+include_directories(third_party/re2)
+include_directories(third_party/protobuf/src)
 include_directories(.)
 include_directories(src)
 include_directories(third_party/abseil-cpp)
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
+
+# Baseline build flags.
 set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
@@ -36,6 +46,7 @@ if(SUPPORTS_COLOR_ALWAYS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
 endif()
 
+# Implement ASAN/UBSAN options
 if(BLOATY_ENABLE_ASAN)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
   set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
@@ -46,8 +57,18 @@ if(BLOATY_ENABLE_UBSAN)
   set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=undefined")
 endif()
 
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
+  DEPENDS protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+  COMMAND protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+      --cpp_out=${CMAKE_CURRENT_BINARY_DIR}/src
+      -I${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 add_library(libbloaty
     src/bloaty.cc
+    ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
     src/dwarf.cc
     src/elf.cc
     src/macho.cc
@@ -65,7 +86,7 @@ add_library(libbloaty
     )
 
 add_executable(bloaty src/main.cc)
-target_link_libraries(bloaty libbloaty re2)
+target_link_libraries(bloaty libbloaty libprotoc re2)
 
 # All of this is to add -pthread, which is required by re2 (not us).
 find_package(Threads REQUIRED)
@@ -92,7 +113,7 @@ if(BUILD_TESTING)
 
   foreach(target ${TEST_TARGETS})
     add_executable(${target} tests/${target}.cc)
-    target_link_libraries(${target} libbloaty re2 gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
+    target_link_libraries(${target} libbloaty libprotoc re2 gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
   endforeach(target)
 
   if($ENV{LIB_FUZZING_ENGINE})
@@ -100,7 +121,7 @@ if(BUILD_TESTING)
   else()
     add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
   endif()
-  target_link_libraries(fuzz_test libbloaty re2 "${CMAKE_THREAD_LIBS_INIT}")
+  target_link_libraries(fuzz_test libbloaty libprotoc re2 "${CMAKE_THREAD_LIBS_INIT}")
 
   file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
 
