@@ -38,4 +38,5 @@ int main(int argc, char *argv[]) {
   }
 
   output.Print(output_options, &std::cout);
+  return 0;
 }

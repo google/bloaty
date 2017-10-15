@@ -27,6 +27,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <assert.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
@@ -38,11 +39,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/substitute.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/text_format.h"
 #include "re2/re2.h"
-#include <assert.h>
 
 #include "bloaty.h"
 #include "bloaty.pb.h"
@@ -1651,6 +1653,7 @@ USAGE: bloaty [options] file... [-- base_file...]
 Options:
 
   --csv            Output in CSV format instead of human-readable.
+  -c <file>        Load configuration from <file>.
   -d <sources>     Comma-separated list of sources to scan.
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
@@ -1694,6 +1697,17 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
       saw_separator = true;
     } else if (strcmp(argv[i], "--csv") == 0) {
       output_options->output_format = OutputFormat::kCSV;
+    } else if (strcmp(argv[i], "-c") == 0) {
+      CheckNextArg(i, argc, "-c");
+      std::string filename(argv[++i]);
+      std::ifstream input_file(filename, std::ios::in);
+      if (!input_file.is_open()) {
+        THROWF("couldn't open file $0", filename);
+      }
+      google::protobuf::io::IstreamInputStream stream(&input_file);
+      if (!google::protobuf::TextFormat::Merge(&stream, options)) {
+        THROWF("error parsing configuration out of file $0", filename);
+      }
     } else if (strcmp(argv[i], "-d") == 0) {
       CheckNextArg(i, argc, "-d");
       std::vector<std::string> names;
