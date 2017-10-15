@@ -37,14 +37,5 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  switch (output_options.output_format) {
-    case bloaty::OutputFormat::kPrettyPrint:
-      output.PrettyPrint(&std::cout);
-      break;
-    case bloaty::OutputFormat::kCSV:
-      output.PrintToCSV(&std::cout);
-      break;
-    default:
-      BLOATY_UNREACHABLE();
-  }
+  output.Print(output_options, &std::cout);
 }

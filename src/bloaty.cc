@@ -66,9 +66,9 @@ static void Throw(const char *str, int line) {
 
 namespace bloaty {
 
-size_t max_label_len = 80;
-int verbose_level = 0;
-Options::SortBy sortby = Options::SORTBY_BOTH;
+// Use thread-local since we would have to plumb it through so many call-stacks
+// otherwise.
+thread_local int verbose_level = 0;
 
 struct DataSourceDefinition {
   DataSource number;
@@ -458,18 +458,18 @@ class Rollup {
   }
 
   // Prints a graphical representation of the rollup.
-  void ComputeWithBase(int row_limit, RollupOutput* row) const {
-    ComputeWithBase(nullptr, row_limit, row);
+  void CreateRollupOutput(const Options& options, RollupOutput* row) const {
+    CreateDiffModeRollupOutput(nullptr, options, row);
   }
 
-  void ComputeWithBase(Rollup* base, int row_limit, RollupOutput* output) const {
+  void CreateDiffModeRollupOutput(Rollup* base, const Options& options,
+                                  RollupOutput* output) const {
     RollupRow* row = &output->toplevel_row_;
     row->vmsize = vm_total_;
     row->filesize = file_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
-    output->longest_label_ = 0;
-    CreateRows(0, row, &output->longest_label_, base, row_limit, true);
+    CreateRows(row, base, options, true);
   }
 
   // Subtract the values in "other" from this.
@@ -527,16 +527,15 @@ class Rollup {
     return static_cast<double>(part) / static_cast<double>(whole) * 100;
   }
 
-  void CreateRows(size_t indent, RollupRow* row, size_t* longest_label,
-                  const Rollup* base, int row_limit, bool is_toplevel) const;
-  void ComputeRows(size_t indent, RollupRow* row,
-                   std::vector<RollupRow>* children, size_t* longest_label,
-                   const Rollup* base, int row_limit, bool is_toplevel) const;
+  void CreateRows(RollupRow* row, const Rollup* base, const Options& options,
+                  bool is_toplevel) const;
+  void ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
+                   const Rollup* base, const Options& options,
+                   bool is_toplevel) const;
 };
 
-void Rollup::CreateRows(size_t indent, RollupRow* row, size_t* longest_label,
-                        const Rollup* base, int row_limit,
-                        bool is_toplevel) const {
+void Rollup::CreateRows(RollupRow* row, const Rollup* base,
+                        const Options& options, bool is_toplevel) const {
   if (base) {
     row->vmpercent = Percent(vm_total_, base->vm_total_);
     row->filepercent = Percent(file_total_, base->file_total_);
@@ -564,20 +563,16 @@ void Rollup::CreateRows(size_t indent, RollupRow* row, size_t* longest_label,
     }
   }
 
-  ComputeRows(indent, row, &row->sorted_children, longest_label, base,
-              row_limit, is_toplevel);
-  ComputeRows(indent, row, &row->shrinking, longest_label, base, row_limit,
-              is_toplevel);
-  ComputeRows(indent, row, &row->mixed, longest_label, base, row_limit,
-              is_toplevel);
+  ComputeRows(row, &row->sorted_children, base, options, is_toplevel);
+  ComputeRows(row, &row->shrinking, base, options, is_toplevel);
+  ComputeRows(row, &row->mixed, base, options, is_toplevel);
 }
 
 Rollup* Rollup::empty_;
 
-void Rollup::ComputeRows(size_t indent, RollupRow* row,
-                         std::vector<RollupRow>* children,
-                         size_t* longest_label, const Rollup* base,
-                         int row_limit, bool is_toplevel) const {
+void Rollup::ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
+                         const Rollup* base, const Options& options,
+                         bool is_toplevel) const {
   std::vector<RollupRow>& child_rows = *children;
 
   // We don't want to output a solitary "[None]" or "[Unmapped]" row except at
@@ -598,32 +593,30 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row,
   }
 
   // Our overall sorting rank.
-  auto rank =
-      [](const RollupRow& row) {
-        int64_t val_to_rank;
-        switch (sortby) {
-          case Options::SORTBY_VMSIZE:
-            val_to_rank = std::abs(row.vmsize);
-            break;
-          case Options::SORTBY_FILESIZE:
-            val_to_rank = std::abs(row.filesize);
-            break;
-          case Options::SORTBY_BOTH:
-            val_to_rank =
-                std::max(std::abs(row.vmsize), std::abs(row.filesize));
-            break;
-          default:
-            assert(false);
-            val_to_rank = -1;
-            break;
-        }
+  auto rank = [options](const RollupRow& row) {
+    int64_t val_to_rank;
+    switch (options.sort_by()) {
+      case Options::SORTBY_VMSIZE:
+        val_to_rank = std::abs(row.vmsize);
+        break;
+      case Options::SORTBY_FILESIZE:
+        val_to_rank = std::abs(row.filesize);
+        break;
+      case Options::SORTBY_BOTH:
+        val_to_rank = std::max(std::abs(row.vmsize), std::abs(row.filesize));
+        break;
+      default:
+        assert(false);
+        val_to_rank = -1;
+        break;
+    }
 
-        // Reverse so that numerically we always sort high-to-low.
-        int64_t numeric_rank = INT64_MAX - val_to_rank;
+    // Reverse so that numerically we always sort high-to-low.
+    int64_t numeric_rank = INT64_MAX - val_to_rank;
 
-        // Use name to break ties in numeric rank (names sort low-to-high).
-        return std::make_tuple(numeric_rank, row.name);
-      };
+    // Use name to break ties in numeric rank (names sort low-to-high).
+    return std::make_tuple(numeric_rank, row.name);
+  };
 
   // Our sorting rank for the first pass, when we are deciding what to put in
   // [Other].  Certain things we don't want to put in [Other], so we rank them
@@ -644,7 +637,7 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row,
   // Filter out everything but the top 'row_limit'.  Add rows that were filtered
   // out to "others_row".
   size_t i = child_rows.size() - 1;
-  while (i >= row_limit) {
+  while (i >= options.max_rows_per_level()) {
     CheckedAdd(&others_row.vmsize, child_rows[i].vmsize);
     CheckedAdd(&others_row.filesize, child_rows[i].filesize);
     if (base) {
@@ -677,8 +670,6 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row,
   }
 
   // Recurse into sub-rows, (except "Other", which isn't a real row).
-  Demangler demangler;
-  NameStripper stripper;
   for (auto& child_row : child_rows) {
     const Rollup* child_rollup;
     const Rollup* child_base = nullptr;
@@ -706,14 +697,7 @@ void Rollup::ComputeRows(size_t indent, RollupRow* row,
       }
     }
 
-    auto demangled = demangler.Demangle(child_row.name);
-    stripper.StripName(demangled);
-    size_t allowed_label_len =
-        std::min(stripper.stripped().size(), max_label_len);
-    child_row.name = stripper.stripped();
-    *longest_label = std::max(*longest_label, allowed_label_len + indent);
-    child_rollup->CreateRows(indent + 4, &child_row, longest_label, child_base,
-                             row_limit, false);
+    child_rollup->CreateRows(&child_row, child_base, options, false);
   }
 }
 
@@ -821,19 +805,21 @@ std::string PercentString(double percent, bool diff_mode) {
 }
 
 void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
+                                  size_t longest_label,
                                   std::ostream* out) const {
   *out << FixedWidthString("", indent) << " "
        << PercentString(row.vmpercent, row.diff_mode) << " "
        << SiPrint(row.vmsize, row.diff_mode) << " "
-       << FixedWidthString(row.name, longest_label_) << " "
+       << FixedWidthString(row.name, longest_label) << " "
        << SiPrint(row.filesize, row.diff_mode) << " "
        << PercentString(row.filepercent, row.diff_mode) << "\n";
 }
 
 void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
+                                   size_t longest_label,
                                    std::ostream* out) const {
   // Rows are printed before their sub-rows.
-  PrettyPrintRow(row, indent, out);
+  PrettyPrintRow(row, indent, longest_label, out);
 
   // For now we don't print "confounding" sub-entries.  For example, if we're
   // doing a two-level analysis "-d section,symbol", and a section is growing
@@ -844,65 +830,99 @@ void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
 
   if (row.vmsize > 0 || row.filesize > 0) {
     for (const auto& child : row.sorted_children) {
-      PrettyPrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
 
   if (row.vmsize < 0 || row.filesize < 0) {
     for (const auto& child : row.shrinking) {
-      PrettyPrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
 
   if ((row.vmsize < 0) != (row.filesize < 0)) {
     for (const auto& child : row.mixed) {
-      PrettyPrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
 }
 
-void RollupOutput::PrettyPrint(std::ostream* out) const {
+size_t RollupOutput::CalculateLongestLabel(const RollupRow& row,
+                                           int indent) const {
+  size_t ret = indent + row.name.size();
+
+  for (const auto& child : row.sorted_children) {
+    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+  }
+
+  for (const auto& child : row.shrinking) {
+    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+  }
+
+  for (const auto& child : row.mixed) {
+    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+  }
+
+  return ret;
+}
+
+void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
+  size_t longest_label = toplevel_row_.name.size();
+  for (const auto& child : toplevel_row_.sorted_children) {
+    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  }
+
+  for (const auto& child : toplevel_row_.shrinking) {
+    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  }
+
+  for (const auto& child : toplevel_row_.mixed) {
+    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  }
+
+  longest_label = std::min(longest_label, max_label_len);
+
   *out << "     VM SIZE    ";
-  PrintSpaces(longest_label_, out);
+  PrintSpaces(longest_label, out);
   *out << "    FILE SIZE";
   *out << "\n";
 
   if (toplevel_row_.diff_mode) {
     *out << " ++++++++++++++ ";
-    *out << FixedWidthString("GROWING", longest_label_);
+    *out << FixedWidthString("GROWING", longest_label);
     *out << " ++++++++++++++";
     *out << "\n";
   } else {
     *out << " -------------- ";
-    PrintSpaces(longest_label_, out);
+    PrintSpaces(longest_label, out);
     *out << " --------------";
     *out << "\n";
   }
 
   for (const auto& child : toplevel_row_.sorted_children) {
-    PrettyPrintTree(child, 0, out);
+    PrettyPrintTree(child, 0, longest_label, out);
   }
 
   if (toplevel_row_.diff_mode) {
     if (toplevel_row_.shrinking.size() > 0) {
       *out << "\n";
       *out << " -------------- ";
-      *out << FixedWidthString("SHRINKING", longest_label_);
+      *out << FixedWidthString("SHRINKING", longest_label);
       *out << " --------------";
       *out << "\n";
       for (const auto& child : toplevel_row_.shrinking) {
-        PrettyPrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, longest_label, out);
       }
     }
 
     if (toplevel_row_.mixed.size() > 0) {
       *out << "\n";
       *out << " -+-+-+-+-+-+-+ ";
-      *out << FixedWidthString("MIXED", longest_label_);
+      *out << FixedWidthString("MIXED", longest_label);
       *out << " +-+-+-+-+-+-+-";
       *out << "\n";
       for (const auto& child : toplevel_row_.mixed) {
-        PrettyPrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, longest_label, out);
       }
     }
 
@@ -911,7 +931,7 @@ void RollupOutput::PrettyPrint(std::ostream* out) const {
   }
 
   // The "TOTAL" row comes after all other rows.
-  PrettyPrintRow(toplevel_row_, 0, out);
+  PrettyPrintRow(toplevel_row_, 0, longest_label, out);
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
@@ -1408,15 +1428,13 @@ class Bloaty {
   }
 
   void AddDataSource(const std::string& name);
-  void ScanAndRollup(RollupOutput* output);
+  void ScanAndRollup(const Options& options, RollupOutput* output);
   void PrintDataSources() const {
     for (const auto& source : all_known_sources_) {
       const auto& definition = source.second;
       fprintf(stderr, "%s\n", definition.name);
     }
   }
-
-  void SetRowLimit(int n) { row_limit_ = (n == 0) ? INT_MAX : n; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
@@ -1437,12 +1455,11 @@ class Bloaty {
   std::map<std::string, ConfiguredDataSource*> sources_by_name_;
   std::vector<std::unique_ptr<InputFile>> input_files_;
   std::vector<std::unique_ptr<InputFile>> base_files_;
-  int row_limit_;
   int filename_position_;
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory)
-    : file_factory_(factory), row_limit_(20), filename_position_(-1) {
+    : file_factory_(factory), filename_position_(-1) {
   MakeAllSourcesMap(data_sources);
 }
 
@@ -1598,7 +1615,7 @@ void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
   }
 }
 
-void Bloaty::ScanAndRollup(RollupOutput* output) {
+void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   if (input_files_.empty()) {
     THROW("no filename specified");
   }
@@ -1621,9 +1638,9 @@ void Bloaty::ScanAndRollup(RollupOutput* output) {
     }
 
     rollup.Subtract(base);
-    rollup.ComputeWithBase(&base, row_limit_, output);
+    rollup.CreateDiffModeRollupOutput(&base, options, output);
   } else {
-    rollup.ComputeWithBase(nullptr, row_limit_, output);
+    rollup.CreateRollupOutput(options, output);
   }
 }
 
@@ -1638,9 +1655,6 @@ Options:
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
                    Defaults to 20.
-  -r <regex>       Add regex to the list of regexes.
-                   Format for regex is:
-                     SOURCE:s/PATTERN/REPLACEMENT/
   -s <sortby>      Whether to sort by VM or File size.  Possible values
                    are:
                      -s vm
@@ -1712,9 +1726,6 @@ bool ParseOptions(int argc, char* argv[], Options* options,
       options->set_verbose_level(3);
     } else if (strcmp(argv[i], "-w") == 0) {
       output_options->max_label_len = INT_MAX;
-      // TODO(haberman): move this out of the guts of the aggregation, make it a
-      // post-processing pass so the user can call output.ClampLabelLen(x).
-      max_label_len = INT_MAX;
     } else if (strcmp(argv[i], "--list-sources") == 0) {
       for (const auto& source : data_sources) {
         fprintf(stderr, "%s\n", source.name);
@@ -1751,6 +1762,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
     THROW("must specify at least one file");
   }
 
+  if (options.max_rows_per_level() < 1) {
+    THROW("max_rows_per_level must be at least 1");
+  }
+
   for (auto& filename : options.filename()) {
     bloaty.AddFilename(filename, false);
   }
@@ -1763,11 +1778,9 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
     bloaty.AddDataSource(data_source);
   }
 
-  sortby = options.sort_by();
   verbose_level = options.verbose_level();
-  bloaty.SetRowLimit(options.max_rows_per_level());
 
-  bloaty.ScanAndRollup(output);
+  bloaty.ScanAndRollup(options, output);
 }
 
 bool BloatyMain(const Options& options, const InputFileFactory& file_factory,

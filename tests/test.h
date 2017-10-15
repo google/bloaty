@@ -111,7 +111,7 @@ class BloatyTest : public ::testing::Test {
     bloaty::MmapInputFileFactory factory;
     if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
       CheckConsistency();
-      output_->PrettyPrint(&std::cerr);
+      output_->Print(output_options, &std::cerr);
       return true;
     } else {
       std::cerr << "Bloaty returned error:" << error << "\n";

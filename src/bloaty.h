@@ -388,37 +388,6 @@ struct RollupRow {
   bool diff_mode = false;
 };
 
-struct RollupOutput {
- public:
-  RollupOutput() : toplevel_row_("TOTAL") {}
-  const RollupRow& toplevel_row() { return toplevel_row_; }
-  void PrettyPrint(std::ostream* out) const;
-  void PrintToCSV(std::ostream* out) const;
-
-  void AddDataSourceName(absl::string_view name) {
-    source_names_.emplace_back(std::string(name));
-  }
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
-  friend class Rollup;
-
-  size_t longest_label_;
-  std::vector<std::string> source_names_;
-  RollupRow toplevel_row_;
-
-  void PrettyPrintRow(const RollupRow& row, size_t indent,
-                      std::ostream* out) const;
-  void PrettyPrintTree(const RollupRow& row, size_t indent,
-                       std::ostream* out) const;
-  void PrintRowToCSV(const RollupRow& row,
-                     absl::string_view parent_labels,
-                     std::ostream* out) const;
-  void PrintTreeToCSV(const RollupRow& row,
-                      absl::string_view parent_labels,
-                      std::ostream* out) const;
-};
-
 enum class OutputFormat {
   kPrettyPrint,
   kCSV,
@@ -427,6 +396,48 @@ enum class OutputFormat {
 struct OutputOptions {
   OutputFormat output_format = OutputFormat::kPrettyPrint;
   int max_label_len = 80;
+};
+
+struct RollupOutput {
+ public:
+  RollupOutput() : toplevel_row_("TOTAL") {}
+  const RollupRow& toplevel_row() { return toplevel_row_; }
+
+  void AddDataSourceName(absl::string_view name) {
+    source_names_.emplace_back(std::string(name));
+  }
+
+  void Print(const OutputOptions& options, std::ostream* out) {
+    switch (options.output_format) {
+      case bloaty::OutputFormat::kPrettyPrint:
+        PrettyPrint(options.max_label_len, out);
+        break;
+      case bloaty::OutputFormat::kCSV:
+        PrintToCSV(out);
+        break;
+      default:
+        BLOATY_UNREACHABLE();
+    }
+  }
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
+  friend class Rollup;
+
+  std::vector<std::string> source_names_;
+  RollupRow toplevel_row_;
+
+  void PrettyPrint(size_t max_label_len, std::ostream* out) const;
+  void PrintToCSV(std::ostream* out) const;
+  size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
+  void PrettyPrintRow(const RollupRow& row, size_t indent, size_t longest_row,
+                      std::ostream* out) const;
+  void PrettyPrintTree(const RollupRow& row, size_t indent, size_t longest_row,
+                       std::ostream* out) const;
+  void PrintRowToCSV(const RollupRow& row, absl::string_view parent_labels,
+                     std::ostream* out) const;
+  void PrintTreeToCSV(const RollupRow& row, absl::string_view parent_labels,
+                      std::ostream* out) const;
 };
 
 bool ParseOptions(int argc, char* argv[], Options* options,

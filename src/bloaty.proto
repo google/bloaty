@@ -33,7 +33,7 @@ message Options {
 
   // The maximum number of rows to show at each level before collapsing the rest
   // into '[Other]'.
-  optional int32 max_rows_per_level = 4;
+  optional int32 max_rows_per_level = 4 [default = 20];
 
   // What to sort the output by.
   enum SortBy {
