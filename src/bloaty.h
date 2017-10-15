@@ -395,7 +395,7 @@ enum class OutputFormat {
 
 struct OutputOptions {
   OutputFormat output_format = OutputFormat::kPrettyPrint;
-  int max_label_len = 80;
+  size_t max_label_len = 80;
 };
 
 struct RollupOutput {

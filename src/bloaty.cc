@@ -1682,15 +1682,14 @@ void Split(const std::string& str, char delim, std::vector<std::string>* out) {
   }
 }
 
-bool ParseOptions(int argc, char* argv[], Options* options,
-                  OutputOptions* output_options, std::string* error) {
+bool DoParseOptions(int argc, char* argv[], Options* options,
+                    OutputOptions* output_options) {
   bool saw_separator = false;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--") == 0) {
       if (saw_separator) {
-        error->assign("'--' option should only be specified once");
-        return false;
+        THROW("'--' option should only be specified once");
       }
       saw_separator = true;
     } else if (strcmp(argv[i], "--csv") == 0) {
@@ -1715,8 +1714,7 @@ bool ParseOptions(int argc, char* argv[], Options* options,
       } else if (strcmp(argv[i], "both") == 0) {
         options->set_sort_by(Options::SORTBY_BOTH);
       } else {
-        *error = absl::Substitute("unknown value for -s: $0", argv[i]);
-        return false;
+        THROWF("unknown value for -s: $0", argv[i]);
       }
     } else if (strcmp(argv[i], "-v") == 0) {
       options->set_verbose_level(1);
@@ -1725,7 +1723,7 @@ bool ParseOptions(int argc, char* argv[], Options* options,
     } else if (strcmp(argv[i], "-vvv") == 0) {
       options->set_verbose_level(3);
     } else if (strcmp(argv[i], "-w") == 0) {
-      output_options->max_label_len = INT_MAX;
+      output_options->max_label_len = SIZE_MAX;
     } else if (strcmp(argv[i], "--list-sources") == 0) {
       for (const auto& source : data_sources) {
         fprintf(stderr, "%s\n", source.name);
@@ -1735,8 +1733,7 @@ bool ParseOptions(int argc, char* argv[], Options* options,
       fputs(usage, stderr);
       return false;
     } else if (argv[i][0] == '-') {
-      error->assign(absl::Substitute("Unknown option: $0", argv[i]));
-      return false;
+      THROWF("Unknown option: $0", argv[i]);
     } else {
       if (saw_separator) {
         options->add_base_filename(argv[i]);
@@ -1752,6 +1749,16 @@ bool ParseOptions(int argc, char* argv[], Options* options,
   }
 
   return true;
+}
+
+bool ParseOptions(int argc, char* argv[], Options* options,
+                  OutputOptions* output_options, std::string* error) {
+  try {
+    return DoParseOptions(argc, argv, options, output_options);
+  } catch (const bloaty::Error& e) {
+    error->assign(e.what());
+    return false;
+  }
 }
 
 void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
