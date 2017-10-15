@@ -68,9 +68,10 @@ static void Throw(const char *str, int line) {
 
 namespace bloaty {
 
-// Use thread-local since we would have to plumb it through so many call-stacks
-// otherwise.
-thread_local int verbose_level = 0;
+// Use a global since we would have to plumb it through so many call-stacks
+// otherwise.  We would make this thread_local but that's not supported on OS X
+// right now.
+int verbose_level = 0;
 
 struct DataSourceDefinition {
   DataSource number;
