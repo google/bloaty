@@ -47,6 +47,7 @@ class Options;
 
 enum class DataSource {
   kArchiveMembers,
+  kCppSymbols,
   kCompileUnits,
   kInlines,
   kSections,
@@ -209,6 +210,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 
+
 // LineReader //////////////////////////////////////////////////////////////////
 
 // Provides range-based for to iterate over lines in a pipe.
@@ -264,6 +266,32 @@ class LineIterator {
 };
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
+
+
+// Demangler ///////////////////////////////////////////////////////////////////
+
+// Demangles C++ symbols.
+//
+// There is no library we can (easily) link against for this, we have to shell
+// out to the "c++filt" program
+//
+// We can't use LineReader or popen() because we need to both read and write to
+// the subprocess.  So we need to roll our own.
+
+class Demangler {
+ public:
+  Demangler();
+  ~Demangler();
+
+  std::string Demangle(const std::string& symbol);
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
+
+  FILE* write_file_;
+  std::unique_ptr<LineReader> reader_;
+  pid_t child_pid_;
+};
 
 
 // RangeMap ////////////////////////////////////////////////////////////////////

@@ -79,17 +79,18 @@ struct DataSourceDefinition {
 };
 
 constexpr DataSourceDefinition data_sources[] = {
-  {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
-  {DataSource::kCompileUnits, "compileunits",
-   "source file for the .o file (translation unit). requires debug info."},
-  // Not a real data source, so we give it a junk DataSource::kInlines value
-  {DataSource::kInlines, "inputfiles",
-   "the filename specified on the Bloaty command-line"},
-  {DataSource::kInlines, "inlines",
-   "source line/file where inlined code came from.  requires debug info."},
-  {DataSource::kSections, "sections", "object file section"},
-  {DataSource::kSegments, "segments", "load commands in the binary"},
-  {DataSource::kSymbols, "symbols", "symbols from symbol table"},
+    {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
+    {DataSource::kCppSymbols, "cppsymbols", "demangled C++ symbols."},
+    {DataSource::kCompileUnits, "compileunits",
+     "source file for the .o file (translation unit). requires debug info."},
+    // Not a real data source, so we give it a junk DataSource::kInlines value
+    {DataSource::kInlines, "inputfiles",
+     "the filename specified on the Bloaty command-line"},
+    {DataSource::kInlines, "inlines",
+     "source line/file where inlined code came from.  requires debug info."},
+    {DataSource::kSections, "sections", "object file section"},
+    {DataSource::kSegments, "segments", "load commands in the binary"},
+    {DataSource::kSymbols, "symbols", "symbols from symbol table"},
 };
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
@@ -283,29 +284,6 @@ class NameStripper {
 
 
 // Demangler ///////////////////////////////////////////////////////////////////
-
-// Demangles C++ symbols.
-//
-// There is no library we can (easily) link against for this, we have to shell
-// out to the "c++filt" program
-//
-// We can't use LineReader or popen() because we need to both read and write to
-// the subprocess.  So we need to roll our own.
-
-class Demangler {
- public:
-  Demangler();
-  ~Demangler();
-
-  std::string Demangle(const std::string& symbol);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
-
-  FILE* write_file_;
-  std::unique_ptr<LineReader> reader_;
-  pid_t child_pid_;
-};
 
 Demangler::Demangler() {
   int toproc_pipe_fd[2];
@@ -1740,7 +1718,8 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
       output_options->max_label_len = SIZE_MAX;
     } else if (strcmp(argv[i], "--list-sources") == 0) {
       for (const auto& source : data_sources) {
-        fprintf(stderr, "%s\n", source.name);
+        fprintf(stderr, "%s %s\n", FixedWidthString(source.name, 15).c_str(),
+                source.description);
       }
       return false;
     } else if (strcmp(argv[i], "--help") == 0) {
