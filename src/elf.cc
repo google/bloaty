@@ -695,8 +695,12 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
             if (sink) {
               std::string namestr(name);
-              if (sink->data_source() == DataSource::kCppSymbols) {
+              if (sink->data_source() == DataSource::kCppSymbols ||
+                  sink->data_source() == DataSource::kCppSymbolsStripped) {
                 namestr = demangler->Demangle(namestr);
+                if (sink->data_source() == DataSource::kCppSymbolsStripped) {
+                  namestr = std::string(StripName(namestr));
+                }
               }
               sink->AddVMRangeAllowAlias(full_addr, sym.st_size, namestr);
             }
@@ -890,6 +894,7 @@ class ElfFileHandler : public FileHandler {
           break;
         case DataSource::kSymbols:
         case DataSource::kCppSymbols:
+        case DataSource::kCppSymbolsStripped:
           ReadELFSymbols(sink->input_file(), sink, nullptr, &demangler_);
           break;
         case DataSource::kArchiveMembers:

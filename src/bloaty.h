@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "re2/re2.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
@@ -48,6 +49,7 @@ class Options;
 enum class DataSource {
   kArchiveMembers,
   kCppSymbols,
+  kCppSymbolsStripped,
   kCompileUnits,
   kInlines,
   kSections,
@@ -266,6 +268,39 @@ class LineIterator {
 };
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
+
+// C++ Symbol names can get really long because they include all the parameter
+// types.  For example:
+//
+// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
+//
+// This parameter info is often unnecessary.  This class strips it.  This will
+// cause ambiguity in the case of overloaded functions, but the user can
+// disambiguate with "cppsymbols".
+//
+// This transformation is, by its nature, heuristic and inexact.  Improvements
+// welcome.
+inline absl::string_view StripName(absl::string_view name) {
+  absl::ConsumeSuffix(&name, " const");
+
+  if (!name.empty() && name[name.size() - 1] != ')') {
+    // This doesn't look like a function.
+    return name;
+  }
+
+  int nesting = 0;
+  for (size_t n = name.size() - 1; n < name.size(); --n) {
+    if (name[n] == '(') {
+      if (--nesting == 0) {
+        return name.substr(0, n);
+      }
+    } else if (name[n] == ')') {
+      ++nesting;
+    }
+  }
+
+  return name;
+}
 
 
 // Demangler ///////////////////////////////////////////////////////////////////

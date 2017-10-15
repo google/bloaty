@@ -81,6 +81,8 @@ struct DataSourceDefinition {
 constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
     {DataSource::kCppSymbols, "cppsymbols", "demangled C++ symbols."},
+    {DataSource::kCppSymbolsStripped, "cppxsyms",
+     "demangled C++ symbols, stripped to remove function parameters"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
     // Not a real data source, so we give it a junk DataSource::kInlines value
@@ -235,52 +237,6 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 
   return LineReader(pipe, true);
 }
-
-
-// NameStripper ////////////////////////////////////////////////////////////////
-
-// C++ Symbol names can get really long because they include all the parameter
-// types.  For example:
-//
-// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
-//
-// In most cases, we can strip all of the parameter info.  We only need to keep
-// it in the case of overloaded functions.  This class can do the stripping, but
-// the caller needs to verify that the stripped name is still unique within the
-// binary, otherwise the full name should be used.
-
-class NameStripper {
- public:
-  bool StripName(const std::string& name) {
-    if (!name.empty() && name[name.size() - 1] != ')') {
-      // (anonymous namespace)::ctype_w
-      stripped_ = &name;
-      return false;
-    }
-
-    int nesting = 0;
-    for (size_t n = name.size() - 1; n < name.size(); --n) {
-      if (name[n] == '(') {
-        if (--nesting == 0) {
-          storage_ = name.substr(0, n);
-          stripped_ = &storage_;
-          return true;
-        }
-      } else if (name[n] == ')') {
-        ++nesting;
-      }
-    }
-
-    stripped_ = &name;
-    return false;
-  }
-
-  const std::string& stripped() { return *stripped_; }
-
- private:
-  const std::string* stripped_;
-  std::string storage_;
-};
 
 
 // Demangler ///////////////////////////////////////////////////////////////////
