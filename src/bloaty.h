@@ -30,18 +30,26 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "re2/re2.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
   class_name(const class_name&) = delete; \
   void operator=(const class_name&) = delete;
+#define BLOATY_UNREACHABLE() do { \
+  assert(false); \
+  __builtin_unreachable(); \
+} while (0)
 
 namespace bloaty {
 
 class MemoryMap;
+class Options;
 
 enum class DataSource {
   kArchiveMembers,
+  kCppSymbols,
+  kCppSymbolsStripped,
   kCompileUnits,
   kInlines,
   kSections,
@@ -204,6 +212,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 
+
 // LineReader //////////////////////////////////////////////////////////////////
 
 // Provides range-based for to iterate over lines in a pipe.
@@ -259,6 +268,65 @@ class LineIterator {
 };
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
+
+// C++ Symbol names can get really long because they include all the parameter
+// types.  For example:
+//
+// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
+//
+// This parameter info is often unnecessary.  This class strips it.  This will
+// cause ambiguity in the case of overloaded functions, but the user can
+// disambiguate with "cppsymbols".
+//
+// This transformation is, by its nature, heuristic and inexact.  Improvements
+// welcome.
+inline absl::string_view StripName(absl::string_view name) {
+  absl::ConsumeSuffix(&name, " const");
+
+  if (!name.empty() && name[name.size() - 1] != ')') {
+    // This doesn't look like a function.
+    return name;
+  }
+
+  int nesting = 0;
+  for (size_t n = name.size() - 1; n < name.size(); --n) {
+    if (name[n] == '(') {
+      if (--nesting == 0) {
+        return name.substr(0, n);
+      }
+    } else if (name[n] == ')') {
+      ++nesting;
+    }
+  }
+
+  return name;
+}
+
+
+// Demangler ///////////////////////////////////////////////////////////////////
+
+// Demangles C++ symbols.
+//
+// There is no library we can (easily) link against for this, we have to shell
+// out to the "c++filt" program
+//
+// We can't use LineReader or popen() because we need to both read and write to
+// the subprocess.  So we need to roll our own.
+
+class Demangler {
+ public:
+  Demangler();
+  ~Demangler();
+
+  std::string Demangle(const std::string& symbol);
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
+
+  FILE* write_file_;
+  std::unique_ptr<LineReader> reader_;
+  pid_t child_pid_;
+};
 
 
 // RangeMap ////////////////////////////////////////////////////////////////////
@@ -383,50 +451,62 @@ struct RollupRow {
   bool diff_mode = false;
 };
 
+enum class OutputFormat {
+  kPrettyPrint,
+  kCSV,
+};
+
+struct OutputOptions {
+  OutputFormat output_format = OutputFormat::kPrettyPrint;
+  size_t max_label_len = 80;
+};
+
 struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
   const RollupRow& toplevel_row() { return toplevel_row_; }
-  void PrettyPrint(std::ostream* out) const;
-  void PrintToCSV(std::ostream* out) const;
-
-  void Print(std::ostream* out) const {
-    if (csv_) {
-      PrintToCSV(out);
-    } else {
-      PrettyPrint(out);
-    }
-  }
-
-  void SetCSV(bool csv) { csv_ = csv; }
 
   void AddDataSourceName(absl::string_view name) {
     source_names_.emplace_back(std::string(name));
+  }
+
+  void Print(const OutputOptions& options, std::ostream* out) {
+    switch (options.output_format) {
+      case bloaty::OutputFormat::kPrettyPrint:
+        PrettyPrint(options.max_label_len, out);
+        break;
+      case bloaty::OutputFormat::kCSV:
+        PrintToCSV(out);
+        break;
+      default:
+        BLOATY_UNREACHABLE();
+    }
   }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
 
-  bool csv_ = false;
-  size_t longest_label_;
   std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
 
-  void PrettyPrintRow(const RollupRow& row, size_t indent,
+  void PrettyPrint(size_t max_label_len, std::ostream* out) const;
+  void PrintToCSV(std::ostream* out) const;
+  size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
+  void PrettyPrintRow(const RollupRow& row, size_t indent, size_t longest_row,
                       std::ostream* out) const;
-  void PrettyPrintTree(const RollupRow& row, size_t indent,
+  void PrettyPrintTree(const RollupRow& row, size_t indent, size_t longest_row,
                        std::ostream* out) const;
-  void PrintRowToCSV(const RollupRow& row,
-                     absl::string_view parent_labels,
+  void PrintRowToCSV(const RollupRow& row, absl::string_view parent_labels,
                      std::ostream* out) const;
-  void PrintTreeToCSV(const RollupRow& row,
-                      absl::string_view parent_labels,
+  void PrintTreeToCSV(const RollupRow& row, absl::string_view parent_labels,
                       std::ostream* out) const;
 };
 
-bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
-                RollupOutput* output);
+bool ParseOptions(int argc, char* argv[], Options* options,
+                  OutputOptions* output_options, std::string* error);
+bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
+                RollupOutput* output, std::string* error);
 
 // Endianness utilities ////////////////////////////////////////////////////////
 

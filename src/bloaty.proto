@@ -1,0 +1,76 @@
+// Copyright 2016 Google Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto2";
+
+package bloaty;
+
+message Options {
+  // The files to analyze.  At least one file must be provided.
+  repeated string filename = 1;
+
+  // If non-empty, we are in diff mode and these files should provide the
+  // baseline.
+  repeated string base_filename = 2;
+
+  // The data sources to scan in each file.  At least one data source must be
+  // specified.  If more than one source is specified, the output is
+  // hierarchical.
+  //
+  // These can be built-in data sources or custom data sources.
+  repeated string data_source = 3;
+
+  // The maximum number of rows to show at each level before collapsing the rest
+  // into '[Other]'.
+  optional int32 max_rows_per_level = 4 [default = 20];
+
+  // What to sort the output by.
+  enum SortBy {
+    SORTBY_BOTH = 0;
+    SORTBY_VMSIZE = 1;
+    SORTBY_FILESIZE = 2;
+  }
+  optional SortBy sort_by = 5 [default = SORTBY_BOTH];
+
+  // When greater than zero, Bloaty will print verbose output to stderr.
+  // TODO(haberman): should this be in the output object instead?
+  optional int32 verbose_level = 6;
+
+  // Custom data sources for this analysis.
+  optional CustomDataSource custom_data_sources = 7;
+}
+
+// A custom data source allows users to create their own label space by
+// rewriting a set of existing labels according to a set of regexes.
+message CustomDataSource {
+  // The name of this data source.
+  optional string name = 1;
+
+  // The underlying data source.  We will scan this data source and apply
+  // rewrites to define the new data source.
+  optional string base_data_source = 2;
+
+  // The rewrites that we will apply to the underlying labels to define the new
+  // data source.
+  repeated Regex rewrite = 3;
+}
+
+// For rewriting labels from a data source.  If the regex matches, then the
+// entire string is replaced with the replacement.  Any groups captured from the
+// pattern can be substituted into the replacement with \1, \2, etc. and \0
+// refers to the entire match.
+message Regex {
+  optional string pattern = 1;
+  optional string replacement = 2;
+}

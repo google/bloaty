@@ -651,8 +651,9 @@ static void CheckNotObject(const char* source, RangeSink* sink) {
 }
 
 static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
-                           SymbolTable* table) {
+                           SymbolTable* table, Demangler* demangler) {
   bool is_object = IsObjectFile(file.data());
+
   ForEachElf(
       file, sink,
       [=](const ElfFile& elf, string_view /*filename*/, uint32_t index_base) {
@@ -693,8 +694,15 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
             if (sink) {
-              sink->AddVMRangeAllowAlias(full_addr, sym.st_size,
-                                         std::string(name));
+              std::string namestr(name);
+              if (sink->data_source() == DataSource::kCppSymbols ||
+                  sink->data_source() == DataSource::kCppSymbolsStripped) {
+                namestr = demangler->Demangle(namestr);
+                if (sink->data_source() == DataSource::kCppSymbolsStripped) {
+                  namestr = std::string(StripName(namestr));
+                }
+              }
+              sink->AddVMRangeAllowAlias(full_addr, sym.st_size, namestr);
             }
             if (table) {
               table->insert(
@@ -885,7 +893,9 @@ class ElfFileHandler : public FileHandler {
           DoReadELFSections(sink, kReportBySectionName);
           break;
         case DataSource::kSymbols:
-          ReadELFSymbols(sink->input_file(), sink, nullptr);
+        case DataSource::kCppSymbols:
+        case DataSource::kCppSymbolsStripped:
+          ReadELFSymbols(sink->input_file(), sink, nullptr, &demangler_);
           break;
         case DataSource::kArchiveMembers:
           DoReadELFSections(sink, kReportByFilename);
@@ -894,7 +904,7 @@ class ElfFileHandler : public FileHandler {
           CheckNotObject("compileunits", sink);
           SymbolTable symtab;
           ElfFile elf(sink->input_file().data());
-          ReadELFSymbols(sink->input_file(), nullptr, &symtab);
+          ReadELFSymbols(sink->input_file(), nullptr, &symtab, &demangler_);
           dwarf::File dwarf;
           ReadDWARFSections(elf, &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, sink);
@@ -913,6 +923,9 @@ class ElfFileHandler : public FileHandler {
       }
     }
   }
+
+ private:
+  Demangler demangler_;
 };
 
 std::unique_ptr<FileHandler> TryOpenELFFile(const InputFile& file) {
