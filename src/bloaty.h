@@ -36,10 +36,18 @@
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
   class_name(const class_name&) = delete; \
   void operator=(const class_name&) = delete;
+
 #define BLOATY_UNREACHABLE() do { \
   assert(false); \
   __builtin_unreachable(); \
 } while (0)
+
+#ifdef NDEBUG
+// Prevent "unused variable" warnings.
+#define BLOATY_ASSERT(expr) do {} while (false && (expr))
+#else
+#define BLOATY_ASSERT(expr) assert(expr)
+#endif
 
 namespace bloaty {
 

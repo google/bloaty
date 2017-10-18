@@ -107,7 +107,7 @@ class BloatyTest : public ::testing::Test {
     std::string error;
     bool ok = bloaty::ParseOptions(strings.size(), StrArr(strings).get(),
                                    &options, &output_options, &error);
-    assert(ok);
+    BLOATY_ASSERT(ok);
     bloaty::MmapInputFileFactory factory;
     if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
       CheckConsistency();
