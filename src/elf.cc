@@ -547,23 +547,10 @@ void MaybeAddFileRange(RangeSink* sink, string_view label, string_view range) {
   }
 }
 
+// Iterate over each ELF file, agnostic to whether it is inside a .a (AR) file
+// or not.
 template <class Func>
-void OnElfFile(const ElfFile& elf, string_view filename,
-               unsigned long index_base, RangeSink* sink, Func func) {
-  func(elf, filename, index_base);
-
-  // Add these *after* running the user callback.  That way if there is
-  // overlap, the user's annotations will take precedence.
-  MaybeAddFileRange(sink, "[ELF Headers]", elf.header_region());
-  MaybeAddFileRange(sink, "[ELF Headers]", elf.section_headers());
-  MaybeAddFileRange(sink, "[ELF Headers]", elf.segment_headers());
-
-  // Any sections of the file not covered by any segments/sections/symbols/etc.
-  MaybeAddFileRange(sink, "[Unmapped]", elf.entire_file());
-}
-
-template <class Func>
-bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
+void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
   ArFile ar_file(file.data());
   unsigned long index_base = 0;
 
@@ -579,7 +566,7 @@ bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
         case ArFile::MemberFile::kNormal: {
           ElfFile elf(member.contents);
           if (elf.IsOpen()) {
-            OnElfFile(elf, member.filename, index_base, sink, func);
+            func(elf, member.filename, index_base);
             index_base += elf.section_count();
           } else {
             MaybeAddFileRange(sink, "[AR Non-ELF Member File]",
@@ -598,25 +585,26 @@ bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
   } else {
     ElfFile elf(file.data());
     if (!elf.IsOpen()) {
-      fprintf(stderr, "Not an ELF or Archive file: %s\n",
-              file.filename().c_str());
-      return false;
+      THROWF("Not an ELF or Archive file: $0", file.filename());
     }
 
-    OnElfFile(elf, file.filename(), index_base, sink, func);
+    func(elf, file.filename(), index_base);
   }
-
-  return true;
 }
 
+static void AddCatchAll(RangeSink* sink) {
+  ForEachElf(sink->input_file(), sink,
+             [=](const ElfFile& elf, string_view /*filename*/,
+                 uint32_t /*index_base*/) {
+               MaybeAddFileRange(sink, "[ELF Headers]", elf.header_region());
+               MaybeAddFileRange(sink, "[ELF Headers]", elf.section_headers());
+               MaybeAddFileRange(sink, "[ELF Headers]", elf.segment_headers());
 
-// There are several programs that offer useful information about
-// binaries:
-//
-// - objdump: display object file headers and contents (including disassembly)
-// - readelf: more ELF-specific objdump (no disassembly though)
-// - nm: display symbols
-// - size: display binary size
+               // Any sections of the file not covered by any
+               // segments/sections/symbols/etc.
+               MaybeAddFileRange(sink, "[Unmapped]", elf.entire_file());
+             });
+}
 
 // For object files, addresses are relative to the section they live in, which
 // is indicated by ndx.  We split this into:
@@ -650,8 +638,8 @@ static void CheckNotObject(const char* source, RangeSink* sink) {
   }
 }
 
-static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
-                           SymbolTable* table, Demangler* demangler) {
+void ReadELFSymbols(const InputFile& file, RangeSink* sink, SymbolTable* table,
+                    Demangler* demangler) {
   bool is_object = IsObjectFile(file.data());
 
   ForEachElf(
@@ -679,9 +667,12 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
             Elf64_Sym sym;
 
             section.ReadSymbol(i, &sym);
-            int type = ELF64_ST_TYPE(sym.st_info);
 
-            if (type != STT_OBJECT && type != STT_FUNC) {
+            if (ELF64_ST_TYPE(sym.st_info) == STT_SECTION) {
+              continue;
+            }
+
+            if (sym.st_shndx == STN_UNDEF) {
               continue;
             }
 
@@ -719,9 +710,9 @@ enum ReportSectionsBy {
   kReportByFilename,
 };
 
-static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) {
+static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) {
   bool is_object = IsObjectFile(sink->input_file().data());
-  return ForEachElf(
+  ForEachElf(
       sink->input_file(), sink,
       [=](const ElfFile& elf, string_view filename, uint32_t index_base) {
         if (elf.section_count() == 0) {
@@ -896,6 +887,7 @@ class ElfFileHandler : public FileHandler {
         case DataSource::kCppSymbols:
         case DataSource::kCppSymbolsStripped:
           ReadELFSymbols(sink->input_file(), sink, nullptr, &demangler_);
+          DoReadELFSections(sink, kReportBySectionName);
           break;
         case DataSource::kArchiveMembers:
           DoReadELFSections(sink, kReportByFilename);
@@ -921,7 +913,10 @@ class ElfFileHandler : public FileHandler {
         default:
           THROW("unknown data source");
       }
+      // Add these *after* processing all other data sources.
+      AddCatchAll(sink);
     }
+
   }
 
  private:

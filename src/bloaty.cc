@@ -774,22 +774,16 @@ void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
   // confusing.  If we can find a clear, non-confusing way to present the
   // information we can add it back.
 
-  if (row.vmsize > 0 || row.filesize > 0) {
-    for (const auto& child : row.sorted_children) {
-      PrettyPrintTree(child, indent + 4, longest_label, out);
-    }
+  for (const auto& child : row.sorted_children) {
+    PrettyPrintTree(child, indent + 4, longest_label, out);
   }
 
-  if (row.vmsize < 0 || row.filesize < 0) {
-    for (const auto& child : row.shrinking) {
-      PrettyPrintTree(child, indent + 4, longest_label, out);
-    }
+  for (const auto& child : row.shrinking) {
+    PrettyPrintTree(child, indent + 4, longest_label, out);
   }
 
-  if ((row.vmsize < 0) != (row.filesize < 0)) {
-    for (const auto& child : row.mixed) {
-      PrettyPrintTree(child, indent + 4, longest_label, out);
-    }
+  for (const auto& child : row.mixed) {
+    PrettyPrintTree(child, indent + 4, longest_label, out);
   }
 }
 
@@ -1014,7 +1008,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
   while (1) {
     while (it != mappings_.end() && EntryContains(it, addr)) {
       if (verbose_level > 1) {
-        fprintf(stderr,
+        fprintf(stdout,
                 "WARN: adding mapping [%" PRIx64 "x, %" PRIx64 "x] for label"
                 "%s, this conflicts with existing mapping [%" PRIx64 ", %"
                 PRIx64 "] for label %s\n",
@@ -1033,7 +1027,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
     if (it != mappings_.end() && end > it->first) {
       this_end = std::min(end, it->first);
       if (verbose_level > 1) {
-        fprintf(stderr,
+        fprintf(stdout,
                 "WARN(2): adding mapping [%" PRIx64 ", %" PRIx64 "] for label "
                 "%s, this conflicts with existing mapping [%" PRIx64 ", %"
                 PRIx64 "] for label %s\n",
@@ -1075,7 +1069,7 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
     if (translator.TranslateAndTrimRangeWithEntry(it, addr, end, &this_addr,
                                                   &this_size)) {
       if (verbose_level > 2) {
-        fprintf(stderr, "  -> translates to: [%" PRIx64 " %" PRIx64 "]\n",
+        fprintf(stdout, "  -> translates to: [%" PRIx64 " %" PRIx64 "]\n",
                 this_addr, this_size);
       }
       other->AddRange(this_addr, this_size, val);
@@ -1271,7 +1265,7 @@ void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
 void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
                              uint64_t filesize) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+    fprintf(stdout, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             fileoff, filesize);
   }
@@ -1288,7 +1282,7 @@ void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
 void RangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
                            const std::string& name) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+    fprintf(stdout, "[%s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             vmaddr, vmsize);
   }
@@ -1316,7 +1310,7 @@ void RangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
 void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
                          uint64_t fileoff, uint64_t filesize) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
+    fprintf(stdout, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
             ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             vmaddr, vmsize, fileoff, filesize);
