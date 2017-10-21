@@ -51,7 +51,8 @@
 
 namespace bloaty {
 
-class MemoryMap;
+class DualMap;
+class NameMunger;
 class Options;
 
 enum class DataSource {
@@ -122,8 +123,10 @@ class MmapInputFileFactory : public InputFileFactory {
 class RangeSink {
  public:
   RangeSink(const InputFile* file, DataSource data_source,
-            const MemoryMap* translator, MemoryMap* map);
+            const DualMap* translator);
   ~RangeSink();
+
+  void AddOutput(DualMap* map, const NameMunger* munger);
 
   DataSource data_source() const { return data_source_; }
   const InputFile& input_file() const { return *file_; }
@@ -178,8 +181,8 @@ class RangeSink {
 
   const InputFile* file_;
   DataSource data_source_;
-  const MemoryMap* translator_;
-  MemoryMap* map_;
+  const DualMap* translator_;
+  std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
 };
 
 // The main interface that modules should implement to handle a particular file
@@ -341,12 +344,15 @@ class Demangler {
 
 // Maps
 //
-//   [uint64_t, uint64_t) -> std::string
+//   [uint64_t, uint64_t) -> std::string, [optional other range base]
 //
 // where ranges must be non-overlapping.
 //
 // This is used to map the address space (either pointer offsets or file
 // offsets).
+//
+// The other range base allows us to use this RangeMap to translate addresses
+// from this domain to another one (like vm_addr -> file_addr or vice versa).
 //
 // This type is only exposed in the .h file for unit testing purposes.
 
@@ -354,7 +360,9 @@ class RangeMapTest;
 
 class RangeMap {
  public:
-  RangeMap() {}
+  RangeMap() = default;
+  RangeMap(RangeMap&& other) = default;
+  RangeMap& operator=(RangeMap&& other) = default;
 
   // Adds a range to this map.
   void AddRange(uint64_t addr, uint64_t size, const std::string& val);

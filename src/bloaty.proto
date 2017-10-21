@@ -48,7 +48,7 @@ message Options {
   optional int32 verbose_level = 6;
 
   // Custom data sources for this analysis.
-  optional CustomDataSource custom_data_sources = 7;
+  repeated CustomDataSource custom_data_source = 7;
 }
 
 // A custom data source allows users to create their own label space by
@@ -58,7 +58,8 @@ message CustomDataSource {
   optional string name = 1;
 
   // The underlying data source.  We will scan this data source and apply
-  // rewrites to define the new data source.
+  // rewrites to define the new data source.  This must be a built-in data
+  // source, not another custom data source.
   optional string base_data_source = 2;
 
   // The rewrites that we will apply to the underlying labels to define the new

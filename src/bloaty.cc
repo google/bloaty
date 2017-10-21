@@ -39,6 +39,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/substitute.h"
@@ -335,26 +336,29 @@ class NameMunger {
 
   std::string Munge(string_view name) const;
 
+  bool IsEmpty() const { return regexes_.empty(); }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
   std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
 };
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
-  std::unique_ptr<RE2> re2(new RE2(regex));
+  auto re2 = absl::make_unique<RE2>(regex);
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
 std::string NameMunger::Munge(string_view name) const {
-  std::string ret(name);
+  re2::StringPiece piece(name.data(), name.size());
+  std::string ret;
 
   for (const auto& pair : regexes_) {
-    if (RE2::Replace(&ret, *pair.first, pair.second)) {
+    if (RE2::Extract(piece, *pair.first, pair.second, &ret)) {
       return ret;
     }
   }
 
-  return ret;
+  return std::string(name);
 }
 
 
@@ -1171,39 +1175,14 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 }
 
 
-// MemoryMap ///////////////////////////////////////////////////////////////////
+// DualMap /////////////////////////////////////////////////////////////////////
 
-// Contains a RangeMap for VM space and file space.
+// Contains a RangeMap for VM space and file space for a given file.
 
-class MemoryMap {
- public:
-  MemoryMap(std::unique_ptr<NameMunger>&& munger) : munger_(std::move(munger)) {}
-  virtual ~MemoryMap() {}
-
-  bool FindAtAddr(uint64_t vmaddr, std::string* name) const;
-  bool FindContainingAddr(uint64_t vmaddr, uint64_t* start,
-                          std::string* name) const;
-
-  const RangeMap* file_map() const { return &file_map_; }
-  const RangeMap* vm_map() const { return &vm_map_; }
-  RangeMap* file_map() { return &file_map_; }
-  RangeMap* vm_map() { return &vm_map_; }
-
- protected:
-  std::string ApplyNameRegexes(string_view name);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
-  friend class RangeSink;
-
-  RangeMap vm_map_;
-  RangeMap file_map_;
-  std::unique_ptr<NameMunger> munger_;
+struct DualMap {
+  RangeMap vm_map;
+  RangeMap file_map;
 };
-
-std::string MemoryMap::ApplyNameRegexes(string_view name) {
-  return munger_ ? munger_->Munge(name) : std::string(name);
-}
 
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
@@ -1266,22 +1245,23 @@ MmapInputFile::~MmapInputFile() {
 
 std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
     const std::string& filename) const {
-  return std::unique_ptr<MmapInputFile>(new MmapInputFile(filename));
+  return absl::make_unique<MmapInputFile>(filename);
 }
 
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 
 RangeSink::RangeSink(const InputFile* file, DataSource data_source,
-                     const MemoryMap* translator, MemoryMap* map)
+                     const DualMap* translator)
     : file_(file),
       data_source_(data_source),
-      translator_(translator),
-      map_(map) {
-  assert(map_);
-}
+      translator_(translator) {}
 
 RangeSink::~RangeSink() {}
+
+void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
+  outputs_.push_back(std::make_pair(map, munger));
+}
 
 void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
                              uint64_t filesize) {
@@ -1290,10 +1270,13 @@ void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             fileoff, filesize);
   }
-  const std::string label = map_->ApplyNameRegexes(name);
-  if (translator_) {
-    map_->file_map()->AddRangeWithTranslation(
-        fileoff, filesize, label, *translator_->file_map(), map_->vm_map());
+  for (auto& pair : outputs_) {
+    const std::string label = pair.second->Munge(name);
+    if (translator_) {
+      pair.first->file_map.AddRangeWithTranslation(fileoff, filesize, label,
+                                                    translator_->file_map,
+                                                    &pair.first->vm_map);
+    }
   }
 }
 
@@ -1305,9 +1288,11 @@ void RangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
             vmaddr, vmsize);
   }
   assert(translator_);
-  const std::string label = map_->ApplyNameRegexes(name);
-  map_->vm_map()->AddRangeWithTranslation(
-      vmaddr, vmsize, label, *translator_->vm_map(), map_->file_map());
+  for (auto& pair : outputs_) {
+    const std::string label = pair.second->Munge(name);
+    pair.first->vm_map.AddRangeWithTranslation(
+        vmaddr, vmsize, label, translator_->vm_map, &pair.first->file_map);
+  }
 }
 
 void RangeSink::AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
@@ -1331,14 +1316,16 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             vmaddr, vmsize, fileoff, filesize);
   }
-  const std::string label = map_->ApplyNameRegexes(name);
-  uint64_t common = std::min(vmsize, filesize);
+  for (auto& pair : outputs_) {
+    const std::string label = pair.second->Munge(name);
+    uint64_t common = std::min(vmsize, filesize);
 
-  map_->vm_map()->AddDualRange(vmaddr, common, fileoff, label);
-  map_->file_map()->AddDualRange(fileoff, common, vmaddr, label);
+    pair.first->vm_map.AddDualRange(vmaddr, common, fileoff, label);
+    pair.first->file_map.AddDualRange(fileoff, common, vmaddr, label);
 
-  map_->vm_map()->AddRange(vmaddr + common, vmsize - common, label);
-  map_->file_map()->AddRange(fileoff + common, filesize - common, label);
+    pair.first->vm_map.AddRange(vmaddr + common, vmsize - common, label);
+    pair.first->file_map.AddRange(fileoff + common, filesize - common, label);
+  }
 }
 
 
@@ -1349,6 +1336,7 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
 struct ConfiguredDataSource {
   ConfiguredDataSource(const DataSourceDefinition& definition_)
       : definition(definition_), munger(new NameMunger()) {}
+
   const DataSourceDefinition& definition;
   std::unique_ptr<NameMunger> munger;
 };
@@ -1359,37 +1347,40 @@ class Bloaty {
 
   void AddFilename(const std::string& filename, bool base_file);
 
-  ConfiguredDataSource* FindDataSource(const std::string& name) const;
   size_t GetSourceCount() const {
     return sources_.size() + (filename_position_ >= 0 ? 1 : 0);
   }
 
+  void DefineCustomDataSource(const CustomDataSource& source);
+
   void AddDataSource(const std::string& name);
   void ScanAndRollup(const Options& options, RollupOutput* output);
-  void PrintDataSources() const {
-    for (const auto& source : all_known_sources_) {
-      const auto& definition = source.second;
-      fprintf(stderr, "%s\n", definition.name);
-    }
-  }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
 
   template <size_t T>
-  void MakeAllSourcesMap(const DataSourceDefinition (&sources)[T]) {
+  void AddBuiltInSources(const DataSourceDefinition (&sources)[T]) {
     for (size_t i = 0; i < T; i++) {
       auto& source = sources[i];
-      all_known_sources_[source.name] = source;
+      all_known_sources_[source.name] =
+          absl::make_unique<ConfiguredDataSource>(source);
     }
   }
 
   void ScanAndRollupFile(const InputFile& file, Rollup* rollup);
 
   const InputFileFactory& file_factory_;
-  std::map<std::string, DataSourceDefinition> all_known_sources_;
-  std::vector<ConfiguredDataSource> sources_;
-  std::map<std::string, ConfiguredDataSource*> sources_by_name_;
+
+  // All data sources, indexed by name.
+  // Contains both built-in sources and custom sources.
+  std::map<std::string, std::unique_ptr<ConfiguredDataSource>>
+      all_known_sources_;
+
+  // Sources the user has actually selected, in the order selected.
+  // Points to entries in all_known_sources_.
+  std::vector<ConfiguredDataSource*> sources_;
+
   std::vector<std::unique_ptr<InputFile>> input_files_;
   std::vector<std::unique_ptr<InputFile>> base_files_;
   int filename_position_;
@@ -1397,7 +1388,7 @@ class Bloaty {
 
 Bloaty::Bloaty(const InputFileFactory& factory)
     : file_factory_(factory), filename_position_(-1) {
-  MakeAllSourcesMap(data_sources);
+  AddBuiltInSources(data_sources);
 }
 
 void Bloaty::AddFilename(const std::string& filename, bool is_base) {
@@ -1408,6 +1399,25 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
     base_files_.push_back(std::move(file));
   } else {
     input_files_.push_back(std::move(file));
+  }
+}
+
+void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
+  auto iter = all_known_sources_.find(source.base_data_source());
+
+  if (iter == all_known_sources_.end()) {
+    THROWF("custom data source '$0': no such base source '$1'", source.name(),
+           source.base_data_source());
+  } else if (!iter->second->munger->IsEmpty()) {
+    THROWF("custom data source '$0' tries to depend on custom data source '$1'",
+           source.name(), source.base_data_source());
+  }
+
+  all_known_sources_[source.name()] =
+      absl::make_unique<ConfiguredDataSource>(iter->second->definition);
+  NameMunger* munger = all_known_sources_[source.name()]->munger.get();
+  for (const auto& regex : source.rewrite()) {
+    munger->AddRegex(regex.pattern(), regex.replacement());
   }
 }
 
@@ -1422,18 +1432,98 @@ void Bloaty::AddDataSource(const std::string& name) {
     THROWF("no such data source: $0", name);
   }
 
-  sources_.emplace_back(it->second);
-  sources_by_name_[name] = &sources_.back();
+  sources_.emplace_back(it->second.get());
 }
 
-ConfiguredDataSource* Bloaty::FindDataSource(const std::string& name) const {
-  auto it = sources_by_name_.find(name);
-  if (it != sources_by_name_.end()) {
-    return it->second;
-  } else {
-    return NULL;
+// All of the DualMaps for a given file.
+struct DualMaps {
+ public:
+  DualMaps() {
+    // Base map.
+    AppendMap();
   }
-}
+
+  DualMap* AppendMap() {
+    maps_.emplace_back(new DualMap);
+    return maps_.back().get();
+  }
+
+  void ComputeRollup(const std::string& filename, int filename_position,
+                     Rollup* rollup) {
+    RangeMap::ComputeRollup(VmMaps(), filename, filename_position,
+                            [=](const std::vector<std::string>& keys,
+                                uint64_t addr, uint64_t end) {
+                              return rollup->AddSizes(keys, end - addr, true);
+                            });
+    RangeMap::ComputeRollup(FileMaps(), filename, filename_position,
+                            [=](const std::vector<std::string>& keys,
+                                uint64_t addr, uint64_t end) {
+                              return rollup->AddSizes(keys, end - addr,
+                                                      false);
+                            });
+  }
+
+  void PrintMaps(const std::vector<const RangeMap*> maps,
+                 const std::string& filename, int filename_position) {
+    uint64_t last = 0;
+    RangeMap::ComputeRollup(maps, filename, filename_position,
+                            [&](const std::vector<std::string>& keys,
+                                uint64_t addr, uint64_t end) {
+                              if (addr > last) {
+                                PrintMapRow("NO ENTRY", last, addr);
+                              }
+                              PrintMapRow(KeysToString(keys), addr, end);
+                              last = end;
+                            });
+  }
+
+  void PrintFileMaps(const std::string& filename, int filename_position) {
+    PrintMaps(FileMaps(), filename, filename_position);
+  }
+
+  void PrintVMMaps(const std::string& filename, int filename_position) {
+    PrintMaps(VmMaps(), filename, filename_position);
+  }
+
+  std::string KeysToString(const std::vector<std::string>& keys) {
+    std::string ret;
+
+    for (size_t i = 0; i < keys.size(); i++) {
+      if (i > 0) {
+        ret += ", ";
+      }
+      ret += keys[i];
+    }
+
+    return ret;
+  }
+
+  void PrintMapRow(string_view str, uint64_t start, uint64_t end) {
+    printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
+           str.data());
+  }
+
+  DualMap* base_map() { return maps_[0].get(); }
+
+ private:
+  std::vector<const RangeMap*> VmMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->vm_map);
+    }
+    return ret;
+  }
+
+  std::vector<const RangeMap*> FileMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->file_map);
+    }
+    return ret;
+  }
+
+  std::vector<std::unique_ptr<DualMap>> maps_;
+};
 
 void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
   const std::string& filename = file.filename();
@@ -1447,97 +1537,20 @@ void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
     THROWF("unknown file type for file '$0'", filename.c_str());
   }
 
-  struct Maps {
-   public:
-    Maps() : base_map_(nullptr) { PushMap(&base_map_); }
-
-    void PushAndOwnMap(MemoryMap* map) {
-      maps_.emplace_back(map);
-      PushMap(map);
-    }
-
-    void PushMap(MemoryMap* map) {
-      vm_maps_.push_back(map->vm_map());
-      file_maps_.push_back(map->file_map());
-    }
-
-    void ComputeRollup(const std::string& filename, int filename_position,
-                       Rollup* rollup) {
-      RangeMap::ComputeRollup(vm_maps_, filename, filename_position,
-                              [=](const std::vector<std::string>& keys,
-                                  uint64_t addr, uint64_t end) {
-                                return rollup->AddSizes(keys, end - addr, true);
-                              });
-      RangeMap::ComputeRollup(file_maps_, filename, filename_position,
-                              [=](const std::vector<std::string>& keys,
-                                  uint64_t addr, uint64_t end) {
-                                return rollup->AddSizes(keys, end - addr,
-                                                        false);
-                              });
-    }
-
-    void PrintMaps(const std::vector<const RangeMap*> maps,
-                   const std::string& filename, int filename_position) {
-      uint64_t last = 0;
-      RangeMap::ComputeRollup(maps, filename, filename_position,
-                              [&](const std::vector<std::string>& keys,
-                                  uint64_t addr, uint64_t end) {
-                                if (addr > last) {
-                                  PrintMapRow("NO ENTRY", last, addr);
-                                }
-                                PrintMapRow(KeysToString(keys), addr, end);
-                                last = end;
-                              });
-    }
-
-    void PrintFileMaps(const std::string& filename, int filename_position) {
-      PrintMaps(file_maps_, filename, filename_position);
-    }
-
-    void PrintVMMaps(const std::string& filename, int filename_position) {
-      PrintMaps(vm_maps_, filename, filename_position);
-    }
-
-    std::string KeysToString(const std::vector<std::string>& keys) {
-      std::string ret;
-
-      for (size_t i = 0; i < keys.size(); i++) {
-        if (i > 0) {
-          ret += ", ";
-        }
-        ret += keys[i];
-      }
-
-      return ret;
-    }
-
-    void PrintMapRow(string_view str, uint64_t start, uint64_t end) {
-      printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
-             str.data());
-    }
-
-    MemoryMap* base_map() { return &base_map_; }
-
-   private:
-    MemoryMap base_map_;
-    std::vector<std::unique_ptr<MemoryMap>> maps_;
-    std::vector<const RangeMap*> vm_maps_;
-    std::vector<const RangeMap*> file_maps_;
-
-  } maps;
-
-  RangeSink sink(&file, DataSource::kSegments, nullptr, maps.base_map());
+  DualMaps maps;
+  RangeSink sink(&file, DataSource::kSegments, nullptr);
+  NameMunger empty_munger;
+  sink.AddOutput(maps.base_map(), &empty_munger);
   file_handler->ProcessBaseMap(&sink);
-  maps.base_map()->file_map()->AddRange(0, file.data().size(), "[None]");
+  maps.base_map()->file_map.AddRange(0, file.data().size(), "[None]");
 
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
 
-  for (auto& source : sources_) {
-    auto map = new MemoryMap(std::move(source.munger));
-    maps.PushAndOwnMap(map);
-    sinks.push_back(std::unique_ptr<RangeSink>(
-        new RangeSink(&file, source.definition.number, maps.base_map(), map)));
+  for (auto source : sources_) {
+    sinks.push_back(absl::make_unique<RangeSink>(
+        &file, source->definition.number, maps.base_map()));
+    sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     sink_ptrs.push_back(sinks.back().get());
   }
 
@@ -1557,8 +1570,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
     THROW("no filename specified");
   }
 
-  for (auto& source : sources_) {
-    output->AddDataSourceName(source.definition.name);
+  for (auto source : sources_) {
+    output->AddDataSourceName(source->definition.name);
   }
 
   Rollup rollup;
@@ -1729,6 +1742,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   for (auto& base_filename : options.base_filename()) {
     bloaty.AddFilename(base_filename, true);
+  }
+
+  for (const auto& custom_data_source : options.custom_data_source()) {
+    bloaty.DefineCustomDataSource(custom_data_source);
   }
 
   for (const auto& data_source : options.data_source()) {
