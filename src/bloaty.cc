@@ -352,6 +352,11 @@ std::string NameMunger::Munge(string_view name) const {
   re2::StringPiece piece(name.data(), name.size());
   std::string ret;
 
+  if (!name.empty() && name[0] == '[') {
+    // This is a special symbol, don't mangle.
+    return std::string(name);
+  }
+
   for (const auto& pair : regexes_) {
     if (RE2::Extract(piece, *pair.first, pair.second, &ret)) {
       return ret;
