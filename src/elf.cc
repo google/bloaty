@@ -706,6 +706,7 @@ void ReadELFSymbols(const InputFile& file, RangeSink* sink, SymbolTable* table,
 
 enum ReportSectionsBy {
   kReportBySectionName,
+  kReportByEscapedSectionName,
   kReportByFlags,
   kReportByFilename,
 };
@@ -767,6 +768,9 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
             sink->AddRange(name_from_flags, full_addr, vmsize, contents);
           } else if (report_by == kReportBySectionName) {
             sink->AddRange(name, full_addr, vmsize, contents);
+          } else if (report_by == kReportByEscapedSectionName) {
+            sink->AddRange(std::string("[section ") + std::string(name) + "]",
+                           full_addr, vmsize, contents);
           } else if (report_by == kReportByFilename) {
             sink->AddRange(filename, full_addr, vmsize, contents);
           }
@@ -887,7 +891,7 @@ class ElfFileHandler : public FileHandler {
         case DataSource::kCppSymbols:
         case DataSource::kCppSymbolsStripped:
           ReadELFSymbols(sink->input_file(), sink, nullptr, &demangler_);
-          DoReadELFSections(sink, kReportBySectionName);
+          DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         case DataSource::kArchiveMembers:
           DoReadELFSections(sink, kReportByFilename);
@@ -900,6 +904,7 @@ class ElfFileHandler : public FileHandler {
           dwarf::File dwarf;
           ReadDWARFSections(elf, &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, sink);
+          DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }
         case DataSource::kInlines: {
@@ -908,6 +913,7 @@ class ElfFileHandler : public FileHandler {
           dwarf::File dwarf;
           ReadDWARFSections(elf, &dwarf);
           ReadDWARFInlines(dwarf, sink, true);
+          DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }
         default:

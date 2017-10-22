@@ -349,21 +349,16 @@ void NameMunger::AddRegex(const std::string& regex, const std::string& replaceme
 }
 
 std::string NameMunger::Munge(string_view name) const {
-  re2::StringPiece piece(name.data(), name.size());
-  std::string ret;
-
-  if (!name.empty() && name[0] == '[') {
-    // This is a special symbol, don't mangle.
-    return std::string(name);
-  }
+  std::string name_str(name);
+  std::string ret(name);
 
   for (const auto& pair : regexes_) {
-    if (RE2::Extract(piece, *pair.first, pair.second, &ret)) {
+    if (RE2::Extract(name_str, *pair.first, pair.second, &ret)) {
       return ret;
     }
   }
 
-  return std::string(name);
+  return name_str;
 }
 
 
