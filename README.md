@@ -132,13 +132,12 @@ USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
+  --csv            Output in CSV format instead of human-readable.
+  -c <file>        Load configuration from <file>.
   -d <sources>     Comma-separated list of sources to scan.
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
                    Defaults to 20.
-  -r <regex>       Add regex to the list of regexes.
-                   Format for regex is:
-                     SOURCE:s/PATTERN/REPLACEMENT/
   -s <sortby>      Whether to sort by VM or File size.  Possible values
                    are:
                      -s vm
@@ -147,6 +146,7 @@ Options:
   -v               Verbose output.  Dumps warnings encountered during
                    processing and full VM/file maps at the end.
                    Add more v's (-vv, -vvv) for even more.
+  -w               Wide output; don't truncate long labels.
   --help           Display this message and exit.
   --list-sources   Show a list of available sources and exit.
 ```
