@@ -111,12 +111,24 @@ class ElfFile {
     const Elf64_Shdr& header() const { return header_; }
     string_view contents() const { return contents_; }
 
-    // If header().sh_type == SHT_STRTAB.
-    string_view ReadName(Elf64_Word index) const;
+    // For SHN_UNDEF (undefined name), returns [nullptr, 0].
+    string_view GetName() const;
 
-    // If header().sh_type == SHT_SYMTAB
-    Elf64_Word GetSymbolCount() const;
+    // Requires: this is a section with fixed-width entries (symbol table,
+    // relocation table, etc).
+    Elf64_Word GetEntryCount() const;
+
+    // Requires: header().sh_type == SHT_STRTAB.
+    string_view ReadString(Elf64_Word index) const;
+
+    // Requires: header().sh_type == SHT_SYMTAB
     void ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const;
+
+    // Requires: header().sh_type == SHT_REL
+    void ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const;
+
+    // Requires: header().sh_type == SHT_RELA
+    void ReadRelocationWithAddend(Elf64_Word index, Elf64_Rela* rel) const;
 
    private:
     friend class ElfFile;
@@ -125,8 +137,10 @@ class ElfFile {
     string_view contents_;
   };
 
-  bool ReadSegment(Elf64_Word index, Segment* segment) const;
-  bool ReadSection(Elf64_Word index, Section* section) const;
+  void ReadSegment(Elf64_Word index, Segment* segment) const;
+  void ReadSection(Elf64_Word index, Section* section) const;
+
+  bool FindSectionByName(absl::string_view name, Section* section) const;
 
   bool is_64bit() const { return is_64bit_; }
   bool is_native_endian() const { return is_native_endian_; }
@@ -191,6 +205,7 @@ class ElfFile {
   string_view header_region_;
   string_view section_headers_;
   string_view segment_headers_;
+  Section section_name_table_;
 };
 
 // ELF uses different structure definitions for 32/64 bit files.  The sizes of
@@ -266,6 +281,23 @@ struct SymMunger {
   }
 };
 
+struct RelMunger {
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Rel* to, Func func) {
+    to->r_offset = func(from.r_offset);
+    to->r_info   = func(from.r_info);
+  }
+};
+
+struct RelaMunger {
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Rela* to, Func func) {
+    to->r_offset = func(from.r_offset);
+    to->r_info   = func(from.r_info);
+    to->r_addend = func(from.r_addend);
+  }
+};
+
 template <class T32, class T64, class Munger>
 void ElfFile::StructReader::ReadFallback(size_t offset, T64* out) const {
   if (elf_.is_64bit()) {
@@ -283,7 +315,14 @@ void ElfFile::StructReader::ReadFallback(size_t offset, T64* out) const {
   }
 }
 
-string_view ElfFile::Section::ReadName(Elf64_Word index) const {
+string_view ElfFile::Section::GetName() const {
+  if (header_.sh_name == SHN_UNDEF) {
+    return string_view(nullptr, 0);
+  }
+  return elf_->section_name_table_.ReadString(header_.sh_name);
+}
+
+string_view ElfFile::Section::ReadString(Elf64_Word index) const {
   assert(header().sh_type == SHT_STRTAB);
 
   if (index == SHN_UNDEF || index >= contents_.size()) {
@@ -305,8 +344,7 @@ string_view ElfFile::Section::ReadName(Elf64_Word index) const {
   return ret;
 }
 
-Elf64_Word ElfFile::Section::GetSymbolCount() const {
-  assert(header().sh_type == SHT_SYMTAB);
+Elf64_Word ElfFile::Section::GetEntryCount() const {
   if (header_.sh_entsize == 0) {
     THROW("sh_entsize is zero");
   }
@@ -317,6 +355,19 @@ void ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const {
   assert(header().sh_type == SHT_SYMTAB);
   ElfFile::StructReader reader(*elf_, contents());
   reader.Read<Elf32_Sym>(header_.sh_entsize * index, SymMunger(), sym);
+}
+
+void ElfFile::Section::ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const {
+  assert(header().sh_type == SHT_REL);
+  ElfFile::StructReader reader(*elf_, contents());
+  reader.Read<Elf32_Rel>(header_.sh_entsize * index, RelMunger(), rel);
+}
+
+void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
+                                                Elf64_Rela* rela) const {
+  assert(header().sh_type == SHT_RELA);
+  ElfFile::StructReader reader(*elf_, contents());
+  reader.Read<Elf32_Rela>(header_.sh_entsize * index, RelaMunger(), rela);
 }
 
 bool ElfFile::Initialize() {
@@ -386,10 +437,17 @@ bool ElfFile::Initialize() {
   segment_headers_ =
       GetRegion(header_.e_phoff, header_.e_phentsize * header_.e_phnum);
 
+  if (section_count_ > 0) {
+    ReadSection(section_string_index_, &section_name_table_);
+    if (section_name_table_.header().sh_type != SHT_STRTAB) {
+      THROW("section string index pointed to non-strtab");
+    }
+  }
+
   return true;
 }
 
-bool ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
+void ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
   if (index >= header_.e_phnum) {
     THROWF("segment $0 doesn't exist, only $1 segments", index,
            header_.e_phnum);
@@ -399,10 +457,9 @@ bool ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
   ReadStruct<Elf32_Phdr>(header_.e_phoff + header_.e_phentsize * index,
                          PhdrMunger(), header);
   segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
-  return true;
 }
 
-bool ElfFile::ReadSection(Elf64_Word index, Section* section) const {
+void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   if (index >= section_count_) {
     THROWF("tried to read section $0, but there are only $1", index,
            section_count_);
@@ -419,7 +476,16 @@ bool ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   }
 
   section->elf_ = this;
-  return true;
+}
+
+bool ElfFile::FindSectionByName(absl::string_view name, Section* section) const {
+  for (Elf64_Word i = 0; i < section_count_; i++) {
+    ReadSection(i, section);
+    if (section->GetName() == name) {
+      return true;
+    }
+  }
+  return false;
 }
 
 
@@ -653,6 +719,14 @@ static void CheckNotObject(const char* source, RangeSink* sink) {
 static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
                            SymbolTable* table, Demangler* demangler) {
   bool is_object = IsObjectFile(file.data());
+  bool demangle = false;
+  bool strip = false;
+
+  if (sink) {
+    demangle = (sink->data_source() == DataSource::kCppSymbols ||
+                sink->data_source() == DataSource::kCppSymbolsStripped);
+    strip = (sink->data_source() == DataSource::kCppSymbolsStripped);
+  }
 
   ForEachElf(
       file, sink,
@@ -665,7 +739,7 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
             continue;
           }
 
-          Elf64_Word symbol_count = section.GetSymbolCount();
+          Elf64_Word symbol_count = section.GetEntryCount();
 
           // Find the corresponding section where the strings for the symbol
           // table can be found.
@@ -690,17 +764,13 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               continue;
             }
 
-            string_view name = strtab_section.ReadName(sym.st_name);
+            string_view name = strtab_section.ReadString(sym.st_name);
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
             if (sink) {
               std::string namestr(name);
-              if (sink->data_source() == DataSource::kCppSymbols ||
-                  sink->data_source() == DataSource::kCppSymbolsStripped) {
-                namestr = demangler->Demangle(namestr);
-                if (sink->data_source() == DataSource::kCppSymbolsStripped) {
-                  namestr = std::string(StripName(namestr));
-                }
+              if (demangle) {
+                namestr = demangler->Demangle(namestr, strip);
               }
               sink->AddVMRangeAllowAlias(full_addr, sym.st_size, namestr);
             }
@@ -729,23 +799,17 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
         }
 
         std::string name_from_flags;
-        ElfFile::Section section_names;
-        elf.ReadSection(elf.section_string_index(), &section_names);
-        if (section_names.header().sh_type != SHT_STRTAB) {
-          THROW("section string index pointed to non-strtab");
-        }
 
         for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
           ElfFile::Section section;
           elf.ReadSection(i, &section);
-          const auto& header = section.header();
+          string_view name = section.GetName();
 
-          if (header.sh_name == SHN_UNDEF) {
+          if (name.size() == 0) {
             return;
           }
 
-          string_view name = section_names.ReadName(header.sh_name);
-
+          const auto& header = section.header();
           auto addr = header.sh_addr;
           auto size = header.sh_size;
           auto filesize = (header.sh_type == SHT_NOBITS) ? 0 : size;
@@ -839,22 +903,10 @@ static void ReadELFSegments(RangeSink* sink) {
 // work with object files.
 
 static void ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
-  ElfFile::Section section_names;
-  elf.ReadSection(elf.section_string_index(), &section_names);
-  if (section_names.header().sh_type != SHT_STRTAB) {
-    THROW("section string index pointed to non-strtab");
-  }
-
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
-    const auto& header = section.header();
-
-    if (header.sh_name == SHN_UNDEF) {
-      return;
-    }
-
-    string_view name = section_names.ReadName(header.sh_name);
+    string_view name = section.GetName();
 
     if (name == ".debug_aranges") {
       dwarf->debug_aranges = section.contents();
@@ -870,9 +922,65 @@ static void ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
   }
 }
 
+static void ElfMachineToCapstone(Elf64_Half e_machine, cs_arch* arch,
+                                 cs_mode* mode) {
+  switch (e_machine) {
+    case EM_386:
+      *arch = CS_ARCH_X86;
+      *mode = CS_MODE_32;
+      break;
+    case EM_X86_64:
+      *arch = CS_ARCH_X86;
+      *mode = CS_MODE_64;
+      break;
+
+    // These aren't tested, but we include them on the off-chance
+    // that it will work.
+    case EM_ARM:
+      *arch = CS_ARCH_ARM;
+      *mode = CS_MODE_LITTLE_ENDIAN;
+      break;
+    case EM_MIPS:
+      *arch = CS_ARCH_MIPS;
+      break;
+    case EM_PPC:
+      *arch = CS_ARCH_PPC;
+      *mode = CS_MODE_32;
+      break;
+    case EM_PPC64:
+      *arch = CS_ARCH_PPC;
+      *mode = CS_MODE_64;
+      break;
+    case EM_SPARC:
+      *arch = CS_ARCH_SPARC;
+      *mode = CS_MODE_BIG_ENDIAN;
+      break;
+    case EM_SPARCV9:
+      *arch = CS_ARCH_SPARC;
+      *mode = CS_MODE_V9;
+      break;
+    default:
+      THROWF("Unknown ELF machine value: $0'", e_machine);
+  }
+}
+
+static void ReadElfArchMode(const InputFile& file, cs_arch* arch, cs_mode* mode) {
+  ForEachElf(file, nullptr,
+             [=](const ElfFile& elf, string_view /*filename*/,
+                 uint32_t /*index_base*/) {
+               // Last .o file wins?  (For .a files)?  It's kind of arbitrary,
+               // but a single .a file shouldn't have multiple archs in it.
+               ElfMachineToCapstone(elf.header().e_machine, arch, mode);
+             });
+}
+
 }  // namespace
 
-class ElfFileHandler : public FileHandler {
+class ElfObjectFile : public ObjectFile {
+ public:
+  ElfObjectFile(std::unique_ptr<InputFile> file)
+      : ObjectFile(std::move(file)) {}
+
   void ProcessBaseMap(RangeSink* sink) override {
     if (IsObjectFile(sink->input_file().data())) {
       DoReadELFSections(sink, kReportBySectionName);
@@ -924,18 +1032,59 @@ class ElfFileHandler : public FileHandler {
     }
   }
 
+  bool GetDisassemblyInfo(absl::string_view symbol,
+                          DisassemblyInfo* info) override {
+    // Find the corresponding file range.  This also could be optimized not to
+    // build the entire map.
+    DualMap base_map;
+    NameMunger empty_munger;
+    RangeSink base_sink(&file_data(), DataSource::kSegments, nullptr);
+    base_sink.AddOutput(&base_map, &empty_munger);
+    ProcessBaseMap(&base_sink);
+
+    // Could optimize this not to build the whole table if necessary.
+    SymbolTable symbol_table;
+    RangeSink symbol_sink(&file_data(), DataSource::kSymbols, &base_map);
+    symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
+    ReadELFSymbols(file_data(), &symbol_sink, &symbol_table, &demangler_);
+    auto entry = symbol_table.find(symbol);
+    if (entry == symbol_table.end()) {
+      return false;
+    }
+    uint64_t vmaddr = entry->second.first;
+    uint64_t size = entry->second.second;
+
+    // TODO(haberman); Add PLT entries to symbol map, so call <plt stub> gets
+    // symbolized.
+
+    uint64_t fileoff;
+    if (!base_map.vm_map.Translate(vmaddr, &fileoff)) {
+      THROWF("Couldn't translate VM address for function $0", symbol);
+    }
+
+    info->text = file_data().data().substr(fileoff, size);
+    info->start_address = vmaddr;
+    ReadElfArchMode(file_data(), &info->arch, &info->mode);
+    return true;
+  }
+
  private:
   Demangler demangler_;
 };
 
-std::unique_ptr<FileHandler> TryOpenELFFile(const InputFile& file) {
-  ElfFile elf(file.data());
-  ArFile ar(file.data());
+std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file) {
+  ElfFile elf(file->data());
+  ArFile ar(file->data());
   if (elf.IsOpen() || ar.IsOpen()) {
-    return std::unique_ptr<FileHandler>(new ElfFileHandler());
+    return std::unique_ptr<ObjectFile>(new ElfObjectFile(std::move(file)));
   } else {
     return nullptr;
   }
+
+  // A few functions that have been defined but are not yet used.
+  (void)&ElfFile::FindSectionByName;
+  (void)&ElfFile::Section::ReadRelocation;
+  (void)&ElfFile::Section::ReadRelocationWithAddend;
 }
 
 }  // namespace bloaty

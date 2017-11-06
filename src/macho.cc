@@ -206,7 +206,11 @@ static void ParseMachOSections(RangeSink* sink) {
   }
 }
 
-class MachOFileHandler : public FileHandler {
+class MachOObjectFile : public ObjectFile {
+ public:
+  MachOObjectFile(std::unique_ptr<InputFile> file_data)
+      : ObjectFile(std::move(file_data)) {}
+
   void ProcessBaseMap(RangeSink* sink) override {
     return ParseMachOSegments(sink);
   }
@@ -231,10 +235,16 @@ class MachOFileHandler : public FileHandler {
       }
     }
   }
+
+  bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+                          DisassemblyInfo* /*info*/) override {
+    WARN("Mach-O files do not support disassembly yet");
+    return false;
+  }
 };
 
-std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
-  std::string cmd = "file " + file.filename();
+std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file) {
+  std::string cmd = "file " + file->filename();
   std::string cmd_tonull = cmd + " > /dev/null 2> /dev/null";
   if (system(cmd_tonull.c_str()) < 0) {
     return nullptr;
@@ -242,7 +252,7 @@ std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
 
   for (auto& line : ReadLinesFromPipe(cmd)) {
     if (line.find("Mach-O") != std::string::npos) {
-      return std::unique_ptr<FileHandler>(new MachOFileHandler);
+      return std::unique_ptr<ObjectFile>(new MachOObjectFile(std::move(file)));
     }
   }
 
