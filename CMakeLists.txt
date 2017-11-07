@@ -72,6 +72,7 @@ add_custom_command(
 
 add_library(libbloaty
     src/bloaty.cc
+    src/demangle.cc
     src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
     src/dwarf.cc

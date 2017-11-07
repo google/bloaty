@@ -326,18 +326,20 @@ LineReader ReadLinesFromPipe(const std::string& cmd);
 
 class Demangler {
  public:
-  Demangler();
+  Demangler() {}
   ~Demangler();
 
   // If |strip| is true, we try to strip parameters and other extraneous info
   // from the symbol.
-  std::string Demangle(const std::string& symbol, bool strip);
+  std::string Demangle(absl::string_view symbol, bool strip);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
 
-  static absl::string_view StripName(absl::string_view);
-  FILE* write_file_;
+  void Spawn();
+  std::string DemangleWithCppFilt(absl::string_view symbol);
+
+  FILE* write_file_ = nullptr;
   std::unique_ptr<LineReader> reader_;
   pid_t child_pid_;
 };
