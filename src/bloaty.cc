@@ -1657,93 +1657,138 @@ Options:
   --list-sources   Show a list of available sources and exit.
 )";
 
-void CheckNextArg(int i, int argc, const char *option) {
-  if (i + 1 >= argc) {
-    THROWF("option '$0' requires an argument", option);
-  }
-}
+class ArgParser {
+ public:
+  ArgParser(int argc, char* argv[]) : argc_(argc), argv_(argv) {}
 
-void Split(const std::string& str, char delim, std::vector<std::string>* out) {
-  std::stringstream stream(str);
-  std::string item;
-  while (std::getline(stream, item, delim)) {
-    out->push_back(item);
+  bool IsDone() { return index_ == argc_; }
+
+  string_view Arg() {
+    assert(!IsDone());
+    return string_view(argv_[index_]);
   }
-}
+
+  string_view ConsumeArg() {
+    string_view ret = Arg();
+    index_++;
+    return ret;
+  }
+
+  // Singular flag like --csv or -v.
+  bool TryParseFlag(string_view flag) {
+    if (Arg() == flag) {
+      ConsumeArg();
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  // Option taking an argument, for example:
+  //   -n 20
+  //   --config=file.bloaty
+  //
+  // For --long-options we accept both:
+  //   --long_option value
+  //   --long_option=value
+  bool TryParseOption(string_view flag, string_view* val) {
+    assert(flag.size() > 1);
+    bool is_long = flag[1] == '-';
+    string_view arg = Arg();
+    if (TryParseFlag(flag)) {
+      if (IsDone()) {
+        THROWF("option '$0' requires an argument", flag);
+      }
+      *val = ConsumeArg();
+      return true;
+    } else if (is_long && absl::ConsumePrefix(&arg, std::string(flag) + "=")) {
+      *val = arg;
+      index_++;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  bool TryParseIntegerOption(string_view flag, int* val) {
+    string_view val_str;
+    return TryParseOption(flag, &val_str) && absl::SimpleAtoi(val_str, val);
+  }
+
+ public:
+  int argc_;
+  char** argv_;
+  int index_ = 1;
+  string_view arg_;  // argv[index_]
+};
 
 bool DoParseOptions(int argc, char* argv[], Options* options,
                     OutputOptions* output_options) {
   bool saw_separator = false;
+  ArgParser args(argc, argv);
+  absl::string_view option;
+  int int_option;
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--") == 0) {
+  while (!args.IsDone()) {
+    if (args.TryParseFlag("--")) {
       if (saw_separator) {
         THROW("'--' option should only be specified once");
       }
       saw_separator = true;
-    } else if (strcmp(argv[i], "--csv") == 0) {
+    } else if (args.TryParseFlag("--csv")) {
       output_options->output_format = OutputFormat::kCSV;
-    } else if (strcmp(argv[i], "-c") == 0) {
-      CheckNextArg(i, argc, "-c");
-      std::string filename(argv[++i]);
-      std::ifstream input_file(filename, std::ios::in);
+    } else if (args.TryParseOption("-c", &option)) {
+      std::ifstream input_file(std::string(option), std::ios::in);
       if (!input_file.is_open()) {
-        THROWF("couldn't open file $0", filename);
+        THROWF("couldn't open file $0", option);
       }
       google::protobuf::io::IstreamInputStream stream(&input_file);
       if (!google::protobuf::TextFormat::Merge(&stream, options)) {
-        THROWF("error parsing configuration out of file $0", filename);
+        THROWF("error parsing configuration out of file $0", option);
       }
-    } else if (strcmp(argv[i], "-d") == 0) {
-      CheckNextArg(i, argc, "-d");
-      std::vector<std::string> names;
-      Split(argv[++i], ',', &names);
+    } else if (args.TryParseOption("-d", &option)) {
+      std::vector<std::string> names = absl::StrSplit(option, ',');
       for (const auto& name : names) {
         options->add_data_source(name);
       }
-    } else if (strncmp(argv[i], "--disassemble=", strlen("--disassemble=")) ==
-               0) {
-      options->mutable_disassemble_function()->assign(argv[i] +
-                                                      strlen("--disassemble="));
-    } else if (strcmp(argv[i], "-n") == 0) {
-      CheckNextArg(i, argc, "-n");
-      options->set_max_rows_per_level(strtod(argv[++i], NULL));
-    } else if (strcmp(argv[i], "-s") == 0) {
-      CheckNextArg(i, argc, "-s");
-      i++;
-      if (strcmp(argv[i], "vm") == 0) {
+    } else if (args.TryParseOption("--disassemble", &option)) {
+      options->mutable_disassemble_function()->assign(std::string(option));
+    } else if (args.TryParseIntegerOption("-n", &int_option)) {
+      options->set_max_rows_per_level(int_option);
+    } else if (args.TryParseOption("-s", &option)) {
+      if (option == "vm") {
         options->set_sort_by(Options::SORTBY_VMSIZE);
-      } else if (strcmp(argv[i], "file") == 0) {
+      } else if (option == "file") {
         options->set_sort_by(Options::SORTBY_FILESIZE);
-      } else if (strcmp(argv[i], "both") == 0) {
+      } else if (option == "both") {
         options->set_sort_by(Options::SORTBY_BOTH);
       } else {
-        THROWF("unknown value for -s: $0", argv[i]);
+        THROWF("unknown value for -s: $0", option);
       }
-    } else if (strcmp(argv[i], "-v") == 0) {
+    } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
-    } else if (strcmp(argv[i], "-vv") == 0) {
+    } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(2);
-    } else if (strcmp(argv[i], "-vvv") == 0) {
+    } else if (args.TryParseFlag("-vvv")) {
       options->set_verbose_level(3);
-    } else if (strcmp(argv[i], "-w") == 0) {
+    } else if (args.TryParseFlag("-w")) {
       output_options->max_label_len = SIZE_MAX;
-    } else if (strcmp(argv[i], "--list-sources") == 0) {
+    } else if (args.TryParseFlag("--list-sources")) {
       for (const auto& source : data_sources) {
         fprintf(stderr, "%s %s\n", FixedWidthString(source.name, 15).c_str(),
                 source.description);
       }
       return false;
-    } else if (strcmp(argv[i], "--help") == 0) {
+    } else if (args.TryParseFlag("--help")) {
       fputs(usage, stderr);
       return false;
-    } else if (argv[i][0] == '-') {
-      THROWF("Unknown option: $0", argv[i]);
+    } else if (absl::StartsWith(args.Arg(), "-")) {
+      THROWF("Unknown option: $0", args.Arg());
     } else {
       if (saw_separator) {
-        options->add_base_filename(argv[i]);
+        options->add_base_filename(std::string(args.ConsumeArg()));
       } else {
-        options->add_filename(argv[i]);
+        options->add_filename(std::string(args.ConsumeArg()));
       }
     }
   }
