@@ -86,6 +86,7 @@ add_library(libbloaty
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/numbers.cc
     third_party/abseil-cpp/absl/strings/str_cat.cc
+    third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
     third_party/abseil-cpp/absl/strings/substitute.cc
     )
