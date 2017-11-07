@@ -49,6 +49,9 @@ message Options {
 
   // Custom data sources for this analysis.
   repeated CustomDataSource custom_data_source = 7;
+
+  // Disassemble this function.
+  optional string disassemble_function = 8;
 }
 
 // A custom data source allows users to create their own label space by

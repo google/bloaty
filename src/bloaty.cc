@@ -296,7 +296,40 @@ Demangler::~Demangler() {
   fclose(write_file_);
 }
 
-std::string Demangler::Demangle(const std::string& symbol) {
+// C++ Symbol names can get really long because they include all the parameter
+// types.  For example:
+//
+// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
+//
+// This parameter info is often unnecessary.  This class strips it.  This will
+// cause ambiguity in the case of overloaded functions, but the user can
+// disambiguate with "cppsymbols".
+//
+// This transformation is, by its nature, heuristic and inexact.  Improvements
+// welcome.
+absl::string_view Demangler::StripName(absl::string_view name) {
+  absl::ConsumeSuffix(&name, " const");
+
+  if (!name.empty() && name[name.size() - 1] != ')') {
+    // This doesn't look like a function.
+    return name;
+  }
+
+  int nesting = 0;
+  for (size_t n = name.size() - 1; n < name.size(); --n) {
+    if (name[n] == '(') {
+      if (--nesting == 0) {
+        return name.substr(0, n);
+      }
+    } else if (name[n] == ')') {
+      ++nesting;
+    }
+  }
+
+  return name;
+}
+
+std::string Demangler::Demangle(const std::string& symbol, bool strip) {
   const char *writeptr = symbol.c_str();
   const char *writeend = writeptr + symbol.size();
 
@@ -318,30 +351,15 @@ std::string Demangler::Demangle(const std::string& symbol) {
   }
 
   reader_->Next();
-  return reader_->line();
+  std::string ret = reader_->line();
+  if (strip) {
+    ret = std::string(StripName(ret));
+  }
+  return ret;
 }
 
 
 // NameMunger //////////////////////////////////////////////////////////////////
-
-// Use to transform input names according to the user's configuration.
-// For example, the user can use regexes.
-class NameMunger {
- public:
-  NameMunger() {}
-
-  // Adds a regex that will be applied to all names.  All regexes will be
-  // applied in sequence.
-  void AddRegex(const std::string& regex, const std::string& replacement);
-
-  std::string Munge(string_view name) const;
-
-  bool IsEmpty() const { return regexes_.empty(); }
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
-  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
-};
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
   auto re2 = absl::make_unique<RE2>(regex);
@@ -998,6 +1016,17 @@ bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
   }
 }
 
+bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const {
+  auto iter = FindContaining(addr);
+  if (iter == mappings_.end()) {
+    return false;
+  } else {
+    *label = iter->second.label;
+    *offset = addr - iter->first;
+    return true;
+  }
+}
+
 void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
   AddDualRange(addr, size, UINT64_MAX, val);
 }
@@ -1180,16 +1209,6 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 }
 
 
-// DualMap /////////////////////////////////////////////////////////////////////
-
-// Contains a RangeMap for VM space and file space for a given file.
-
-struct DualMap {
-  RangeMap vm_map;
-  RangeMap file_map;
-};
-
-
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
 class MmapInputFile : public InputFile {
@@ -1360,6 +1379,7 @@ class Bloaty {
 
   void AddDataSource(const std::string& name);
   void ScanAndRollup(const Options& options, RollupOutput* output);
+  void DisassembleFunction(absl::string_view function, RollupOutput* output);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
@@ -1373,7 +1393,7 @@ class Bloaty {
     }
   }
 
-  void ScanAndRollupFile(const InputFile& file, Rollup* rollup);
+  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup);
 
   const InputFileFactory& file_factory_;
 
@@ -1386,8 +1406,8 @@ class Bloaty {
   // Points to entries in all_known_sources_.
   std::vector<ConfiguredDataSource*> sources_;
 
-  std::vector<std::unique_ptr<InputFile>> input_files_;
-  std::vector<std::unique_ptr<InputFile>> base_files_;
+  std::vector<std::unique_ptr<ObjectFile>> input_files_;
+  std::vector<std::unique_ptr<ObjectFile>> base_files_;
   int filename_position_;
 };
 
@@ -1398,12 +1418,20 @@ Bloaty::Bloaty(const InputFileFactory& factory)
 
 void Bloaty::AddFilename(const std::string& filename, bool is_base) {
   std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
-  assert(file.get());
+  auto object_file = TryOpenELFFile(file);
+
+  if (!object_file.get()) {
+    object_file = TryOpenMachOFile(file);
+  }
+
+  if (!object_file.get()) {
+    THROWF("unknown file type for file '$0'", filename.c_str());
+  }
 
   if (is_base) {
-    base_files_.push_back(std::move(file));
+    base_files_.push_back(std::move(object_file));
   } else {
-    input_files_.push_back(std::move(file));
+    input_files_.push_back(std::move(object_file));
   }
 }
 
@@ -1530,36 +1558,27 @@ struct DualMaps {
   std::vector<std::unique_ptr<DualMap>> maps_;
 };
 
-void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
-  const std::string& filename = file.filename();
-  auto file_handler = TryOpenELFFile(file);
-
-  if (!file_handler.get()) {
-    file_handler = TryOpenMachOFile(file);
-  }
-
-  if (!file_handler.get()) {
-    THROWF("unknown file type for file '$0'", filename.c_str());
-  }
-
+void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) {
+  const std::string& filename = file->file_data().filename();
   DualMaps maps;
-  RangeSink sink(&file, DataSource::kSegments, nullptr);
+  RangeSink sink(&file->file_data(), DataSource::kSegments, nullptr);
   NameMunger empty_munger;
   sink.AddOutput(maps.base_map(), &empty_munger);
-  file_handler->ProcessBaseMap(&sink);
-  maps.base_map()->file_map.AddRange(0, file.data().size(), "[None]");
+  file->ProcessBaseMap(&sink);
+  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
+                                     "[None]");
 
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
 
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(
-        &file, source->definition.number, maps.base_map()));
+        &file->file_data(), source->definition.number, maps.base_map()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  file_handler->ProcessFile(sink_ptrs);
+  file->ProcessFile(sink_ptrs);
 
   maps.ComputeRollup(filename, filename_position_, rollup);
   if (verbose_level > 0) {
@@ -1581,15 +1600,15 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
 
   Rollup rollup;
 
-  for (const auto& file : input_files_) {
-    ScanAndRollupFile(*file, &rollup);
+  for (auto& file : input_files_) {
+    ScanAndRollupFile(file.get(), &rollup);
   }
 
   if (!base_files_.empty()) {
     Rollup base;
 
-    for (const auto& base_file : base_files_) {
-      ScanAndRollupFile(*base_file, &base);
+    for (auto& base_file : base_files_) {
+      ScanAndRollupFile(base_file.get(), &base);
     }
 
     rollup.Subtract(base);
@@ -1597,6 +1616,19 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   } else {
     rollup.CreateRollupOutput(options, output);
   }
+}
+
+void Bloaty::DisassembleFunction(absl::string_view function,
+                                 RollupOutput* output) {
+  DisassemblyInfo info;
+  for (auto& file : input_files_) {
+    if (file->GetDisassemblyInfo(function, &info)) {
+      output->SetDisassembly(::bloaty::DisassembleFunction(info));
+      return;
+    }
+  }
+
+  THROWF("Couldn't find function $0 to disassemble", function);
 }
 
 const char usage[] = R"(Bloaty McBloatface: a size profiler for binaries.
@@ -1608,6 +1640,7 @@ Options:
   --csv            Output in CSV format instead of human-readable.
   -c <file>        Load configuration from <file>.
   -d <sources>     Comma-separated list of sources to scan.
+  --disassemble=<function>   Disassemble this function (EXPERIMENTAL)
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
                    Defaults to 20.
@@ -1668,6 +1701,10 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
       for (const auto& name : names) {
         options->add_data_source(name);
       }
+    } else if (strncmp(argv[i], "--disassemble=", strlen("--disassemble=")) ==
+               0) {
+      options->mutable_disassemble_function()->assign(argv[i] +
+                                                      strlen("--disassemble="));
     } else if (strcmp(argv[i], "-n") == 0) {
       CheckNextArg(i, argc, "-n");
       options->set_max_rows_per_level(strtod(argv[++i], NULL));
@@ -1711,7 +1748,8 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
     }
   }
 
-  if (options->data_source_size() == 0) {
+  if (options->data_source_size() == 0 &&
+      !options->has_disassemble_function()) {
     // Default when no sources are specified.
     options->add_data_source("sections");
   }
@@ -1759,7 +1797,12 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   verbose_level = options.verbose_level();
 
-  bloaty.ScanAndRollup(options, output);
+  if (options.data_source_size() > 0) {
+    bloaty.ScanAndRollup(options, output);
+  } else if (options.has_disassemble_function()) {
+    bloaty.DisassembleFunction(options.disassemble_function(),
+                               output);
+  }
 }
 
 bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
