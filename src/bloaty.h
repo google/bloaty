@@ -52,9 +52,9 @@
 
 namespace bloaty {
 
-class DualMap;
 class NameMunger;
 class Options;
+struct DualMap;
 struct DisassemblyInfo;
 
 enum class DataSource {
