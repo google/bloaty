@@ -47,6 +47,7 @@
 
 #include "bloaty.h"
 #include "bloaty.pb.h"
+#include "demangle.h"
 
 using absl::string_view;
 
@@ -241,7 +242,7 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 
 // Demangler ///////////////////////////////////////////////////////////////////
 
-Demangler::Demangler() {
+void Demangler::Spawn() {
   int toproc_pipe_fd[2];
   int fromproc_pipe_fd[2];
   if (pipe(toproc_pipe_fd) < 0 || pipe(fromproc_pipe_fd) < 0) {
@@ -288,47 +289,33 @@ Demangler::Demangler() {
 }
 
 Demangler::~Demangler() {
-  int status;
-  kill(child_pid_, SIGTERM);
-  waitpid(child_pid_, &status, WEXITED);
-  fclose(write_file_);
+  if (write_file_) {
+    int status;
+    kill(child_pid_, SIGTERM);
+    waitpid(child_pid_, &status, WEXITED);
+    fclose(write_file_);
+  }
 }
 
-// C++ Symbol names can get really long because they include all the parameter
-// types.  For example:
-//
-// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
-//
-// This parameter info is often unnecessary.  This class strips it.  This will
-// cause ambiguity in the case of overloaded functions, but the user can
-// disambiguate with "cppsymbols".
-//
-// This transformation is, by its nature, heuristic and inexact.  Improvements
-// welcome.
-absl::string_view Demangler::StripName(absl::string_view name) {
-  absl::ConsumeSuffix(&name, " const");
-
-  if (!name.empty() && name[name.size() - 1] != ')') {
-    // This doesn't look like a function.
-    return name;
-  }
-
-  int nesting = 0;
-  for (size_t n = name.size() - 1; n < name.size(); --n) {
-    if (name[n] == '(') {
-      if (--nesting == 0) {
-        return name.substr(0, n);
-      }
-    } else if (name[n] == ')') {
-      ++nesting;
+std::string Demangler::Demangle(absl::string_view symbol, bool strip) {
+  if (strip) {
+    char buf[1024];
+    if (::Demangle(symbol.data(), buf, sizeof(buf))) {
+      return std::string(buf);
+    } else {
+      return std::string(symbol);
     }
+  } else {
+    return DemangleWithCppFilt(symbol);
   }
-
-  return name;
 }
 
-std::string Demangler::Demangle(const std::string& symbol, bool strip) {
-  const char *writeptr = symbol.c_str();
+std::string Demangler::DemangleWithCppFilt(absl::string_view symbol) {
+  if (!write_file_) {
+    Spawn();
+  }
+
+  const char *writeptr = symbol.data();
   const char *writeend = writeptr + symbol.size();
 
   while (writeptr < writeend) {
@@ -349,11 +336,7 @@ std::string Demangler::Demangle(const std::string& symbol, bool strip) {
   }
 
   reader_->Next();
-  std::string ret = reader_->line();
-  if (strip) {
-    ret = std::string(StripName(ret));
-  }
-  return ret;
+  return reader_->line();
 }
 
 
