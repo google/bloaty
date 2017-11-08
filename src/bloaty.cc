@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <array>
 #include <cmath>
-#include <cinttypes>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
-#include <set>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <assert.h>
@@ -415,6 +413,9 @@ class Rollup {
  public:
   Rollup() {}
 
+  Rollup(Rollup&& other) = default;
+  Rollup& operator=(Rollup&& other) = default;
+
   void AddSizes(const std::vector<std::string> names,
                 uint64_t size, bool is_vmsize) {
     // We start at 1 to exclude the base map (see base_map_).
@@ -447,6 +448,20 @@ class Rollup {
         child.reset(new Rollup());
       }
       child->Subtract(*other_child.second);
+    }
+  }
+
+  // Add the values in "other" from this.
+  void Add(const Rollup& other) {
+    vm_total_ += other.vm_total_;
+    file_total_ += other.file_total_;
+
+    for (const auto& other_child : other.children_) {
+      auto& child = children_[other_child.first];
+      if (child.get() == NULL) {
+        child.reset(new Rollup());
+      }
+      child->Add(*other_child.second);
     }
   }
 
@@ -1353,6 +1368,46 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
 }
 
 
+// ThreadSafeIterIndex /////////////////////////////////////////////////////////
+
+class ThreadSafeIterIndex {
+ public:
+  ThreadSafeIterIndex(int max) : index_(0), max_(max) {}
+
+  bool TryGetNext(int* index) {
+    int ret = index_.fetch_add(1, std::memory_order_relaxed);
+    if (ret >= max_) {
+      return false;
+    } else {
+      *index = ret;
+      return true;
+    }
+  }
+
+  void Abort(string_view error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    index_ = max_;
+    error_ = std::string(error);
+  }
+
+  bool TryGetError(std::string* error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (error_.empty()) {
+      return false;
+    } else {
+      *error = error_;
+      return true;
+    }
+  }
+
+ private:
+  std::atomic<int> index_;
+  std::string error_;
+  std::mutex mutex_;
+  const int max_;
+};
+
+
 // Bloaty //////////////////////////////////////////////////////////////////////
 
 // Represents a program execution and associated state.
@@ -1393,7 +1448,9 @@ class Bloaty {
     }
   }
 
-  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup);
+  void ScanAndRollupFiles(const std::vector<std::unique_ptr<ObjectFile>>& files,
+                          Rollup* rollup) const;
+  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const;
 
   const InputFileFactory& file_factory_;
 
@@ -1558,7 +1615,7 @@ struct DualMaps {
   std::vector<std::unique_ptr<DualMap>> maps_;
 };
 
-void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) {
+void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const {
   const std::string& filename = file->file_data().filename();
   DualMaps maps;
   RangeSink sink(&file->file_data(), DataSource::kSegments, nullptr);
@@ -1589,6 +1646,44 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) {
   }
 }
 
+void Bloaty::ScanAndRollupFiles(
+    const std::vector<std::unique_ptr<ObjectFile>>& files,
+    Rollup* rollup) const {
+  int num_cpus = std::thread::hardware_concurrency();
+  int num_threads = std::min(num_cpus, static_cast<int>(files.size()));
+  std::vector<Rollup> rollups(num_threads);
+  std::vector<std::thread> threads(num_threads);
+  ThreadSafeIterIndex index(files.size());
+
+
+  for (int i = 0; i < num_threads; i++) {
+    threads[i] = std::thread([this, &index, &files](Rollup* r) {
+      try {
+        int j;
+        while (index.TryGetNext(&j)) {
+          ScanAndRollupFile(files[j].get(), r);
+        }
+      } catch (const bloaty::Error& e) {
+        index.Abort(e.what());
+      }
+    }, &rollups[i]);
+  }
+
+  for (int i = 0; i < num_threads; i++) {
+    threads[i].join();
+    if (i == 0) {
+      *rollup = std::move(rollups[i]);
+    } else {
+      rollup->Add(rollups[i]);
+    }
+  }
+
+  std::string error;
+  if (index.TryGetError(&error)) {
+    THROW(error.c_str());
+  }
+}
+
 void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   if (input_files_.empty()) {
     THROW("no filename specified");
@@ -1599,18 +1694,11 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   }
 
   Rollup rollup;
-
-  for (auto& file : input_files_) {
-    ScanAndRollupFile(file.get(), &rollup);
-  }
+  ScanAndRollupFiles(input_files_, &rollup);
 
   if (!base_files_.empty()) {
     Rollup base;
-
-    for (auto& base_file : base_files_) {
-      ScanAndRollupFile(base_file.get(), &base);
-    }
-
+    ScanAndRollupFiles(base_files_, &base);
     rollup.Subtract(base);
     rollup.CreateDiffModeRollupOutput(&base, options, output);
   } else {
