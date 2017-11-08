@@ -296,7 +296,40 @@ Demangler::~Demangler() {
   fclose(write_file_);
 }
 
-std::string Demangler::Demangle(const std::string& symbol) {
+// C++ Symbol names can get really long because they include all the parameter
+// types.  For example:
+//
+// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
+//
+// This parameter info is often unnecessary.  This class strips it.  This will
+// cause ambiguity in the case of overloaded functions, but the user can
+// disambiguate with "cppsymbols".
+//
+// This transformation is, by its nature, heuristic and inexact.  Improvements
+// welcome.
+absl::string_view Demangler::StripName(absl::string_view name) {
+  absl::ConsumeSuffix(&name, " const");
+
+  if (!name.empty() && name[name.size() - 1] != ')') {
+    // This doesn't look like a function.
+    return name;
+  }
+
+  int nesting = 0;
+  for (size_t n = name.size() - 1; n < name.size(); --n) {
+    if (name[n] == '(') {
+      if (--nesting == 0) {
+        return name.substr(0, n);
+      }
+    } else if (name[n] == ')') {
+      ++nesting;
+    }
+  }
+
+  return name;
+}
+
+std::string Demangler::Demangle(const std::string& symbol, bool strip) {
   const char *writeptr = symbol.c_str();
   const char *writeend = writeptr + symbol.size();
 
@@ -318,30 +351,15 @@ std::string Demangler::Demangle(const std::string& symbol) {
   }
 
   reader_->Next();
-  return reader_->line();
+  std::string ret = reader_->line();
+  if (strip) {
+    ret = std::string(StripName(ret));
+  }
+  return ret;
 }
 
 
 // NameMunger //////////////////////////////////////////////////////////////////
-
-// Use to transform input names according to the user's configuration.
-// For example, the user can use regexes.
-class NameMunger {
- public:
-  NameMunger() {}
-
-  // Adds a regex that will be applied to all names.  All regexes will be
-  // applied in sequence.
-  void AddRegex(const std::string& regex, const std::string& replacement);
-
-  std::string Munge(string_view name) const;
-
-  bool IsEmpty() const { return regexes_.empty(); }
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
-  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
-};
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
   auto re2 = absl::make_unique<RE2>(regex);
@@ -987,6 +1005,17 @@ bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
   }
 }
 
+bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const {
+  auto iter = FindContaining(addr);
+  if (iter == mappings_.end()) {
+    return false;
+  } else {
+    *label = iter->second.label;
+    *offset = addr - iter->first;
+    return true;
+  }
+}
+
 void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
   AddDualRange(addr, size, UINT64_MAX, val);
 }
@@ -1169,16 +1198,6 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 }
 
 
-// DualMap /////////////////////////////////////////////////////////////////////
-
-// Contains a RangeMap for VM space and file space for a given file.
-
-struct DualMap {
-  RangeMap vm_map;
-  RangeMap file_map;
-};
-
-
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
 class MmapInputFile : public InputFile {
@@ -1349,6 +1368,7 @@ class Bloaty {
 
   void AddDataSource(const std::string& name);
   void ScanAndRollup(const Options& options, RollupOutput* output);
+  void DisassembleFunction(absl::string_view function, RollupOutput* output);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
@@ -1362,7 +1382,7 @@ class Bloaty {
     }
   }
 
-  void ScanAndRollupFile(const InputFile& file, Rollup* rollup);
+  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup);
 
   const InputFileFactory& file_factory_;
 
@@ -1375,8 +1395,8 @@ class Bloaty {
   // Points to entries in all_known_sources_.
   std::vector<ConfiguredDataSource*> sources_;
 
-  std::vector<std::unique_ptr<InputFile>> input_files_;
-  std::vector<std::unique_ptr<InputFile>> base_files_;
+  std::vector<std::unique_ptr<ObjectFile>> input_files_;
+  std::vector<std::unique_ptr<ObjectFile>> base_files_;
   int filename_position_;
 };
 
@@ -1387,12 +1407,20 @@ Bloaty::Bloaty(const InputFileFactory& factory)
 
 void Bloaty::AddFilename(const std::string& filename, bool is_base) {
   std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
-  assert(file.get());
+  auto object_file = TryOpenELFFile(file);
+
+  if (!object_file.get()) {
+    object_file = TryOpenMachOFile(file);
+  }
+
+  if (!object_file.get()) {
+    THROWF("unknown file type for file '$0'", filename.c_str());
+  }
 
   if (is_base) {
-    base_files_.push_back(std::move(file));
+    base_files_.push_back(std::move(object_file));
   } else {
-    input_files_.push_back(std::move(file));
+    input_files_.push_back(std::move(object_file));
   }
 }
 
@@ -1519,36 +1547,27 @@ struct DualMaps {
   std::vector<std::unique_ptr<DualMap>> maps_;
 };
 
-void Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
-  const std::string& filename = file.filename();
-  auto file_handler = TryOpenELFFile(file);
-
-  if (!file_handler.get()) {
-    file_handler = TryOpenMachOFile(file);
-  }
-
-  if (!file_handler.get()) {
-    THROWF("unknown file type for file '$0'", filename.c_str());
-  }
-
+void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) {
+  const std::string& filename = file->file_data().filename();
   DualMaps maps;
-  RangeSink sink(&file, DataSource::kSegments, nullptr);
+  RangeSink sink(&file->file_data(), DataSource::kSegments, nullptr);
   NameMunger empty_munger;
   sink.AddOutput(maps.base_map(), &empty_munger);
-  file_handler->ProcessBaseMap(&sink);
-  maps.base_map()->file_map.AddRange(0, file.data().size(), "[None]");
+  file->ProcessBaseMap(&sink);
+  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
+                                     "[None]");
 
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
 
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(
-        &file, source->definition.number, maps.base_map()));
+        &file->file_data(), source->definition.number, maps.base_map()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  file_handler->ProcessFile(sink_ptrs);
+  file->ProcessFile(sink_ptrs);
 
   maps.ComputeRollup(filename, filename_position_, rollup);
   if (verbose_level > 0) {
@@ -1570,15 +1589,15 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
 
   Rollup rollup;
 
-  for (const auto& file : input_files_) {
-    ScanAndRollupFile(*file, &rollup);
+  for (auto& file : input_files_) {
+    ScanAndRollupFile(file.get(), &rollup);
   }
 
   if (!base_files_.empty()) {
     Rollup base;
 
-    for (const auto& base_file : base_files_) {
-      ScanAndRollupFile(*base_file, &base);
+    for (auto& base_file : base_files_) {
+      ScanAndRollupFile(base_file.get(), &base);
     }
 
     rollup.Subtract(base);
@@ -1586,6 +1605,19 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   } else {
     rollup.CreateRollupOutput(options, output);
   }
+}
+
+void Bloaty::DisassembleFunction(absl::string_view function,
+                                 RollupOutput* output) {
+  DisassemblyInfo info;
+  for (auto& file : input_files_) {
+    if (file->GetDisassemblyInfo(function, &info)) {
+      output->SetDisassembly(::bloaty::DisassembleFunction(info));
+      return;
+    }
+  }
+
+  THROWF("Couldn't find function $0 to disassemble", function);
 }
 
 const char usage[] = R"(Bloaty McBloatface: a size profiler for binaries.
@@ -1597,6 +1629,7 @@ Options:
   --csv            Output in CSV format instead of human-readable.
   -c <file>        Load configuration from <file>.
   -d <sources>     Comma-separated list of sources to scan.
+  --disassemble=<function>   Disassemble this function (EXPERIMENTAL)
   -n <num>         How many rows to show per level before collapsing
                    other keys into '[Other]'.  Set to '0' for unlimited.
                    Defaults to 20.
@@ -1613,94 +1646,144 @@ Options:
   --list-sources   Show a list of available sources and exit.
 )";
 
-void CheckNextArg(int i, int argc, const char *option) {
-  if (i + 1 >= argc) {
-    THROWF("option '$0' requires an argument", option);
-  }
-}
+class ArgParser {
+ public:
+  ArgParser(int argc, char* argv[]) : argc_(argc), argv_(argv) {}
 
-void Split(const std::string& str, char delim, std::vector<std::string>* out) {
-  std::stringstream stream(str);
-  std::string item;
-  while (std::getline(stream, item, delim)) {
-    out->push_back(item);
+  bool IsDone() { return index_ == argc_; }
+
+  string_view Arg() {
+    assert(!IsDone());
+    return string_view(argv_[index_]);
   }
-}
+
+  string_view ConsumeArg() {
+    string_view ret = Arg();
+    index_++;
+    return ret;
+  }
+
+  // Singular flag like --csv or -v.
+  bool TryParseFlag(string_view flag) {
+    if (Arg() == flag) {
+      ConsumeArg();
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  // Option taking an argument, for example:
+  //   -n 20
+  //   --config=file.bloaty
+  //
+  // For --long-options we accept both:
+  //   --long_option value
+  //   --long_option=value
+  bool TryParseOption(string_view flag, string_view* val) {
+    assert(flag.size() > 1);
+    bool is_long = flag[1] == '-';
+    string_view arg = Arg();
+    if (TryParseFlag(flag)) {
+      if (IsDone()) {
+        THROWF("option '$0' requires an argument", flag);
+      }
+      *val = ConsumeArg();
+      return true;
+    } else if (is_long && absl::ConsumePrefix(&arg, std::string(flag) + "=")) {
+      *val = arg;
+      index_++;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  bool TryParseIntegerOption(string_view flag, int* val) {
+    string_view val_str;
+    return TryParseOption(flag, &val_str) && absl::SimpleAtoi(val_str, val);
+  }
+
+ public:
+  int argc_;
+  char** argv_;
+  int index_ = 1;
+  string_view arg_;  // argv[index_]
+};
 
 bool DoParseOptions(int argc, char* argv[], Options* options,
                     OutputOptions* output_options) {
   bool saw_separator = false;
+  ArgParser args(argc, argv);
+  absl::string_view option;
+  int int_option;
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--") == 0) {
+  while (!args.IsDone()) {
+    if (args.TryParseFlag("--")) {
       if (saw_separator) {
         THROW("'--' option should only be specified once");
       }
       saw_separator = true;
-    } else if (strcmp(argv[i], "--csv") == 0) {
+    } else if (args.TryParseFlag("--csv")) {
       output_options->output_format = OutputFormat::kCSV;
-    } else if (strcmp(argv[i], "-c") == 0) {
-      CheckNextArg(i, argc, "-c");
-      std::string filename(argv[++i]);
-      std::ifstream input_file(filename, std::ios::in);
+    } else if (args.TryParseOption("-c", &option)) {
+      std::ifstream input_file(std::string(option), std::ios::in);
       if (!input_file.is_open()) {
-        THROWF("couldn't open file $0", filename);
+        THROWF("couldn't open file $0", option);
       }
       google::protobuf::io::IstreamInputStream stream(&input_file);
       if (!google::protobuf::TextFormat::Merge(&stream, options)) {
-        THROWF("error parsing configuration out of file $0", filename);
+        THROWF("error parsing configuration out of file $0", option);
       }
-    } else if (strcmp(argv[i], "-d") == 0) {
-      CheckNextArg(i, argc, "-d");
-      std::vector<std::string> names;
-      Split(argv[++i], ',', &names);
+    } else if (args.TryParseOption("-d", &option)) {
+      std::vector<std::string> names = absl::StrSplit(option, ',');
       for (const auto& name : names) {
         options->add_data_source(name);
       }
-    } else if (strcmp(argv[i], "-n") == 0) {
-      CheckNextArg(i, argc, "-n");
-      options->set_max_rows_per_level(strtod(argv[++i], NULL));
-    } else if (strcmp(argv[i], "-s") == 0) {
-      CheckNextArg(i, argc, "-s");
-      i++;
-      if (strcmp(argv[i], "vm") == 0) {
+    } else if (args.TryParseOption("--disassemble", &option)) {
+      options->mutable_disassemble_function()->assign(std::string(option));
+    } else if (args.TryParseIntegerOption("-n", &int_option)) {
+      options->set_max_rows_per_level(int_option);
+    } else if (args.TryParseOption("-s", &option)) {
+      if (option == "vm") {
         options->set_sort_by(Options::SORTBY_VMSIZE);
-      } else if (strcmp(argv[i], "file") == 0) {
+      } else if (option == "file") {
         options->set_sort_by(Options::SORTBY_FILESIZE);
-      } else if (strcmp(argv[i], "both") == 0) {
+      } else if (option == "both") {
         options->set_sort_by(Options::SORTBY_BOTH);
       } else {
-        THROWF("unknown value for -s: $0", argv[i]);
+        THROWF("unknown value for -s: $0", option);
       }
-    } else if (strcmp(argv[i], "-v") == 0) {
+    } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
-    } else if (strcmp(argv[i], "-vv") == 0) {
+    } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(2);
-    } else if (strcmp(argv[i], "-vvv") == 0) {
+    } else if (args.TryParseFlag("-vvv")) {
       options->set_verbose_level(3);
-    } else if (strcmp(argv[i], "-w") == 0) {
+    } else if (args.TryParseFlag("-w")) {
       output_options->max_label_len = SIZE_MAX;
-    } else if (strcmp(argv[i], "--list-sources") == 0) {
+    } else if (args.TryParseFlag("--list-sources")) {
       for (const auto& source : data_sources) {
         fprintf(stderr, "%s %s\n", FixedWidthString(source.name, 15).c_str(),
                 source.description);
       }
       return false;
-    } else if (strcmp(argv[i], "--help") == 0) {
+    } else if (args.TryParseFlag("--help")) {
       fputs(usage, stderr);
       return false;
-    } else if (argv[i][0] == '-') {
-      THROWF("Unknown option: $0", argv[i]);
+    } else if (absl::StartsWith(args.Arg(), "-")) {
+      THROWF("Unknown option: $0", args.Arg());
     } else {
       if (saw_separator) {
-        options->add_base_filename(argv[i]);
+        options->add_base_filename(std::string(args.ConsumeArg()));
       } else {
-        options->add_filename(argv[i]);
+        options->add_filename(std::string(args.ConsumeArg()));
       }
     }
   }
 
-  if (options->data_source_size() == 0) {
+  if (options->data_source_size() == 0 &&
+      !options->has_disassemble_function()) {
     // Default when no sources are specified.
     options->add_data_source("sections");
   }
@@ -1748,7 +1831,12 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   verbose_level = options.verbose_level();
 
-  bloaty.ScanAndRollup(options, output);
+  if (options.data_source_size() > 0) {
+    bloaty.ScanAndRollup(options, output);
+  } else if (options.has_disassemble_function()) {
+    bloaty.DisassembleFunction(options.disassemble_function(),
+                               output);
+  }
 }
 
 bool BloatyMain(const Options& options, const InputFileFactory& file_factory,

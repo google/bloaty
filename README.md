@@ -351,11 +351,12 @@ $ bloaty -d sections bloaty
 ## Symbols
 
 Symbols come from the symbol table, and represent individual
-functions or variables.  C++ symbols are demangled for
-convenience.
+functions or variables.  Use `symbols` for raw symbols, or `cppsymbols`
+to demangle C++ symbols for convenience.
+
 
 ```
-$ ./bloaty -d symbols bloaty
+$ ./bloaty -d cppsymbols bloaty
       VM SIZE                                                                                        FILE SIZE
  --------------                                                                                  --------------
   17.9%  81.9Ki [Unmapped]                                                                        7.39Mi  95.3%
