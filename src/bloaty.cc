@@ -1381,6 +1381,13 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
+  if (source.base_data_source() == "symbols") {
+    THROW(
+        "For custom data sources, use one of {rawsymbols, shortsymbols, "
+        "fullsymbols} for base_data_source instead of 'symbols', so you aren't "
+        "sensitive to the --demangle parameter.");
+  }
+
   auto iter = all_known_sources_.find(source.base_data_source());
 
   if (iter == all_known_sources_.end()) {
