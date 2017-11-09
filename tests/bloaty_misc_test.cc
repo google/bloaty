@@ -44,9 +44,10 @@ TEST_F(BloatyTest, MultiThreaded) {
   // Bloaty doesn't know or care that you are passing the same file multiple
   // times.
   std::vector<std::string> args{"bloaty"};
-  for (int i = 0; i < 2000; i++) {
+  const int count = 100;
+  for (int i = 0; i < count; i++) {
     args.push_back("02-section-count-overflow.o");
   }
   RunBloaty(args);  // Heavily multithreaded test.
-  EXPECT_EQ(top_row_->filesize, file_size * 2000);
+  EXPECT_EQ(top_row_->filesize, file_size * 100);
 }
