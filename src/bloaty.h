@@ -230,6 +230,7 @@ class ObjectFile {
   virtual void ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
 
   virtual bool GetDisassemblyInfo(absl::string_view symbol,
+                                  DataSource symbol_source,
                                   DisassemblyInfo* info) = 0;
 
   const InputFile& file_data() const { return *file_data_; }

@@ -245,6 +245,7 @@ class MachOObjectFile : public ObjectFile {
   }
 
   bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+                          DataSource /*symbol_source*/,
                           DisassemblyInfo* /*info*/) override {
     WARN("Mach-O files do not support disassembly yet");
     return false;

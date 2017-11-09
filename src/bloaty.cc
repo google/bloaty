@@ -1299,7 +1299,8 @@ class Bloaty {
 
   void AddDataSource(const std::string& name);
   void ScanAndRollup(const Options& options, RollupOutput* output);
-  void DisassembleFunction(string_view function, RollupOutput* output);
+  void DisassembleFunction(string_view function, const Options& options,
+                           RollupOutput* output);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
@@ -1312,22 +1313,23 @@ class Bloaty {
       auto configured_source = absl::make_unique<ConfiguredDataSource>(source);
 
       if (configured_source->effective_source == DataSource::kSymbols) {
-        switch (options.demangle()) {
-          case Options::DEMANGLE_NONE:
-            configured_source->effective_source = DataSource::kRawSymbols;
-            break;
-          case Options::DEMANGLE_SHORT:
-            configured_source->effective_source = DataSource::kShortSymbols;
-            break;
-          case Options::DEMANGLE_FULL:
-            configured_source->effective_source = DataSource::kFullSymbols;
-            break;
-          default:
-            BLOATY_UNREACHABLE();
-        }
+        configured_source->effective_source = EffectiveSymbolSource(options);
       }
 
       all_known_sources_[source.name] = std::move(configured_source);
+    }
+  }
+
+  static DataSource EffectiveSymbolSource(const Options& options) {
+    switch (options.demangle()) {
+      case Options::DEMANGLE_NONE:
+        return DataSource::kRawSymbols;
+      case Options::DEMANGLE_SHORT:
+        return DataSource::kShortSymbols;
+      case Options::DEMANGLE_FULL:
+        return DataSource::kFullSymbols;
+      default:
+        BLOATY_UNREACHABLE();
     }
   }
 
@@ -1563,10 +1565,12 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   }
 }
 
-void Bloaty::DisassembleFunction(string_view function, RollupOutput* output) {
+void Bloaty::DisassembleFunction(string_view function, const Options& options,
+                                 RollupOutput* output) {
   DisassemblyInfo info;
   for (auto& file : input_files_) {
-    if (file->GetDisassemblyInfo(function, &info)) {
+    if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
+                                 &info)) {
       output->SetDisassembly(::bloaty::DisassembleFunction(info));
       return;
     }
@@ -1806,8 +1810,7 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
   if (options.data_source_size() > 0) {
     bloaty.ScanAndRollup(options, output);
   } else if (options.has_disassemble_function()) {
-    bloaty.DisassembleFunction(options.disassemble_function(),
-                               output);
+    bloaty.DisassembleFunction(options.disassemble_function(), options, output);
   }
 }
 

@@ -1022,7 +1022,7 @@ class ElfObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(absl::string_view symbol,
+  bool GetDisassemblyInfo(absl::string_view symbol, DataSource symbol_source,
                           DisassemblyInfo* info) override {
     // Find the corresponding file range.  This also could be optimized not to
     // build the entire map.
@@ -1034,12 +1034,15 @@ class ElfObjectFile : public ObjectFile {
 
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;
-    RangeSink symbol_sink(&file_data(), DataSource::kSymbols, &base_map);
+    RangeSink symbol_sink(&file_data(), symbol_source, &base_map);
     symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
     ReadELFSymbols(file_data(), &symbol_sink, &symbol_table);
     auto entry = symbol_table.find(symbol);
     if (entry == symbol_table.end()) {
-      return false;
+      entry = symbol_table.find(ItaniumDemangle(symbol, symbol_source));
+      if (entry == symbol_table.end()) {
+        return false;
+      }
     }
     uint64_t vmaddr = entry->second.first;
     uint64_t size = entry->second.second;
