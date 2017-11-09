@@ -88,49 +88,49 @@ static const AbbrevPair kOperatorList[] = {
     {"qu", "?", 3},
     {"st", "sizeof", 0},  // Special syntax
     {"sz", "sizeof", 1},  // Not a real operator name, but used in expressions.
-    {nullptr, nullptr},
+    {nullptr, nullptr, 0},
 };
 
 // List of builtin types from Itanium C++ ABI.
 static const AbbrevPair kBuiltinTypeList[] = {
-  { "v", "void" },
-  { "w", "wchar_t" },
-  { "b", "bool" },
-  { "c", "char" },
-  { "a", "signed char" },
-  { "h", "unsigned char" },
-  { "s", "short" },
-  { "t", "unsigned short" },
-  { "i", "int" },
-  { "j", "unsigned int" },
-  { "l", "long" },
-  { "m", "unsigned long" },
-  { "x", "long long" },
-  { "y", "unsigned long long" },
-  { "n", "__int128" },
-  { "o", "unsigned __int128" },
-  { "f", "float" },
-  { "d", "double" },
-  { "e", "long double" },
-  { "g", "__float128" },
-  { "z", "ellipsis" },
-  { nullptr, nullptr }
+  { "v", "void", 0},
+  { "w", "wchar_t", 0},
+  { "b", "bool", 0},
+  { "c", "char", 0},
+  { "a", "signed char", 0},
+  { "h", "unsigned char", 0},
+  { "s", "short", 0},
+  { "t", "unsigned short", 0},
+  { "i", "int", 0},
+  { "j", "unsigned int", 0},
+  { "l", "long", 0},
+  { "m", "unsigned long", 0},
+  { "x", "long long", 0},
+  { "y", "unsigned long long", 0},
+  { "n", "__int128", 0},
+  { "o", "unsigned __int128", 0},
+  { "f", "float", 0},
+  { "d", "double", 0},
+  { "e", "long double", 0},
+  { "g", "__float128", 0},
+  { "z", "ellipsis", 0},
+  { nullptr, nullptr, 0}
 };
 
 // List of substitutions Itanium C++ ABI.
 static const AbbrevPair kSubstitutionList[] = {
-  { "St", "" },
-  { "Sa", "allocator" },
-  { "Sb", "basic_string" },
+  { "St", "", 0},
+  { "Sa", "allocator", 0},
+  { "Sb", "basic_string", 0},
   // std::basic_string<char, std::char_traits<char>,std::allocator<char> >
-  { "Ss", "string"},
+  { "Ss", "string", 0},
   // std::basic_istream<char, std::char_traits<char> >
-  { "Si", "istream" },
+  { "Si", "istream", 0},
   // std::basic_ostream<char, std::char_traits<char> >
-  { "So", "ostream" },
+  { "So", "ostream", 0},
   // std::basic_iostream<char, std::char_traits<char> >
-  { "Sd", "iostream" },
-  { nullptr, nullptr }
+  { "Sd", "iostream", 0},
+  { nullptr, nullptr, 0}
 };
 
 // State needed for demangling.  This struct is copied in almost every stack
@@ -318,6 +318,7 @@ static bool ParseDigit(State *state, int *digit) {
 
 // This function is used for handling an optional non-terminal.
 static bool Optional(bool status) {
+  (void)status;
   return true;
 }
 
