@@ -62,6 +62,12 @@ static void ParseMachOSymbols(RangeSink* sink) {
         continue;
       }
 
+      // macOS symbols have a leading underscore.  Strip it.
+      // TODO(haberman): are there cases where we shouldn't do this?
+      if (name[0] == '_') {
+        name = name.substr(1);
+      }
+
       sink->AddVMRange(addr, size, ItaniumDemangle(name, sink->data_source()));
     }
   }

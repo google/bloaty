@@ -251,23 +251,16 @@ std::string ItaniumDemangle(absl::string_view symbol, DataSource source) {
     return std::string(symbol);
   }
 
-  string_view demangle_from = symbol;
-  if (absl::StartsWith(symbol, "__Z")) {
-    // Remove leading underscore so demangling can succeed.
-    demangle_from = symbol.substr(1);
-  }
-
-
   if (source == DataSource::kShortSymbols) {
     char demangled[1024];
-    if (::Demangle(demangle_from.data(), demangled, sizeof(demangled))) {
+    if (::Demangle(symbol.data(), demangled, sizeof(demangled))) {
       return std::string(demangled);
     } else {
       return std::string(symbol);
     }
   } else if (source == DataSource::kFullSymbols) {
     char* demangled =
-        __cxa_demangle(demangle_from.data(), NULL, NULL, NULL);
+        __cxa_demangle(symbol.data(), NULL, NULL, NULL);
     if (demangled) {
       std::string ret(demangled);
       free(demangled);
