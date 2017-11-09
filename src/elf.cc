@@ -717,16 +717,8 @@ static void CheckNotObject(const char* source, RangeSink* sink) {
 }
 
 static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
-                           SymbolTable* table, Demangler* demangler) {
+                           SymbolTable* table) {
   bool is_object = IsObjectFile(file.data());
-  bool demangle = false;
-  bool strip = false;
-
-  if (sink) {
-    demangle = (sink->data_source() == DataSource::kCppSymbols ||
-                sink->data_source() == DataSource::kCppSymbolsStripped);
-    strip = (sink->data_source() == DataSource::kCppSymbolsStripped);
-  }
 
   ForEachElf(
       file, sink,
@@ -768,11 +760,9 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
             if (sink) {
-              std::string namestr(name);
-              if (demangle) {
-                namestr = demangler->Demangle(namestr, strip);
-              }
-              sink->AddVMRangeAllowAlias(full_addr, sym.st_size, namestr);
+              sink->AddVMRangeAllowAlias(
+                  full_addr, sym.st_size,
+                  ItaniumDemangle(name, sink->data_source()));
             }
             if (table) {
               table->insert(
@@ -1000,10 +990,10 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kSections:
           DoReadELFSections(sink, kReportBySectionName);
           break;
-        case DataSource::kSymbols:
-        case DataSource::kCppSymbols:
-        case DataSource::kCppSymbolsStripped:
-          ReadELFSymbols(sink->input_file(), sink, nullptr, &demangler_);
+        case DataSource::kRawSymbols:
+        case DataSource::kShortSymbols:
+        case DataSource::kFullSymbols:
+          ReadELFSymbols(sink->input_file(), sink, nullptr);
           break;
         case DataSource::kArchiveMembers:
           DoReadELFSections(sink, kReportByFilename);
@@ -1012,7 +1002,7 @@ class ElfObjectFile : public ObjectFile {
           CheckNotObject("compileunits", sink);
           SymbolTable symtab;
           ElfFile elf(sink->input_file().data());
-          ReadELFSymbols(sink->input_file(), nullptr, &symtab, &demangler_);
+          ReadELFSymbols(sink->input_file(), nullptr, &symtab);
           dwarf::File dwarf;
           ReadDWARFSections(elf, &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, sink);
@@ -1032,7 +1022,7 @@ class ElfObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(absl::string_view symbol,
+  bool GetDisassemblyInfo(absl::string_view symbol, DataSource symbol_source,
                           DisassemblyInfo* info) override {
     // Find the corresponding file range.  This also could be optimized not to
     // build the entire map.
@@ -1044,12 +1034,15 @@ class ElfObjectFile : public ObjectFile {
 
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;
-    RangeSink symbol_sink(&file_data(), DataSource::kSymbols, &base_map);
+    RangeSink symbol_sink(&file_data(), symbol_source, &base_map);
     symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
-    ReadELFSymbols(file_data(), &symbol_sink, &symbol_table, &demangler_);
+    ReadELFSymbols(file_data(), &symbol_sink, &symbol_table);
     auto entry = symbol_table.find(symbol);
     if (entry == symbol_table.end()) {
-      return false;
+      entry = symbol_table.find(ItaniumDemangle(symbol, symbol_source));
+      if (entry == symbol_table.end()) {
+        return false;
+      }
     }
     uint64_t vmaddr = entry->second.first;
     uint64_t size = entry->second.second;
@@ -1067,9 +1060,6 @@ class ElfObjectFile : public ObjectFile {
     ReadElfArchMode(file_data(), &info->arch, &info->mode);
     return true;
   }
-
- private:
-  Demangler demangler_;
 };
 
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file) {
