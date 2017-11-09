@@ -83,9 +83,6 @@ struct DataSourceDefinition {
 
 constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
-    {DataSource::kCppSymbols, "cppsymbols", "demangled C++ symbols."},
-    {DataSource::kCppSymbolsStripped, "cppxsyms",
-     "demangled C++ symbols, stripped to remove function parameters"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
     // Not a real data source, so we give it a junk DataSource::kInlines value
@@ -95,7 +92,11 @@ constexpr DataSourceDefinition data_sources[] = {
      "source line/file where inlined code came from.  requires debug info."},
     {DataSource::kSections, "sections", "object file section"},
     {DataSource::kSegments, "segments", "load commands in the binary"},
-    {DataSource::kSymbols, "symbols", "symbols from symbol table"},
+    {DataSource::kSymbols, "symbols",
+     "symbols from symbol table (configure demangling with --demangle)"},
+    {DataSource::kRawSymbols, "rawsymbols", "unmangled symbols"},
+    {DataSource::kFullSymbols, "fullsymbols", "full demangled symbols"},
+    {DataSource::kShortSymbols, "shortsymbols", "short demangled symbols"},
 };
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
@@ -241,104 +242,42 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
   return LineReader(pipe, true);
 }
 
+extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
+                                int* status);
 
-// Demangler ///////////////////////////////////////////////////////////////////
-
-void Demangler::Spawn() {
-  int toproc_pipe_fd[2];
-  int fromproc_pipe_fd[2];
-  if (pipe(toproc_pipe_fd) < 0 || pipe(fromproc_pipe_fd) < 0) {
-    perror("pipe");
-    exit(1);
+std::string ItaniumDemangle(absl::string_view symbol, DataSource source) {
+  if (source == DataSource::kRawSymbols) {
+    // No demangling.
+    return std::string(symbol);
   }
 
-  pid_t pid = fork();
-  if (pid < 0) {
-    perror("fork");
-    exit(1);
+  string_view demangle_from = symbol;
+  if (absl::StartsWith(symbol, "__Z")) {
+    // Remove leading underscore so demangling can succeed.
+    demangle_from = symbol.substr(1);
   }
 
-  if (pid) {
-    // Parent.
-    CHECK_SYSCALL(close(toproc_pipe_fd[0]));
-    CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-    int write_fd = toproc_pipe_fd[1];
-    int read_fd = fromproc_pipe_fd[0];
-    write_file_ = fdopen(write_fd, "w");
-    FILE* read_file = fdopen(read_fd, "r");
-    if (write_file_ == nullptr || read_file == nullptr) {
-      perror("fdopen");
-      exit(1);
+
+  if (source == DataSource::kShortSymbols) {
+    char demangled[1024];
+    if (::Demangle(demangle_from.data(), demangled, sizeof(demangled))) {
+      return std::string(demangled);
+    } else {
+      return std::string(symbol);
     }
-    reader_.reset(new LineReader(read_file, false));
-    child_pid_ = pid;
-  } else {
-    // Child.
-    CHECK_SYSCALL(close(STDIN_FILENO));
-    CHECK_SYSCALL(close(STDOUT_FILENO));
-    CHECK_SYSCALL(dup2(toproc_pipe_fd[0], STDIN_FILENO));
-    CHECK_SYSCALL(dup2(fromproc_pipe_fd[1], STDOUT_FILENO));
-
-    CHECK_SYSCALL(close(toproc_pipe_fd[0]));
-    CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-    CHECK_SYSCALL(close(toproc_pipe_fd[1]));
-    CHECK_SYSCALL(close(fromproc_pipe_fd[0]));
-
-    char prog[] = "c++filt";
-    char *const argv[] = {prog, nullptr};
-    CHECK_SYSCALL(execvp("c++filt", argv));
-  }
-}
-
-Demangler::~Demangler() {
-  if (write_file_) {
-    int status;
-    kill(child_pid_, SIGTERM);
-    waitpid(child_pid_, &status, WEXITED);
-    fclose(write_file_);
-  }
-}
-
-std::string Demangler::Demangle(absl::string_view symbol, bool strip) {
-  if (strip) {
-    char buf[1024];
-    if (::Demangle(symbol.data(), buf, sizeof(buf))) {
-      return std::string(buf);
+  } else if (source == DataSource::kFullSymbols) {
+    char* demangled =
+        __cxa_demangle(demangle_from.data(), NULL, NULL, NULL);
+    if (demangled) {
+      std::string ret(demangled);
+      free(demangled);
+      return ret;
     } else {
       return std::string(symbol);
     }
   } else {
-    return DemangleWithCppFilt(symbol);
+    BLOATY_UNREACHABLE();
   }
-}
-
-std::string Demangler::DemangleWithCppFilt(absl::string_view symbol) {
-  if (!write_file_) {
-    Spawn();
-  }
-
-  const char *writeptr = symbol.data();
-  const char *writeend = writeptr + symbol.size();
-
-  while (writeptr < writeend) {
-    size_t bytes = fwrite(writeptr, 1, writeend - writeptr, write_file_);
-    if (bytes == 0) {
-      perror("fread");
-      exit(1);
-    }
-    writeptr += bytes;
-  }
-  if (fwrite("\n", 1, 1, write_file_) != 1) {
-    perror("fwrite");
-    exit(1);
-  }
-  if (fflush(write_file_) != 0) {
-    perror("fflush");
-    exit(1);
-  }
-
-  reader_->Next();
-  return reader_->line();
 }
 
 
@@ -1342,15 +1281,20 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
 
 struct ConfiguredDataSource {
   ConfiguredDataSource(const DataSourceDefinition& definition_)
-      : definition(definition_), munger(new NameMunger()) {}
+      : definition(definition_),
+        effective_source(definition_.number),
+        munger(new NameMunger()) {}
 
   const DataSourceDefinition& definition;
+  // This will differ from definition.number for kSymbols, where we use the
+  // --demangle flag to set the true/effective source.
+  DataSource effective_source;
   std::unique_ptr<NameMunger> munger;
 };
 
 class Bloaty {
  public:
-  Bloaty(const InputFileFactory& factory);
+  Bloaty(const InputFileFactory& factory, const Options& options);
 
   void AddFilename(const std::string& filename, bool base_file);
 
@@ -1362,17 +1306,35 @@ class Bloaty {
 
   void AddDataSource(const std::string& name);
   void ScanAndRollup(const Options& options, RollupOutput* output);
-  void DisassembleFunction(absl::string_view function, RollupOutput* output);
+  void DisassembleFunction(string_view function, RollupOutput* output);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
 
   template <size_t T>
-  void AddBuiltInSources(const DataSourceDefinition (&sources)[T]) {
+  void AddBuiltInSources(const DataSourceDefinition (&sources)[T],
+                         const Options& options) {
     for (size_t i = 0; i < T; i++) {
-      auto& source = sources[i];
-      all_known_sources_[source.name] =
-          absl::make_unique<ConfiguredDataSource>(source);
+      const DataSourceDefinition& source = sources[i];
+      auto configured_source = absl::make_unique<ConfiguredDataSource>(source);
+
+      if (configured_source->effective_source == DataSource::kSymbols) {
+        switch (options.demangle()) {
+          case Options::DEMANGLE_NONE:
+            configured_source->effective_source = DataSource::kRawSymbols;
+            break;
+          case Options::DEMANGLE_SHORT:
+            configured_source->effective_source = DataSource::kShortSymbols;
+            break;
+          case Options::DEMANGLE_FULL:
+            configured_source->effective_source = DataSource::kFullSymbols;
+            break;
+          default:
+            BLOATY_UNREACHABLE();
+        }
+      }
+
+      all_known_sources_[source.name] = std::move(configured_source);
     }
   }
 
@@ -1394,9 +1356,9 @@ class Bloaty {
   int filename_position_;
 };
 
-Bloaty::Bloaty(const InputFileFactory& factory)
+Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
     : file_factory_(factory), filename_position_(-1) {
-  AddBuiltInSources(data_sources);
+  AddBuiltInSources(data_sources, options);
 }
 
 void Bloaty::AddFilename(const std::string& filename, bool is_base) {
@@ -1556,7 +1518,7 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) {
 
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(
-        &file->file_data(), source->definition.number, maps.base_map()));
+        &file->file_data(), source->effective_source, maps.base_map()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     sink_ptrs.push_back(sinks.back().get());
   }
@@ -1601,8 +1563,7 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   }
 }
 
-void Bloaty::DisassembleFunction(absl::string_view function,
-                                 RollupOutput* output) {
+void Bloaty::DisassembleFunction(string_view function, RollupOutput* output) {
   DisassemblyInfo info;
   for (auto& file : input_files_) {
     if (file->GetDisassemblyInfo(function, &info)) {
@@ -1620,24 +1581,30 @@ USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
-  --csv            Output in CSV format instead of human-readable.
-  -c <file>        Load configuration from <file>.
-  -d <sources>     Comma-separated list of sources to scan.
-  --disassemble=<function>   Disassemble this function (EXPERIMENTAL)
-  -n <num>         How many rows to show per level before collapsing
-                   other keys into '[Other]'.  Set to '0' for unlimited.
-                   Defaults to 20.
-  -s <sortby>      Whether to sort by VM or File size.  Possible values
-                   are:
-                     -s vm
-                     -s file
-                     -s both (the default: sorts by max(vm, file)).
-  -v               Verbose output.  Dumps warnings encountered during
-                   processing and full VM/file maps at the end.
-                   Add more v's (-vv, -vvv) for even more.
-  -w               Wide output; don't truncate long labels.
-  --help           Display this message and exit.
-  --list-sources   Show a list of available sources and exit.
+  --csv              Output in CSV format instead of human-readable.
+  -c <file>          Load configuration from <file>.
+  -d <sources>       Comma-separated list of sources to scan.
+  -C <mode>          How to demangle symbols.  Possible values are:
+  --demangle=<mode>    --demangle=none   no demangling, print raw symbols
+                       --demangle=short  demangle, but omit arg/return types
+                       --demangle=full   print full demangled type
+                     The default is --demangle=short.
+  --disassemble=<function>
+                     Disassemble this function (EXPERIMENTAL)
+  -n <num>           How many rows to show per level before collapsing
+                     other keys into '[Other]'.  Set to '0' for unlimited.
+                     Defaults to 20.
+  -s <sortby>        Whether to sort by VM or File size.  Possible values
+                     are:
+                       -s vm
+                       -s file
+                       -s both (the default: sorts by max(vm, file)).
+  -v                 Verbose output.  Dumps warnings encountered during
+                     processing and full VM/file maps at the end.
+                     Add more v's (-vv, -vvv) for even more.
+  -w                 Wide output; don't truncate long labels.
+  --help             Display this message and exit.
+  --list-sources     Show a list of available sources and exit.
 )";
 
 class ArgParser {
@@ -1709,7 +1676,7 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
                     OutputOptions* output_options) {
   bool saw_separator = false;
   ArgParser args(argc, argv);
-  absl::string_view option;
+  string_view option;
   int int_option;
 
   while (!args.IsDone()) {
@@ -1733,6 +1700,17 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
       std::vector<std::string> names = absl::StrSplit(option, ',');
       for (const auto& name : names) {
         options->add_data_source(name);
+      }
+    } else if (args.TryParseOption("-C", &option) ||
+               args.TryParseOption("--demangle", &option)) {
+      if (option == "none") {
+        options->set_demangle(Options::DEMANGLE_NONE);
+      } else if (option == "short") {
+        options->set_demangle(Options::DEMANGLE_SHORT);
+      } else if (option == "full") {
+        options->set_demangle(Options::DEMANGLE_FULL);
+      } else {
+        THROWF("unknown value for --demangle: $0", option);
       }
     } else if (args.TryParseOption("--disassemble", &option)) {
       options->mutable_disassemble_function()->assign(std::string(option));
@@ -1797,7 +1775,7 @@ bool ParseOptions(int argc, char* argv[], Options* options,
 
 void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
                   RollupOutput* output) {
-  bloaty::Bloaty bloaty(file_factory);
+  bloaty::Bloaty bloaty(file_factory, options);
 
   if (options.filename_size() == 0) {
     THROW("must specify at least one file");

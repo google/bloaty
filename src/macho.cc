@@ -62,7 +62,7 @@ static void ParseMachOSymbols(RangeSink* sink) {
         continue;
       }
 
-      sink->AddVMRange(addr, size, name);
+      sink->AddVMRange(addr, size, ItaniumDemangle(name, sink->data_source()));
     }
   }
 }
@@ -224,7 +224,9 @@ class MachOObjectFile : public ObjectFile {
         case DataSource::kSections:
           ParseMachOSections(sink);
           break;
-        case DataSource::kSymbols:
+        case DataSource::kRawSymbols:
+        case DataSource::kShortSymbols:
+        case DataSource::kFullSymbols:
           ParseMachOSymbols(sink);
           break;
         case DataSource::kArchiveMembers:

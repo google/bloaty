@@ -59,13 +59,18 @@ struct DisassemblyInfo;
 
 enum class DataSource {
   kArchiveMembers,
-  kCppSymbols,
-  kCppSymbolsStripped,
   kCompileUnits,
   kInlines,
   kSections,
   kSegments,
+
+  // We always set this to one of the concrete symbol types below before
+  // setting it on a sink.
   kSymbols,
+
+  kRawSymbols,
+  kFullSymbols,
+  kShortSymbols
 };
 
 class Error : public std::runtime_error {
@@ -313,36 +318,9 @@ class LineIterator {
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
 
-
-// Demangler ///////////////////////////////////////////////////////////////////
-
-// Demangles C++ symbols.
-//
-// There is no library we can (easily) link against for this, we have to shell
-// out to the "c++filt" program
-//
-// We can't use LineReader or popen() because we need to both read and write to
-// the subprocess.  So we need to roll our own.
-
-class Demangler {
- public:
-  Demangler() {}
-  ~Demangler();
-
-  // If |strip| is true, we try to strip parameters and other extraneous info
-  // from the symbol.
-  std::string Demangle(absl::string_view symbol, bool strip);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
-
-  void Spawn();
-  std::string DemangleWithCppFilt(absl::string_view symbol);
-
-  FILE* write_file_ = nullptr;
-  std::unique_ptr<LineReader> reader_;
-  pid_t child_pid_;
-};
+// Demangle C++ symbols according to the Itanium ABI.  The |source| argument
+// controls what demangling mode we are using.
+std::string ItaniumDemangle(absl::string_view symbol, DataSource source);
 
 
 // RangeMap ////////////////////////////////////////////////////////////////////
