@@ -25,6 +25,7 @@ set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
 set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
 set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
 set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
+add_definitions(-D_LIBCXXABI_FUNC_VIS=)  # For Demumble.
 add_subdirectory(third_party/re2)
 add_subdirectory(third_party/capstone)
 add_subdirectory(third_party/protobuf/cmake)
@@ -72,6 +73,7 @@ add_custom_command(
 
 add_library(libbloaty
     src/bloaty.cc
+    src/demangle.cc
     src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
     src/dwarf.cc
@@ -89,6 +91,8 @@ add_library(libbloaty
     third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
     third_party/abseil-cpp/absl/strings/substitute.cc
+    # One source file, no special build system needed.
+    third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
 
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)

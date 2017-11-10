@@ -62,7 +62,13 @@ static void ParseMachOSymbols(RangeSink* sink) {
         continue;
       }
 
-      sink->AddVMRange(addr, size, name);
+      // macOS symbols have a leading underscore.  Strip it.
+      // TODO(haberman): are there cases where we shouldn't do this?
+      if (name[0] == '_') {
+        name = name.substr(1);
+      }
+
+      sink->AddVMRange(addr, size, ItaniumDemangle(name, sink->data_source()));
     }
   }
 }
@@ -224,7 +230,9 @@ class MachOObjectFile : public ObjectFile {
         case DataSource::kSections:
           ParseMachOSections(sink);
           break;
-        case DataSource::kSymbols:
+        case DataSource::kRawSymbols:
+        case DataSource::kShortSymbols:
+        case DataSource::kFullSymbols:
           ParseMachOSymbols(sink);
           break;
         case DataSource::kArchiveMembers:
@@ -237,6 +245,7 @@ class MachOObjectFile : public ObjectFile {
   }
 
   bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+                          DataSource /*symbol_source*/,
                           DisassemblyInfo* /*info*/) override {
     WARN("Mach-O files do not support disassembly yet");
     return false;

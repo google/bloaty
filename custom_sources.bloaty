@@ -1,0 +1,113 @@
+
+# Custom data sources that are generally useful, so we ship them
+# with Bloaty.
+
+##
+# class_or_namespace: grabs everything up until the last "::".
+#
+# This is especially useful when paired with shortsymbols, eg.
+#
+#      VM SIZE                                                                                        FILE SIZE
+# --------------                                                                                  --------------
+#  37.6%  4.18Mi [None]                                                                            4.17Mi  37.6%
+#  30.9%  3.44Mi [Other]                                                                           3.44Mi  30.9%
+#   5.7%   648Ki insns                                                                              648Ki   5.7%
+#   2.9%   330Ki printAliasInstr                                                                    330Ki   2.9%
+#   2.9%   326Ki __cxxabiv1::(anonymous namespace)                                                  326Ki   2.9%
+#      23.6%  77.1Ki [Other]                                                                           77.1Ki  23.6%
+#      12.7%  41.5Ki __cxxabiv1::(anonymous namespace)::parse_type<>()                                 41.5Ki  12.7%
+#      10.1%  32.9Ki __cxxabiv1::(anonymous namespace)::parse_expression<>()                           32.9Ki  10.1%
+#      <...>
+#   2.7%   306Ki std::__1::__tree<>                                                                 306Ki   2.7%
+#      27.2%  83.3Ki std::__1::__tree<>::__find_equal<>()                                              83.3Ki  27.2%
+#      20.9%  64.0Ki std::__1::__tree<>::__construct_node()                                            64.0Ki  20.9%
+#      12.6%  38.8Ki std::__1::__tree<>::find<>()                                                      38.8Ki  12.6%
+#      <...>
+#   2.2%   247Ki std::__1::__hash_table<>                                                           247Ki   2.2%
+#      23.6%  58.5Ki std::__1::__hash_table<>::__rehash()                                              58.5Ki  23.6%
+#      20.3%  50.2Ki std::__1::__hash_table<>::__construct_node_hash()                                 50.2Ki  20.3%
+#      15.4%  38.2Ki std::__1::__hash_table<>::find<>()                                                38.2Ki  15.4%
+#      <...>
+#   1.8%   208Ki google::protobuf                                                                   207Ki   1.8%
+#      35.2%  73.2Ki google::protobuf::InsertIfNotPresent<>()                                          73.2Ki  35.2%
+#      25.8%  53.7Ki [Other]                                                                           53.4Ki  25.7%
+#       6.1%  12.7Ki google::protobuf::StrCat()                                                        12.7Ki   6.1%
+#      <...>
+#
+# etc.
+
+custom_data_source: {
+  name: "class_or_namespace"
+  base_data_source: "shortsymbols"
+
+  rewrite: {
+    pattern: "^(.*)::[^:]+$"
+    replacement: "\\1"
+  }
+}
+
+##
+# stripped_sections: the base section name
+#
+# This is useful when you are profiling object files that you have compiled
+# with -ffunction-sections/-fdata-sections.  Normally this makes "-d sections"
+# very noisy, because every function has a distinct section name.  This
+# removes the noise and gives you a base section name.
+custom_data_source: {
+  name: "stripped_sections"
+  base_data_source: "sections"
+
+ rewrite: {
+    pattern: "^\\.text"
+    replacement: ".text"
+  }
+  rewrite: {
+    pattern: "^\\.data.rel.ro"
+    replacement: ".data.rel.ro"
+  }
+  rewrite: {
+    pattern: "^\\.data"
+    replacement: ".data"
+  }
+  rewrite: {
+    pattern: "^\\.rela\\.text"
+    replacement: ".rela.text"
+  }
+  rewrite: {
+    pattern: "^.rela.data.rel.ro"
+    replacement: ".rela.data.rel.ro"
+  }
+  rewrite: {
+    pattern: "^.rela.rodata"
+    replacement: ".rela.rodata"
+  }
+  rewrite: {
+    pattern: "^.rela.data"
+    replacement: ".rela.data"
+  }
+  rewrite: {
+    pattern: "^.tdata"
+    replacement: ".tdata"
+  }
+  rewrite: {
+    pattern: "^.rodata"
+    replacement: ".rodata"
+  }
+  rewrite: {
+    pattern: "^.bss"
+    replacement: ".bss"
+  }
+  rewrite: {
+    pattern: "^.tbss"
+    replacement: ".tbss"
+  }
+}
+
+custom_data_source: {
+  name: "section_prefix"
+  base_data_source: "sections"
+  rewrite: {
+    pattern: "^(\\.[^.]+)"
+    replacement: "\\1"
+  }
+}
