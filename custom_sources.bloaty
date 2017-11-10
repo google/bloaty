@@ -78,11 +78,36 @@ custom_data_source: {
     replacement: ".rela.data.rel.ro"
   }
   rewrite: {
+    pattern: "^.rela.rodata"
+    replacement: ".rela.rodata"
+  }
+  rewrite: {
+    pattern: "^.rela.data"
+    replacement: ".rela.data"
+  }
+  rewrite: {
+    pattern: "^.tdata"
+    replacement: ".tdata"
+  }
+  rewrite: {
     pattern: "^.rodata"
     replacement: ".rodata"
   }
   rewrite: {
     pattern: "^.bss"
     replacement: ".bss"
+  }
+  rewrite: {
+    pattern: "^.tbss"
+    replacement: ".tbss"
+  }
+}
+
+custom_data_source: {
+  name: "section_prefix"
+  base_data_source: "sections"
+  rewrite: {
+    pattern: "^(\\.[^.]+)"
+    replacement: "\\1"
   }
 }
