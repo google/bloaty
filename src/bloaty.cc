@@ -131,7 +131,8 @@ void CheckedAdd(A* accum, B val) {
     THROW("integer overflow");
   }
 #else
-  bool safe = *accum < 0 ? (val >= INT_MIN - *accum) : (val <= INT_MAX - *accum);
+  bool safe = *accum < 0 ? (val >= std::numeric_limits<B>::max() - *accum)
+                         : (val <= std::numeric_limits<B>::max() - *accum);
   if (!safe) {
     THROW("integer overflow");
   }
@@ -1602,7 +1603,6 @@ void Bloaty::ScanAndRollupFiles(
   std::vector<Rollup> rollups(num_threads);
   std::vector<std::thread> threads(num_threads);
   ThreadSafeIterIndex index(files.size());
-
 
   for (int i = 0; i < num_threads; i++) {
     threads[i] = std::thread([this, &index, &files](Rollup* r) {
