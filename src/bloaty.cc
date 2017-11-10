@@ -1833,7 +1833,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
-    } else if (args.TryParseFlag("-v")) {
+    } else if (args.TryParseFlag("-vv")) {
       options->set_verbose_level(2);
     } else if (args.TryParseFlag("-vvv")) {
       options->set_verbose_level(3);
