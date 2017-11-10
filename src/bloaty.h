@@ -537,7 +537,7 @@ struct RollupOutput {
                       std::ostream* out) const;
 };
 
-bool ParseOptions(int argc, char* argv[], Options* options,
+bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,
                   OutputOptions* output_options, std::string* error);
 bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
                 RollupOutput* output, std::string* error);

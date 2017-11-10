@@ -1702,7 +1702,14 @@ Options:
 
 class ArgParser {
  public:
-  ArgParser(int argc, char* argv[]) : argc_(argc), argv_(argv) {}
+  ArgParser(int* argc, char** argv[])
+      : argc_(*argc),
+        argv_(*argv, *argv + *argc),
+        out_argc_(argc),
+        out_argv_(argv) {
+    *out_argc_ = 0;
+    ConsumeAndSaveArg();  // Executable name.
+  }
 
   bool IsDone() { return index_ == argc_; }
 
@@ -1715,6 +1722,10 @@ class ArgParser {
     string_view ret = Arg();
     index_++;
     return ret;
+  }
+
+  void ConsumeAndSaveArg() {
+    (*out_argv_)[(*out_argc_)++] = argv_[index_++];
   }
 
   // Singular flag like --csv or -v.
@@ -1760,13 +1771,14 @@ class ArgParser {
 
  public:
   int argc_;
-  char** argv_;
-  int index_ = 1;
-  string_view arg_;  // argv[index_]
+  std::vector<char*> argv_;
+  int* out_argc_;
+  char*** out_argv_;
+  int index_ = 0;
 };
 
-bool DoParseOptions(int argc, char* argv[], Options* options,
-                    OutputOptions* output_options) {
+bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
+                    Options* options, OutputOptions* output_options) {
   bool saw_separator = false;
   ArgParser args(argc, argv);
   string_view option;
@@ -1837,7 +1849,11 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
       fputs(usage, stderr);
       return false;
     } else if (absl::StartsWith(args.Arg(), "-")) {
-      THROWF("Unknown option: $0", args.Arg());
+      if (skip_unknown) {
+        args.ConsumeAndSaveArg();
+      } else {
+        THROWF("Unknown option: $0", args.Arg());
+      }
     } else {
       if (saw_separator) {
         options->add_base_filename(std::string(args.ConsumeArg()));
@@ -1856,10 +1872,10 @@ bool DoParseOptions(int argc, char* argv[], Options* options,
   return true;
 }
 
-bool ParseOptions(int argc, char* argv[], Options* options,
+bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,
                   OutputOptions* output_options, std::string* error) {
   try {
-    return DoParseOptions(argc, argv, options, output_options);
+    return DoParseOptions(skip_unknown, argc, argv, options, output_options);
   } catch (const bloaty::Error& e) {
     error->assign(e.what());
     return false;

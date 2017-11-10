@@ -21,7 +21,8 @@ int main(int argc, char *argv[]) {
   bloaty::Options options;
   bloaty::OutputOptions output_options;
   std::string error;
-  if (!bloaty::ParseOptions(argc, argv, &options, &output_options, &error)) {
+  if (!bloaty::ParseOptions(false, &argc, &argv, &options, &output_options,
+                            &error)) {
     if (!error.empty()) {
       fprintf(stderr, "bloaty: %s\n", error.c_str());
     }
