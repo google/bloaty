@@ -54,10 +54,9 @@
 #ifndef	_MACH_MACHINE_H_
 #define _MACH_MACHINE_H_
 
-#include <sys/appleapiopts.h>
+#include <stdint.h>
 
-#include <mach/machine/vm_types.h>
-#include <mach/boolean.h>
+typedef int32_t integer_t;
 
 /*
  *	For each host, there is a maximum possible number of
@@ -68,17 +67,6 @@
  *	possible cpu in the system.
  */
 
-struct machine_info {
-	integer_t	major_version;	/* kernel major version id */
-	integer_t	minor_version;	/* kernel minor version id */
-	integer_t	max_cpus;	/* max number of cpus compiled */
-	integer_t	avail_cpus;	/* number actually available */
-	vm_size_t	memory_size;	/* size of memory in bytes */
-};
-
-typedef struct machine_info	*machine_info_t;
-typedef struct machine_info	machine_info_data_t;	/* bogus */
-
 typedef integer_t	cpu_type_t;
 typedef integer_t	cpu_subtype_t;
 
@@ -88,27 +76,6 @@ typedef integer_t	cpu_subtype_t;
 #define CPU_STATE_SYSTEM	1
 #define CPU_STATE_IDLE		2
 #define CPU_STATE_NICE		3
-
-#ifdef	KERNEL_PRIVATE
-#ifdef   __APPLE_API_UNSTABLE
-
-struct machine_slot {
-/*boolean_t*/integer_t	is_cpu;		/* is there a cpu in this slot? */
-	cpu_type_t	cpu_type;	/* type of cpu */
-	cpu_subtype_t	cpu_subtype;	/* subtype of cpu */
-/*boolean_t*/integer_t	running;	/* is cpu running */
-	integer_t	cpu_ticks[CPU_STATE_MAX];
-	integer_t	clock_freq;	/* clock interrupt frequency */
-};
-
-typedef struct machine_slot	*machine_slot_t;
-typedef struct machine_slot	machine_slot_data_t;	/* bogus */
-
-extern struct machine_info	machine_info;
-extern struct machine_slot	machine_slot[];
-
-#endif /* __APPLE_API_UNSTABLE */
-#endif /* KERNEL_PRIVATE */
 
 /*
  *	Machine types known by all.

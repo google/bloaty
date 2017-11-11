@@ -32,20 +32,13 @@
  * <mach/machine.h> is needed here for the cpu_type_t and cpu_subtype_t types
  * and contains the constants for the possible values of these types.
  */
-#include <mach/machine.h>
+#include "third_party/darwin_xnu_macho/mach/machine.h"
 
 /*
  * <mach/vm_prot.h> is needed here for the vm_prot_t type and contains the 
  * constants that are or'ed together for the possible values of this type.
  */
-#include <mach/vm_prot.h>
-
-/*
- * <machine/thread_status.h> is expected to define the flavors of the thread
- * states and the structures of those flavors for each machine.
- */
-#include <mach/machine/thread_status.h>
-#include <architecture/byte_order.h>
+#include "third_party/darwin_xnu_macho/mach/vm_prot.h"
 
 /*
  * The 32-bit mach header appears at the very beginning of the object file for
