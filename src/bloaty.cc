@@ -334,6 +334,7 @@ class Rollup {
     row->filesize = file_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
+    output->diff_mode_ = true;
     CreateRows(row, base, options, true);
   }
 
@@ -415,6 +416,8 @@ class Rollup {
 void Rollup::CreateRows(RollupRow* row, const Rollup* base,
                         const Options& options, bool is_toplevel) const {
   if (base) {
+    // For a diff, the percentage is a comparison against the previous size of
+    // the same label at the same level.
     row->vmpercent = Percent(vm_total_, base->vm_total_);
     row->filepercent = Percent(file_total_, base->file_total_);
   }
@@ -526,7 +529,7 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
 
   std::sort(child_rows.begin(), child_rows.end(), &RollupRow::Compare);
 
-  // Compute percents for all rows (including "Other")
+  // For a non-diff, the percentage is compared to the total size of the parent.
   if (!base) {
     for (auto& child_row : child_rows) {
       child_row.vmpercent = Percent(child_row.vmsize, row->vmsize);
