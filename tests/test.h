@@ -58,7 +58,8 @@ std::string GetTestDirectory() {
 
 class BloatyTest : public ::testing::Test {
  protected:
-  void CheckConsistencyForRow(const bloaty::RollupRow& row, bool is_toplevel) {
+  void CheckConsistencyForRow(const bloaty::RollupRow& row, bool is_toplevel,
+                              bool diff_mode) {
     // If any children exist, they should sum up to this row's values.
     // Also none of the children should have the same name.
     std::unordered_set<std::string> names;
@@ -69,12 +70,12 @@ class BloatyTest : public ::testing::Test {
       for (const auto& child : row.sorted_children) {
         vmtotal += child.vmsize;
         filetotal += child.filesize;
-        CheckConsistencyForRow(child, false);
+        CheckConsistencyForRow(child, false, diff_mode);
         ASSERT_TRUE(names.insert(child.name).second);
         ASSERT_FALSE(child.vmsize == 0 && child.filesize == 0);
       }
 
-      if (!row.diff_mode) {
+      if (!diff_mode) {
         ASSERT_EQ(vmtotal, row.vmsize);
         ASSERT_EQ(filetotal, row.filesize);
       }
@@ -86,7 +87,7 @@ class BloatyTest : public ::testing::Test {
   }
 
   void CheckConsistency() {
-    CheckConsistencyForRow(*top_row_, true);
+    CheckConsistencyForRow(*top_row_, true, output_->diff_mode());
     ASSERT_EQ("TOTAL", top_row_->name);
   }
 

@@ -457,19 +457,19 @@ struct RollupRow {
   std::string name;
   int64_t vmsize = 0;
   int64_t filesize = 0;
+  int64_t sortkey;
   double vmpercent;
   double filepercent;
   std::vector<RollupRow> sorted_children;
-  std::vector<RollupRow> shrinking;
-  std::vector<RollupRow> mixed;
 
-  // When this is false, sorted_children contains actual sizes, and
-  // shrinking/mixed are unused.
-  //
-  // When this is true, sorted_children contains entites that grew, and
-  // shrinking/mixed indicate entries that shrank or that had one dimension grow
-  // and one shrink.
-  bool diff_mode = false;
+  static bool Compare(const RollupRow& a, const RollupRow& b) {
+    // Sort value high-to-low.
+    if (a.sortkey != b.sortkey) {
+      return a.sortkey > b.sortkey;
+    }
+    // Sort name low to high.
+    return a.name < b.name;
+  }
 };
 
 enum class OutputFormat {
@@ -485,7 +485,6 @@ struct OutputOptions {
 struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
-  const RollupRow& toplevel_row() { return toplevel_row_; }
 
   void AddDataSourceName(absl::string_view name) {
     source_names_.emplace_back(std::string(name));
@@ -516,6 +515,10 @@ struct RollupOutput {
 
   absl::string_view GetDisassembly() { return disassembly_; }
 
+  // For debugging.
+  const RollupRow& toplevel_row() const { return toplevel_row_; }
+  bool diff_mode() const { return diff_mode_; }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
@@ -523,6 +526,9 @@ struct RollupOutput {
   std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
   std::string disassembly_;
+
+  // When we are in diff mode, rollup sizes are relative to the baseline.
+  bool diff_mode_ = false;
 
   void PrettyPrint(size_t max_label_len, std::ostream* out) const;
   void PrintToCSV(std::ostream* out) const;
