@@ -35,20 +35,30 @@ message Options {
   // into '[Other]'.
   optional int32 max_rows_per_level = 4 [default = 20];
 
+  enum Demangle {
+    DEMANGLE_SHORT = 0;
+    DEMANGLE_FULL = 1;
+    DEMANGLE_NONE = 2;
+  }
+  optional Demangle demangle = 5 [default = DEMANGLE_SHORT];
+
   // What to sort the output by.
   enum SortBy {
     SORTBY_BOTH = 0;
     SORTBY_VMSIZE = 1;
     SORTBY_FILESIZE = 2;
   }
-  optional SortBy sort_by = 5 [default = SORTBY_BOTH];
+  optional SortBy sort_by = 6 [default = SORTBY_BOTH];
 
   // When greater than zero, Bloaty will print verbose output to stderr.
   // TODO(haberman): should this be in the output object instead?
-  optional int32 verbose_level = 6;
+  optional int32 verbose_level = 7;
 
   // Custom data sources for this analysis.
-  repeated CustomDataSource custom_data_source = 7;
+  repeated CustomDataSource custom_data_source = 8;
+
+  // Disassemble this function.
+  optional string disassemble_function = 9;
 }
 
 // A custom data source allows users to create their own label space by

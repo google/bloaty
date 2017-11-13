@@ -21,11 +21,16 @@ endif()
 
 # Add third_party libraries, disabling as much as we can of their builds.
 set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
+set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
+set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
 set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
 set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
+add_definitions(-D_LIBCXXABI_FUNC_VIS=)  # For Demumble.
 add_subdirectory(third_party/re2)
+add_subdirectory(third_party/capstone)
 add_subdirectory(third_party/protobuf/cmake)
 
+include_directories(third_party/capstone/include)
 include_directories(third_party/re2)
 include_directories(third_party/protobuf/src)
 include_directories(.)
@@ -37,7 +42,7 @@ include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
-SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 # When using Ninja, compiler output won't be colorized without this.
 include(CheckCXXCompilerFlag)
@@ -68,6 +73,8 @@ add_custom_command(
 
 add_library(libbloaty
     src/bloaty.cc
+    src/demangle.cc
+    src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
     src/dwarf.cc
     src/elf.cc
@@ -81,12 +88,17 @@ add_library(libbloaty
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/numbers.cc
     third_party/abseil-cpp/absl/strings/str_cat.cc
+    third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
     third_party/abseil-cpp/absl/strings/substitute.cc
+    # One source file, no special build system needed.
+    third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
 
+set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
+
 add_executable(bloaty src/main.cc)
-target_link_libraries(bloaty libbloaty libprotoc re2)
+target_link_libraries(bloaty "${LIBBLOATY_LIBS}")
 
 # All of this is to add -pthread, which is required by re2 (not us).
 find_package(Threads REQUIRED)
@@ -113,7 +125,7 @@ if(BUILD_TESTING)
 
   foreach(target ${TEST_TARGETS})
     add_executable(${target} tests/${target}.cc)
-    target_link_libraries(${target} libbloaty libprotoc re2 gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
+    target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
   endforeach(target)
 
   if($ENV{LIB_FUZZING_ENGINE})
@@ -121,7 +133,7 @@ if(BUILD_TESTING)
   else()
     add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
   endif()
-  target_link_libraries(fuzz_test libbloaty libprotoc re2 "${CMAKE_THREAD_LIBS_INIT}")
+  target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
 
   file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
 

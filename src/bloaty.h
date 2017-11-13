@@ -31,6 +31,7 @@
 
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
+#include "capstone.h"
 #include "re2/re2.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
@@ -51,19 +52,25 @@
 
 namespace bloaty {
 
-class DualMap;
 class NameMunger;
 class Options;
+struct DualMap;
+struct DisassemblyInfo;
 
 enum class DataSource {
   kArchiveMembers,
-  kCppSymbols,
-  kCppSymbolsStripped,
   kCompileUnits,
   kInlines,
   kSections,
   kSegments,
+
+  // We always set this to one of the concrete symbol types below before
+  // setting it on a sink.
   kSymbols,
+
+  kRawSymbols,
+  kFullSymbols,
+  kShortSymbols
 };
 
 class Error : public std::runtime_error {
@@ -185,21 +192,55 @@ class RangeSink {
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
 };
 
-// The main interface that modules should implement to handle a particular file
-// type.
-class FileHandler {
- public:
-  virtual ~FileHandler() {}
 
+// NameMunger //////////////////////////////////////////////////////////////////
+
+// Use to transform input names according to the user's configuration.
+// For example, the user can use regexes.
+class NameMunger {
+ public:
+  NameMunger() {}
+
+  // Adds a regex that will be applied to all names.  All regexes will be
+  // applied in sequence.
+  void AddRegex(const std::string& regex, const std::string& replacement);
+
+  std::string Munge(absl::string_view name) const;
+
+  bool IsEmpty() const { return regexes_.empty(); }
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
+  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
+};
+
+typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
+
+// Represents an object/executable file in a format like ELF, Mach-O, PE, etc.
+// To support a new file type, implement this interface.
+class ObjectFile {
+ public:
+  ObjectFile(std::unique_ptr<InputFile> file_data)
+      : file_data_(std::move(file_data)) {}
+  virtual ~ObjectFile() {}
   virtual void ProcessBaseMap(RangeSink* sink) = 0;
 
   // Process this file, pushing data to |sinks| as appropriate for each data
   // source.
   virtual void ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+
+  virtual bool GetDisassemblyInfo(absl::string_view symbol,
+                                  DataSource symbol_source,
+                                  DisassemblyInfo* info) = 0;
+
+  const InputFile& file_data() const { return *file_data_; }
+
+ private:
+  std::unique_ptr<InputFile> file_data_;
 };
 
-std::unique_ptr<FileHandler> TryOpenELFFile(const InputFile& file);
-std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file);
+std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
+std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
 
 namespace dwarf {
 
@@ -213,8 +254,6 @@ struct File {
 };
 
 }  // namespace dwarf
-
-typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
@@ -280,64 +319,9 @@ class LineIterator {
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
 
-// C++ Symbol names can get really long because they include all the parameter
-// types.  For example:
-//
-// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
-//
-// This parameter info is often unnecessary.  This class strips it.  This will
-// cause ambiguity in the case of overloaded functions, but the user can
-// disambiguate with "cppsymbols".
-//
-// This transformation is, by its nature, heuristic and inexact.  Improvements
-// welcome.
-inline absl::string_view StripName(absl::string_view name) {
-  absl::ConsumeSuffix(&name, " const");
-
-  if (!name.empty() && name[name.size() - 1] != ')') {
-    // This doesn't look like a function.
-    return name;
-  }
-
-  int nesting = 0;
-  for (size_t n = name.size() - 1; n < name.size(); --n) {
-    if (name[n] == '(') {
-      if (--nesting == 0) {
-        return name.substr(0, n);
-      }
-    } else if (name[n] == ')') {
-      ++nesting;
-    }
-  }
-
-  return name;
-}
-
-
-// Demangler ///////////////////////////////////////////////////////////////////
-
-// Demangles C++ symbols.
-//
-// There is no library we can (easily) link against for this, we have to shell
-// out to the "c++filt" program
-//
-// We can't use LineReader or popen() because we need to both read and write to
-// the subprocess.  So we need to roll our own.
-
-class Demangler {
- public:
-  Demangler();
-  ~Demangler();
-
-  std::string Demangle(const std::string& symbol);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
-
-  FILE* write_file_;
-  std::unique_ptr<LineReader> reader_;
-  pid_t child_pid_;
-};
+// Demangle C++ symbols according to the Itanium ABI.  The |source| argument
+// controls what demangling mode we are using.
+std::string ItaniumDemangle(absl::string_view symbol, DataSource source);
 
 
 // RangeMap ////////////////////////////////////////////////////////////////////
@@ -384,6 +368,11 @@ class RangeMap {
   // Translates |addr| into the other domain, returning |true| if this was
   // successful.
   bool Translate(uint64_t addr, uint64_t *translated) const;
+
+  // Looks for a range within this map that contains |addr|.  If found, returns
+  // true and sets |label| to the corresponding label, and |offset| to the
+  // offset from the beginning of this range.
+  bool TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const;
 
   template <class Func>
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
@@ -434,11 +423,27 @@ class RangeMap {
   Map::iterator FindContaining(uint64_t addr);
   Map::const_iterator FindContaining(uint64_t addr) const;
   Map::const_iterator FindContainingOrAfter(uint64_t addr) const;
-
-  Entry* TryGet(uint64_t addr, uint64_t* start, uint64_t* size) const;
-  const std::string* TryGetExactly(uint64_t addr, uint64_t* size) const;
 };
 
+
+// DualMap /////////////////////////////////////////////////////////////////////
+
+// Contains a RangeMap for VM space and file space for a given file.
+
+struct DualMap {
+  RangeMap vm_map;
+  RangeMap file_map;
+};
+
+struct DisassemblyInfo {
+  absl::string_view text;
+  DualMap symbol_map;
+  cs_arch arch;
+  cs_mode mode;
+  uint64_t start_address;
+};
+
+std::string DisassembleFunction(const DisassemblyInfo& info);
 
 // Top-level API ///////////////////////////////////////////////////////////////
 
@@ -487,17 +492,29 @@ struct RollupOutput {
   }
 
   void Print(const OutputOptions& options, std::ostream* out) {
-    switch (options.output_format) {
-      case bloaty::OutputFormat::kPrettyPrint:
-        PrettyPrint(options.max_label_len, out);
-        break;
-      case bloaty::OutputFormat::kCSV:
-        PrintToCSV(out);
-        break;
-      default:
-        BLOATY_UNREACHABLE();
+    if (!source_names_.empty()) {
+      switch (options.output_format) {
+        case bloaty::OutputFormat::kPrettyPrint:
+          PrettyPrint(options.max_label_len, out);
+          break;
+        case bloaty::OutputFormat::kCSV:
+          PrintToCSV(out);
+          break;
+        default:
+          BLOATY_UNREACHABLE();
+      }
+    }
+
+    if (!disassembly_.empty()) {
+      *out << disassembly_;
     }
   }
+
+  void SetDisassembly(absl::string_view disassembly) {
+    disassembly_ = std::string(disassembly);
+  }
+
+  absl::string_view GetDisassembly() { return disassembly_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
@@ -505,6 +522,7 @@ struct RollupOutput {
 
   std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
+  std::string disassembly_;
 
   void PrettyPrint(size_t max_label_len, std::ostream* out) const;
   void PrintToCSV(std::ostream* out) const;
@@ -519,7 +537,7 @@ struct RollupOutput {
                       std::ostream* out) const;
 };
 
-bool ParseOptions(int argc, char* argv[], Options* options,
+bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,
                   OutputOptions* output_options, std::string* error);
 bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
                 RollupOutput* output, std::string* error);

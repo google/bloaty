@@ -105,9 +105,16 @@ class BloatyTest : public ::testing::Test {
     bloaty::Options options;
     bloaty::OutputOptions output_options;
     std::string error;
-    bool ok = bloaty::ParseOptions(strings.size(), StrArr(strings).get(),
-                                   &options, &output_options, &error);
-    BLOATY_ASSERT(ok);
+    StrArr str_arr(strings);
+    int argc = strings.size();
+    char** argv = str_arr.get();
+    bool ok = bloaty::ParseOptions(false, &argc, &argv, &options,
+                                   &output_options, &error);
+    if (!ok) {
+      std::cerr << "Error parsing options: " << error;
+      return false;
+    }
+
     bloaty::MmapInputFileFactory factory;
     if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
       CheckConsistency();
