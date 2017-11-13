@@ -42,8 +42,7 @@
  * and contains the constants for the possible values of these types.
  */
 #include <stdint.h>
-#include <mach/machine.h>
-#include <architecture/byte_order.h>
+#include "third_party/darwin_xnu_macho/mach/machine.h"
 
 #define FAT_MAGIC	0xcafebabe
 #define FAT_CIGAM	0xbebafeca	/* NXSwapLong(FAT_MAGIC) */
