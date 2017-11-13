@@ -64,8 +64,6 @@
 #ifndef __ASSEMBLER__
 
 #include <stdint.h>
-#include <mach/machine/vm_types.h>
-#include <mach/boolean.h>
 
 typedef int32_t integer_t;
 
@@ -79,51 +77,6 @@ typedef integer_t	cpu_threadtype_t;
 #define CPU_STATE_SYSTEM	1
 #define CPU_STATE_IDLE		2
 #define CPU_STATE_NICE		3
-
-#ifdef	KERNEL_PRIVATE
-
-#include <sys/cdefs.h>
-
-__BEGIN_DECLS
-cpu_type_t			cpu_type(void);
-
-cpu_subtype_t		cpu_subtype(void);
-
-cpu_threadtype_t	cpu_threadtype(void);
-__END_DECLS
-
-#ifdef	MACH_KERNEL_PRIVATE
-
-struct machine_info {
-	integer_t	major_version;		/* kernel major version id */
-	integer_t	minor_version;		/* kernel minor version id */
-	integer_t	max_cpus;			/* max number of CPUs possible */
-	uint32_t	memory_size;		/* size of memory in bytes, capped at 2 GB */
-	uint64_t	max_mem;			/* actual size of physical memory */
-	uint32_t	physical_cpu;		/* number of physical CPUs now available */
-	integer_t	physical_cpu_max;	/* max number of physical CPUs possible */
-	uint32_t	logical_cpu;		/* number of logical cpu now available */
-	integer_t	logical_cpu_max;	/* max number of physical CPUs possible */
-};
-
-typedef struct machine_info	*machine_info_t;
-typedef struct machine_info	machine_info_data_t;
-
-extern struct machine_info	machine_info;
-
-__BEGIN_DECLS
-cpu_type_t			slot_type(
-						int		slot_num);
-
-cpu_subtype_t		slot_subtype(
-						int		slot_num);
-
-cpu_threadtype_t	slot_threadtype(
-						int		slot_num);
-__END_DECLS
-
-#endif	/* MACH_KERNEL_PRIVATE */
-#endif	/* KERNEL_PRIVATE */
 
 
 /*
