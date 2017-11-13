@@ -150,8 +150,9 @@ class ElfFile {
 
   bool Initialize();
 
-  string_view GetRegion(size_t start, size_t n) const {
-    if (SIZE_MAX - n <= start || start + n > data_.size()) {
+  string_view GetRegion(uint64_t start, uint64_t n) const {
+    if (UINT64_MAX - n <= start ||
+        start + n > static_cast<uint64_t>(data_.size())) {
       THROW("ELF region out-of-bounds");
     }
     return data_.substr(start, n);
@@ -433,9 +434,11 @@ bool ElfFile::Initialize() {
 
   header_region_ = GetRegion(0, header_.e_ehsize);
   section_headers_ =
-      GetRegion(header_.e_shoff, header_.e_shentsize * section_count_);
+      GetRegion(header_.e_shoff,
+                static_cast<uint64_t>(header_.e_shentsize) * section_count_);
   segment_headers_ =
-      GetRegion(header_.e_phoff, header_.e_phentsize * header_.e_phnum);
+      GetRegion(header_.e_phoff,
+                static_cast<uint64_t>(header_.e_phentsize) * header_.e_phnum);
 
   if (section_count_ > 0) {
     ReadSection(section_string_index_, &section_name_table_);
@@ -454,8 +457,10 @@ void ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
   }
 
   Elf64_Phdr* header = &segment->header_;
-  ReadStruct<Elf32_Phdr>(header_.e_phoff + header_.e_phentsize * index,
-                         PhdrMunger(), header);
+  ReadStruct<Elf32_Phdr>(
+      CheckedAdd(header_.e_phoff,
+                 static_cast<uint64_t>(header_.e_phentsize) * index),
+      PhdrMunger(), header);
   segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
 }
 
@@ -466,8 +471,10 @@ void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   }
 
   Elf64_Shdr* header = &section->header_;
-  ReadStruct<Elf32_Shdr>(header_.e_shoff + header_.e_shentsize * index,
-                         ShdrMunger(), header);
+  ReadStruct<Elf32_Shdr>(
+      CheckedAdd(header_.e_shoff,
+                 static_cast<uint64_t>(header_.e_shentsize) * index),
+      ShdrMunger(), header);
 
   if (header->sh_type == SHT_NOBITS) {
     section->contents_ = string_view();
