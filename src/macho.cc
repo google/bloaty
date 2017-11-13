@@ -18,67 +18,19 @@
 
 #include <cassert>
 
-#ifdef __APPLE__
-  #include <mach-o/loader.h>
-  #include <mach-o/fat.h>
-  #include <mach-o/nlist.h>
-  #include <mach-o/reloc.h>
+#include "third_party/darwin_xnu_macho/mach-o/loader.h"
+#include "third_party/darwin_xnu_macho/mach-o/fat.h"
+#include "third_party/darwin_xnu_macho/mach-o/nlist.h"
+#include "third_party/darwin_xnu_macho/mach-o/reloc.h"
 
-  #include <machine/endian.h>
-  #define be32toh(x) OSSwapBigToHostInt32(x)
-#endif
-
-// There are several programs that offer useful information about
-// binaries:
-//
-// - otool: display object file headers and contents (including disassembly)
-// - nm: display symbols
-// - size: display binary size
-// - symbols: display symbols, drawing on more sources
-// - pagestuff: display page-oriented information
-// - dsymutil: create .dSYM bundle with DWARF information inside
-// - dwarfdump: dump DWARF debugging information from .o or .dSYM
-
-#define CHECK_RETURN(call) if (!(call)) { return false; }
-
-namespace bloaty {
-
-#ifndef __APPLE__
-std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
-  return nullptr;
-}
-#else // __APPLE__
-
-bool StartsWith(const std::string& haystack, const std::string& needle) {
-  return !haystack.compare(0, needle.length(), needle);
+ABSL_ATTRIBUTE_NORETURN
+static void Throw(const char *str, int line) {
+  throw bloaty::Error(str, __FILE__, line);
 }
 
-static bool ParseMachOSymbols(RangeSink* sink) {
-  std::string cmd = std::string("symbols -noSources -noDemangling ") +
-                    sink->input_file().filename();
-
-  // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
-  // [16 spaces]0x00000001000015a0 (     0x9) __ZN10LineReader5beginEv [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
-  // [16 spaces]0x0000000100038468 (     0x8) __ZN3re2L12empty_stringE [NameNList, MangledNameNList, NList]
-  RE2 pattern(R"(^\s{16}0x([0-9a-f]+) \(\s*0x([0-9a-f]+)\) (.+) \[((?:FUNC)?))");
-
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-    std::string name;
-    std::string maybe_func;
-    size_t addr, size;
-
-    if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size),
-                          &name, &maybe_func)) {
-      if (StartsWith(name, "DYLD-STUB")) {
-        continue;
-      }
-
-      sink->AddVMRange(addr, size, name);
-    }
-  }
-
-  return true;
-}
+#define THROW(msg) Throw(msg, __LINE__)
+#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
+#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
 // segname (& sectname) may NOT be NULL-terminated,
 //   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
@@ -87,21 +39,33 @@ static std::string str_from_char(const char *s, size_t maxlen) {
   return std::string(s, strnlen(s, maxlen));
 }
 
-static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
+namespace bloaty {
+
+uint32_t MaybeByteSwap(uint32_t val, bool is_native_endian) {
+  if (!is_native_endian) {
+    val = ByteSwap(val);
+  }
+  return val;
+}
+
+static void ParseMachOLoadCommands(RangeSink* sink) {
   const uint8_t *raw_data = (const uint8_t *) sink->input_file().data().data();
   uint32_t magic = *(uint32_t *) raw_data;
 
   uint32_t offset = 0; // file offset for 64 bit in fat binaries (0 for 64 bit native)
 
   if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+    bool is_native_endian = (magic == FAT_MAGIC);
     struct fat_header *fat_header = (struct fat_header *) raw_data;
     struct fat_arch *arch = (struct fat_arch *) (fat_header + 1);
 
-    for (uint32_t i = 0; i < be32toh(fat_header->nfat_arch); i++, arch++) {
-      if (be32toh(arch->cputype) & CPU_ARCH_ABI64) {
-        offset = be32toh(arch->offset);
+    for (uint32_t i = 0; i < MaybeByteSwap(fat_header->nfat_arch, is_native_endian); i++, arch++) {
+      if (MaybeByteSwap(arch->cputype, is_native_endian) & CPU_ARCH_ABI64) {
+        offset = MaybeByteSwap(arch->offset, is_native_endian);
       } else {
-        sink->AddRange("[Non-64bit arch in fat binary]", 0, 0, be32toh(arch->offset), be32toh(arch->size));
+        sink->AddRange("[Non-64bit arch in fat binary]", 0, 0,
+                       MaybeByteSwap(arch->offset, is_native_endian),
+                       MaybeByteSwap(arch->size, is_native_endian));
       }
     }
 
@@ -133,14 +97,14 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
       if (str_from_char(segment->segname, 16) == SEG_LINKEDIT) {
         __linkedit_segment = segment;
       }
-      
-      if (data_source == DataSource::kSegments) { // if segments are all we need this is enough
+
+      if (sink->data_source() == DataSource::kSegments) { // if segments are all we need this is enough
         sink->AddRange(str_from_char(segment->segname, 16),
                        segment->vmaddr,
                        segment->vmsize,
                        segment->fileoff,
                        segment->filesize);
-      } else if (data_source == DataSource::kSections) { // otherwise load sections
+      } else if (sink->data_source() == DataSource::kSections) { // otherwise load sections
         // advance past segment command header
         struct section_64 *section = (struct section_64 *) (segment + 1);
         for (uint32_t j = 0; j < segment->nsects; j++, section++) {
@@ -164,13 +128,13 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
           sink->AddRange(label, section->addr, section->size, section->offset, filesize);
         }
       } else {
-        return false;
+        BLOATY_UNREACHABLE();
       }
     }
 
     // additional __LINKEDIT info
     // not "sections" per se, but nevertheless useful (and more complex parsing logic)
-    if (data_source == DataSource::kSections) {
+    if (sink->data_source() == DataSource::kSections) {
       if (command->cmd == LC_DYLD_INFO || command->cmd == LC_DYLD_INFO_ONLY) {
         // technically load commands can come in any order
         // however unless deliberately hand crafted, LC_SEGMENT_64 comes before any others
@@ -251,40 +215,73 @@ static bool ParseMachOLoadCommands(RangeSink* sink, DataSource data_source) {
     CHECK_LINKEDIT_DATA_COMMAND(LC_DYLIB_CODE_SIGN_DRS, "Code Signing DRs");
     CHECK_LINKEDIT_DATA_COMMAND(LC_LINKER_OPTIMIZATION_HINT, "Optimizatio nHints");
   }
-
-  return true;
 }
 
-class MachOFileHandler : public FileHandler {
-  bool ProcessBaseMap(RangeSink* sink) override {
-    return ParseMachOLoadCommands(sink, DataSource::kSegments);
+static void ParseMachOSymbols(RangeSink* sink) {
+  std::string cmd = std::string("symbols -noSources -noDemangling ") +
+                    sink->input_file().filename();
+
+  // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
+  // [16 spaces]0x00000001000015a0 (     0x9) __ZN10LineReader5beginEv [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
+  // [16 spaces]0x0000000100038468 (     0x8) __ZN3re2L12empty_stringE [NameNList, MangledNameNList, NList]
+  RE2 pattern(R"(^\s{16}0x([0-9a-f]+) \(\s*0x([0-9a-f]+)\) (.+) \[((?:FUNC)?))");
+
+  for ( auto& line : ReadLinesFromPipe(cmd) ) {
+    std::string name;
+    std::string maybe_func;
+    size_t addr, size;
+
+    if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size),
+                          &name, &maybe_func)) {
+      if (absl::StartsWith(name, "DYLD-STUB")) {
+        continue;
+      }
+
+      sink->AddVMRange(addr, size, name);
+    }
+  }
+}
+
+class MachOObjectFile : public ObjectFile {
+ public:
+  MachOObjectFile(std::unique_ptr<InputFile> file_data)
+      : ObjectFile(std::move(file_data)) {}
+
+  void ProcessBaseMap(RangeSink* sink) override {
+    ParseMachOLoadCommands(sink);
   }
 
-  bool ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  void ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
         case DataSource::kSections:
-          CHECK_RETURN(ParseMachOLoadCommands(sink, sink->data_source()));
+          ParseMachOLoadCommands(sink);
           break;
-        case DataSource::kSymbols:
-          CHECK_RETURN(ParseMachOSymbols(sink));
+        case DataSource::kRawSymbols:
+        case DataSource::kShortSymbols:
+        case DataSource::kFullSymbols:
+          ParseMachOSymbols(sink);
           break;
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
         case DataSource::kInlines:
         default:
-          fprintf(stderr, "Mach-O doesn't support this data source.\n");
-          return false;
+          THROW("Mach-O doesn't support this data source");
       }
     }
+  }
 
-    return true;
+  bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+                          DataSource /*symbol_source*/,
+                          DisassemblyInfo* /*info*/) override {
+    WARN("Mach-O files do not support disassembly yet");
+    return false;
   }
 };
 
-std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
-  uint32_t magic = *(uint32_t *) file.data().data();
+std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
+  uint32_t magic = *(uint32_t *) file->data().data();
 
   // 32 bit binaries are effectively deprecated, don't bother
   // note check for MH_CIGAM_64 is unneccessary as long as this tool is executed on
@@ -295,12 +292,11 @@ std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file) {
   //   reading sizes and offsets from load commands
   // for fat binaries, reports info on 64 bit binary (file size and offsets relative to only the 64 bit part)
   if (magic == MH_MAGIC_64 || magic == FAT_CIGAM || magic == FAT_MAGIC) {
-    return std::unique_ptr<FileHandler>(new MachOFileHandler);
+    return std::unique_ptr<ObjectFile>(new MachOObjectFile(std::move(file)));
   }
 
   return nullptr;
 }
-#endif //__APPLE__
 
 }  // namespace bloaty
 

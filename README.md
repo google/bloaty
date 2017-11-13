@@ -17,20 +17,27 @@ This is not an official Google product.
 
 ## Building Bloaty
 
+Bloaty uses CMake to build.  All dependencies are included as Git submodules.
 To build, simply run:
 
 ```
-$ make
+$ cmake .
+$ make -j6
 ```
 
-Bloaty depends on RE2, so the Makefile will download it
-(via a Git submodule) and build that also.
-
-To run the tests (requires that `cmake` is installed and
-available on your path) run:
+To run tests, type:
 
 ```
 $ make test
+```
+
+All the normal CMake features are available, like out-of-source builds:
+
+```
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make -j6
 ```
 
 ## Running Bloaty
@@ -344,11 +351,12 @@ $ bloaty -d sections bloaty
 ## Symbols
 
 Symbols come from the symbol table, and represent individual
-functions or variables.  C++ symbols are demangled for
-convenience.
+functions or variables.  Use `symbols` for raw symbols, or `cppsymbols`
+to demangle C++ symbols for convenience.
+
 
 ```
-$ ./bloaty -d symbols bloaty
+$ ./bloaty -d cppsymbols bloaty
       VM SIZE                                                                                        FILE SIZE
  --------------                                                                                  --------------
   17.9%  81.9Ki [Unmapped]                                                                        7.39Mi  95.3%

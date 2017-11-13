@@ -1,0 +1,145 @@
+cmake_minimum_required (VERSION 2.6)
+project (Bloaty)
+
+# Options we define for users.
+option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
+option(BLOATY_ENABLE_UBSAN "Enable undefined behavior sanitizer." OFF)
+
+# Set default build type.
+if(NOT CMAKE_BUILD_TYPE)
+  message(STATUS "Setting build type to 'RelWithDebInfo' as none was specified.")
+  set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
+      "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel."
+      FORCE)
+endif()
+
+# Check out Git submodules.
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
+  execute_process (COMMAND git submodule update --init --recursive
+                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
+# Add third_party libraries, disabling as much as we can of their builds.
+set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
+set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
+set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
+set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
+set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
+add_definitions(-D_LIBCXXABI_FUNC_VIS=)  # For Demumble.
+add_subdirectory(third_party/re2)
+add_subdirectory(third_party/capstone)
+add_subdirectory(third_party/protobuf/cmake)
+
+include_directories(third_party/capstone/include)
+include_directories(third_party/re2)
+include_directories(third_party/protobuf/src)
+include_directories(.)
+include_directories(src)
+include_directories(third_party/abseil-cpp)
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
+
+# Baseline build flags.
+set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+
+# When using Ninja, compiler output won't be colorized without this.
+include(CheckCXXCompilerFlag)
+CHECK_CXX_COMPILER_FLAG(-fdiagnostics-color=always SUPPORTS_COLOR_ALWAYS)
+if(SUPPORTS_COLOR_ALWAYS)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
+endif()
+
+# Implement ASAN/UBSAN options
+if(BLOATY_ENABLE_ASAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+  set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
+endif()
+
+if(BLOATY_ENABLE_UBSAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
+  set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=undefined")
+endif()
+
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
+  DEPENDS protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+  COMMAND protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+      --cpp_out=${CMAKE_CURRENT_BINARY_DIR}/src
+      -I${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_library(libbloaty
+    src/bloaty.cc
+    src/demangle.cc
+    src/disassemble.cc
+    ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
+    src/dwarf.cc
+    src/elf.cc
+    src/macho.cc
+    # Until Abseil has a proper CMake build system
+    third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
+    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+    third_party/abseil-cpp/absl/strings/ascii.cc
+    third_party/abseil-cpp/absl/strings/escaping.cc
+    third_party/abseil-cpp/absl/strings/internal/memutil.cc
+    third_party/abseil-cpp/absl/strings/internal/utf8.cc
+    third_party/abseil-cpp/absl/strings/numbers.cc
+    third_party/abseil-cpp/absl/strings/str_cat.cc
+    third_party/abseil-cpp/absl/strings/str_split.cc
+    third_party/abseil-cpp/absl/strings/string_view.cc
+    third_party/abseil-cpp/absl/strings/substitute.cc
+    # One source file, no special build system needed.
+    third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
+    )
+
+set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
+
+add_executable(bloaty src/main.cc)
+target_link_libraries(bloaty "${LIBBLOATY_LIBS}")
+
+# All of this is to add -pthread, which is required by re2 (not us).
+find_package(Threads REQUIRED)
+if(THREADS_HAVE_PTHREAD_ARG)
+  set_property(TARGET bloaty PROPERTY COMPILE_OPTIONS "-pthread")
+  set_property(TARGET bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
+endif()
+if(CMAKE_THREAD_LIBS_INIT)
+  target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
+endif()
+
+enable_testing()
+
+if(BUILD_TESTING)
+  add_subdirectory(third_party/googletest)
+  include_directories(third_party/googletest/googletest/include)
+  include_directories(third_party/googletest/googlemock/include)
+
+  set(TEST_TARGETS
+      bloaty_test
+      bloaty_misc_test
+      range_map_test
+      )
+
+  foreach(target ${TEST_TARGETS})
+    add_executable(${target} tests/${target}.cc)
+    target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
+  endforeach(target)
+
+  if($ENV{LIB_FUZZING_ENGINE})
+    add_executable(fuzz_test tests/fuzz_target.cc)
+  else()
+    add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
+  endif()
+  target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
+
+  file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
+
+  add_test(NAME range_map_test COMMAND range_map_test)
+  add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
+  add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
+  add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
+  add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
+endif()

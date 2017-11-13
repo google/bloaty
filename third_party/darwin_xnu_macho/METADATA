@@ -1,0 +1,23 @@
+name: "Darwin XNU Mach-O headers"
+description:
+    "A few header files from the Darwin XNU project. These define the Mach-O format."
+    "They only contain struct and constant definitions (no code)."
+
+third_party {
+  url {
+    type: HOMEPAGE
+    value: "https://opensource.apple.com/source/xnu/"
+  }
+  url {
+    type: GIT
+    value: "https://github.com/apple/darwin-xnu"
+  }
+  version: "0a798f6738bc1db01281fc08ae024145e84df927"
+  last_upgrade_date {
+    year: 2017
+    month: 11
+    day: 11
+  }
+  local_modifications:
+      "Removed some includes and definitions not related to the Mach-O file format."
+}

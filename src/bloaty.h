@@ -22,9 +22,6 @@
 #include <stdlib.h>
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
-#ifdef __FreeBSD__
-#include <sys/endian.h>
-#endif
 
 #include <memory>
 #include <set>
@@ -32,17 +29,33 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
+#include "capstone.h"
 #include "re2/re2.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
   class_name(const class_name&) = delete; \
   void operator=(const class_name&) = delete;
 
+#define BLOATY_UNREACHABLE() do { \
+  assert(false); \
+  __builtin_unreachable(); \
+} while (0)
+
+#ifdef NDEBUG
+// Prevent "unused variable" warnings.
+#define BLOATY_ASSERT(expr) do {} while (false && (expr))
+#else
+#define BLOATY_ASSERT(expr) assert(expr)
+#endif
+
 namespace bloaty {
 
-typedef re2::StringPiece StringPiece;
-
-class MemoryMap;
+class NameMunger;
+class Options;
+struct DualMap;
+struct DisassemblyInfo;
 
 enum class DataSource {
   kArchiveMembers,
@@ -50,7 +63,29 @@ enum class DataSource {
   kInlines,
   kSections,
   kSegments,
+
+  // We always set this to one of the concrete symbol types below before
+  // setting it on a sink.
   kSymbols,
+
+  kRawSymbols,
+  kFullSymbols,
+  kShortSymbols
+};
+
+class Error : public std::runtime_error {
+ public:
+  Error(const char* msg, const char* file, int line)
+      : std::runtime_error(msg), file_(file), line_(line) {}
+
+  // TODO(haberman): add these to Bloaty's error message when verbose is
+  // enabled.
+  const char* file() const { return file_; }
+  int line() const { return line_; }
+
+ private:
+  const char* file_;
+  int line_;
 };
 
 class InputFile {
@@ -59,26 +94,28 @@ class InputFile {
   virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }
-  StringPiece data() const { return data_; }
+  absl::string_view data() const { return data_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(InputFile);
   const std::string filename_;
 
  protected:
-  StringPiece data_;
+  absl::string_view data_;
 };
 
 class InputFileFactory {
  public:
-  // Returns nullptr if the file could not be opened.
-  virtual std::unique_ptr<InputFile> TryOpenFile(
+  virtual ~InputFileFactory() {}
+
+  // Throws if the file could not be opened.
+  virtual std::unique_ptr<InputFile> OpenFile(
       const std::string& filename) const = 0;
 };
 
 class MmapInputFileFactory : public InputFileFactory {
  public:
-  std::unique_ptr<InputFile> TryOpenFile(
+  std::unique_ptr<InputFile> OpenFile(
       const std::string& filename) const override;
 };
 
@@ -93,8 +130,10 @@ class MmapInputFileFactory : public InputFileFactory {
 class RangeSink {
  public:
   RangeSink(const InputFile* file, DataSource data_source,
-            const MemoryMap* translator, MemoryMap* map);
+            const DualMap* translator);
   ~RangeSink();
+
+  void AddOutput(DualMap* map, const NameMunger* munger);
 
   DataSource data_source() const { return data_source_; }
   const InputFile& input_file() const { return *file_; }
@@ -102,18 +141,19 @@ class RangeSink {
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
+  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
                 uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
-                      StringPiece file_range) {
+  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
+                      absl::string_view file_range) {
     AddRange(name, vmaddr, vmsize, file_range.data() - file_->data().data(),
              file_range.size());
   }
 
-  void AddFileRange(StringPiece name, uint64_t fileoff, uint64_t filesize);
+  void AddFileRange(absl::string_view name,
+                    uint64_t fileoff, uint64_t filesize);
 
-  void AddFileRange(StringPiece name, StringPiece file_range) {
+  void AddFileRange(absl::string_view name, absl::string_view file_range) {
     AddFileRange(name, file_range.data() - file_->data().data(),
                  file_range.size());
   }
@@ -148,47 +188,80 @@ class RangeSink {
 
   const InputFile* file_;
   DataSource data_source_;
-  const MemoryMap* translator_;
-  MemoryMap* map_;
+  const DualMap* translator_;
+  std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
 };
 
-// The main interface that modules should implement to handle a particular file
-// type.
-class FileHandler {
- public:
-  virtual ~FileHandler() {}
 
-  virtual bool ProcessBaseMap(RangeSink* sink) = 0;
+// NameMunger //////////////////////////////////////////////////////////////////
+
+// Use to transform input names according to the user's configuration.
+// For example, the user can use regexes.
+class NameMunger {
+ public:
+  NameMunger() {}
+
+  // Adds a regex that will be applied to all names.  All regexes will be
+  // applied in sequence.
+  void AddRegex(const std::string& regex, const std::string& replacement);
+
+  std::string Munge(absl::string_view name) const;
+
+  bool IsEmpty() const { return regexes_.empty(); }
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
+  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
+};
+
+typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
+
+// Represents an object/executable file in a format like ELF, Mach-O, PE, etc.
+// To support a new file type, implement this interface.
+class ObjectFile {
+ public:
+  ObjectFile(std::unique_ptr<InputFile> file_data)
+      : file_data_(std::move(file_data)) {}
+  virtual ~ObjectFile() {}
+  virtual void ProcessBaseMap(RangeSink* sink) = 0;
 
   // Process this file, pushing data to |sinks| as appropriate for each data
   // source.
-  virtual bool ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+  virtual void ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+
+  virtual bool GetDisassemblyInfo(absl::string_view symbol,
+                                  DataSource symbol_source,
+                                  DisassemblyInfo* info) = 0;
+
+  const InputFile& file_data() const { return *file_data_; }
+
+ private:
+  std::unique_ptr<InputFile> file_data_;
 };
 
-std::unique_ptr<FileHandler> TryOpenELFFile(const InputFile& file);
-std::unique_ptr<FileHandler> TryOpenMachOFile(const InputFile& file);
+std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
+std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
 
 namespace dwarf {
 
 struct File {
-  StringPiece debug_info;
-  StringPiece debug_types;
-  StringPiece debug_str;
-  StringPiece debug_abbrev;
-  StringPiece debug_aranges;
-  StringPiece debug_line;
+  absl::string_view debug_info;
+  absl::string_view debug_types;
+  absl::string_view debug_str;
+  absl::string_view debug_abbrev;
+  absl::string_view debug_aranges;
+  absl::string_view debug_line;
 };
 
 }  // namespace dwarf
 
-typedef std::map<StringPiece, std::pair<uint64_t, uint64_t>> SymbolTable;
-
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
-bool ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
+void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
                            RangeSink* sink);
-bool ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
+void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
+
 
 // LineReader //////////////////////////////////////////////////////////////////
 
@@ -246,17 +319,24 @@ class LineIterator {
 
 LineReader ReadLinesFromPipe(const std::string& cmd);
 
+// Demangle C++ symbols according to the Itanium ABI.  The |source| argument
+// controls what demangling mode we are using.
+std::string ItaniumDemangle(absl::string_view symbol, DataSource source);
+
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
 // Maps
 //
-//   [uint64_t, uint64_t) -> std::string
+//   [uint64_t, uint64_t) -> std::string, [optional other range base]
 //
 // where ranges must be non-overlapping.
 //
 // This is used to map the address space (either pointer offsets or file
 // offsets).
+//
+// The other range base allows us to use this RangeMap to translate addresses
+// from this domain to another one (like vm_addr -> file_addr or vice versa).
 //
 // This type is only exposed in the .h file for unit testing purposes.
 
@@ -264,7 +344,9 @@ class RangeMapTest;
 
 class RangeMap {
  public:
-  RangeMap() {}
+  RangeMap() = default;
+  RangeMap(RangeMap&& other) = default;
+  RangeMap& operator=(RangeMap&& other) = default;
 
   // Adds a range to this map.
   void AddRange(uint64_t addr, uint64_t size, const std::string& val);
@@ -286,6 +368,11 @@ class RangeMap {
   // Translates |addr| into the other domain, returning |true| if this was
   // successful.
   bool Translate(uint64_t addr, uint64_t *translated) const;
+
+  // Looks for a range within this map that contains |addr|.  If found, returns
+  // true and sets |label| to the corresponding label, and |offset| to the
+  // offset from the beginning of this range.
+  bool TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const;
 
   template <class Func>
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
@@ -336,11 +423,27 @@ class RangeMap {
   Map::iterator FindContaining(uint64_t addr);
   Map::const_iterator FindContaining(uint64_t addr) const;
   Map::const_iterator FindContainingOrAfter(uint64_t addr) const;
-
-  Entry* TryGet(uint64_t addr, uint64_t* start, uint64_t* size) const;
-  const std::string* TryGetExactly(uint64_t addr, uint64_t* size) const;
 };
 
+
+// DualMap /////////////////////////////////////////////////////////////////////
+
+// Contains a RangeMap for VM space and file space for a given file.
+
+struct DualMap {
+  RangeMap vm_map;
+  RangeMap file_map;
+};
+
+struct DisassemblyInfo {
+  absl::string_view text;
+  DualMap symbol_map;
+  cs_arch arch;
+  cs_mode mode;
+  uint64_t start_address;
+};
+
+std::string DisassembleFunction(const DisassemblyInfo& info);
 
 // Top-level API ///////////////////////////////////////////////////////////////
 
@@ -369,25 +472,75 @@ struct RollupRow {
   bool diff_mode = false;
 };
 
+enum class OutputFormat {
+  kPrettyPrint,
+  kCSV,
+};
+
+struct OutputOptions {
+  OutputFormat output_format = OutputFormat::kPrettyPrint;
+  size_t max_label_len = 80;
+};
+
 struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
   const RollupRow& toplevel_row() { return toplevel_row_; }
-  void Print(std::ostream* out) const;
+
+  void AddDataSourceName(absl::string_view name) {
+    source_names_.emplace_back(std::string(name));
+  }
+
+  void Print(const OutputOptions& options, std::ostream* out) {
+    if (!source_names_.empty()) {
+      switch (options.output_format) {
+        case bloaty::OutputFormat::kPrettyPrint:
+          PrettyPrint(options.max_label_len, out);
+          break;
+        case bloaty::OutputFormat::kCSV:
+          PrintToCSV(out);
+          break;
+        default:
+          BLOATY_UNREACHABLE();
+      }
+    }
+
+    if (!disassembly_.empty()) {
+      *out << disassembly_;
+    }
+  }
+
+  void SetDisassembly(absl::string_view disassembly) {
+    disassembly_ = std::string(disassembly);
+  }
+
+  absl::string_view GetDisassembly() { return disassembly_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
 
-  size_t longest_label_;
+  std::vector<std::string> source_names_;
   RollupRow toplevel_row_;
+  std::string disassembly_;
 
-  void PrintRow(const RollupRow& row, size_t indent, std::ostream* out) const;
-  void PrintTree(const RollupRow& row, size_t indent, std::ostream* out) const;
+  void PrettyPrint(size_t max_label_len, std::ostream* out) const;
+  void PrintToCSV(std::ostream* out) const;
+  size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
+  void PrettyPrintRow(const RollupRow& row, size_t indent, size_t longest_row,
+                      std::ostream* out) const;
+  void PrettyPrintTree(const RollupRow& row, size_t indent, size_t longest_row,
+                       std::ostream* out) const;
+  void PrintRowToCSV(const RollupRow& row, absl::string_view parent_labels,
+                     std::ostream* out) const;
+  void PrintTreeToCSV(const RollupRow& row, absl::string_view parent_labels,
+                      std::ostream* out) const;
 };
 
-bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
-                RollupOutput* output);
+bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,
+                  OutputOptions* output_options, std::string* error);
+bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
+                RollupOutput* output, std::string* error);
 
 // Endianness utilities ////////////////////////////////////////////////////////
 
@@ -396,9 +549,16 @@ inline bool IsLittleEndian() {
   return *(char*)&x == 1;
 }
 
-// These are more efficient but appear not to exist on OS X.
-#if defined(__GNUC__) && !defined(__APPLE__)
-
+// It seems like it would be simpler to just specialize on:
+//   template <class T> T ByteSwap(T val);
+//   template <> T ByteSwap<uint16>(T val) { /* ... */ }
+//   template <> T ByteSwap<uint32>(T val) { /* ... */ }
+//   // etc...
+//
+// But this doesn't work out so well.  Consider that on LP32, uint32 could
+// be either "unsigned int" or "unsigned long".  Specializing ByteSwap<uint32>
+// will leave one of those two unspecialized.  C++ is annoying in this regard.
+// Our approach here handles both cases with just one specialization.
 template <class T, size_t size> struct ByteSwapper { T operator()(T val); };
 
 template <class T>
@@ -409,53 +569,37 @@ struct ByteSwapper<T, 1> {
 template <class T>
 struct ByteSwapper<T, 2> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap16(val);
-#else
-    return __bswap_16(val);
-#endif
+    return ((val & 0xff) << 8) |
+        ((val & 0xff00) >> 8);
   }
 };
 
 template <class T>
 struct ByteSwapper<T, 4> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap32(val);
-#else
-    return __bswap_32(val);
-#endif
+    return ((val & 0xff) << 24) |
+        ((val & 0xff00) << 8) |
+        ((val & 0xff0000ULL) >> 8) |
+        ((val & 0xff000000ULL) >> 24);
   }
 };
 
 template <class T>
 struct ByteSwapper<T, 8> {
   T operator()(T val) {
-#ifdef __FreeBSD__
-    return bswap64(val);
-#else
-    return __bswap_64(val);
-#endif
+    return ((val & 0xff) << 56) |
+        ((val & 0xff00) << 40) |
+        ((val & 0xff0000) << 24) |
+        ((val & 0xff000000) << 8) |
+        ((val & 0xff00000000ULL) >> 8) |
+        ((val & 0xff0000000000ULL) >> 24) |
+        ((val & 0xff000000000000ULL) >> 40) |
+        ((val & 0xff00000000000000ULL) >> 56);
   }
 };
 
 template <class T>
 T ByteSwap(T val) { return ByteSwapper<T, sizeof(T)>()(val); }
-
-#else
-
-template <class T>
-T ByteSwap(T val) {
-  char from[sizeof(T)];
-  char to[sizeof(T)];
-  T ret;
-  memcpy(&from, &val, sizeof(T));
-  std::reverse_copy(from, from + sizeof(T), to);
-  memcpy(&ret, &to, sizeof(T));
-  return ret;
-}
-
-#endif
 
 }  // namespace bloaty
 

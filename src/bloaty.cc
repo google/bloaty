@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <array>
+#include <atomic>
 #include <cmath>
-#include <cinttypes>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
-#include <set>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
+#include <assert.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
@@ -38,10 +38,19 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/substitute.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/text_format.h"
 #include "re2/re2.h"
-#include <assert.h>
 
 #include "bloaty.h"
+#include "bloaty.pb.h"
+#include "demangle.h"
+
+using absl::string_view;
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -50,16 +59,20 @@
     perror(#call " " __FILE__ ":" TOSTRING(__LINE__)); \
     exit(1); \
   }
-#define CHECK_RETURN(call) if (!(call)) { return false; }
+
+static void Throw(const char *str, int line) {
+  throw bloaty::Error(str, __FILE__, line);
+}
+
+#define THROW(msg) Throw(msg, __LINE__)
+#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 
 namespace bloaty {
 
-size_t max_label_len = 80;
+// Use a global since we would have to plumb it through so many call-stacks
+// otherwise.  We would make this thread_local but that's not supported on OS X
+// right now.
 int verbose_level = 0;
-
-enum class SortBy {
-  kVM, kFile, kBoth
-} sortby = SortBy::kBoth;
 
 struct DataSourceDefinition {
   DataSource number;
@@ -68,17 +81,21 @@ struct DataSourceDefinition {
 };
 
 constexpr DataSourceDefinition data_sources[] = {
-  {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
-  {DataSource::kCompileUnits, "compileunits",
-   "source file for the .o file (translation unit). requires debug info."},
-  // Not a real data source, so we give it a junk DataSource::kInlines value
-  {DataSource::kInlines, "inputfiles",
-   "the filename specified on the Bloaty command-line"},
-  {DataSource::kInlines, "inlines",
-   "source line/file where inlined code came from.  requires debug info."},
-  {DataSource::kSections, "sections", "object file section"},
-  {DataSource::kSegments, "segments", "load commands in the binary"},
-  {DataSource::kSymbols, "symbols", "symbols from symbol table"},
+    {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
+    {DataSource::kCompileUnits, "compileunits",
+     "source file for the .o file (translation unit). requires debug info."},
+    // Not a real data source, so we give it a junk DataSource::kInlines value
+    {DataSource::kInlines, "inputfiles",
+     "the filename specified on the Bloaty command-line"},
+    {DataSource::kInlines, "inlines",
+     "source line/file where inlined code came from.  requires debug info."},
+    {DataSource::kSections, "sections", "object file section"},
+    {DataSource::kSegments, "segments", "load commands in the binary"},
+    {DataSource::kSymbols, "symbols",
+     "symbols from symbol table (configure demangling with --demangle)"},
+    {DataSource::kRawSymbols, "rawsymbols", "unmangled symbols"},
+    {DataSource::kFullSymbols, "fullsymbols", "full demangled symbols"},
+    {DataSource::kShortSymbols, "shortsymbols", "short demangled symbols"},
 };
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
@@ -101,6 +118,51 @@ int SignOf(long val) {
     return 1;
   } else {
     return 0;
+  }
+}
+
+template <typename A, typename B>
+void CheckedAdd(A* accum, B val) {
+  // We've only implemented the portable version for a subset of possible types.
+  static_assert(std::is_signed<A>::value, "requires signed A");
+  static_assert(sizeof(A) == sizeof(B), "requires integers of the same type");
+#if ABSL_HAVE_BUILTIN(__builtin_add_overflow)
+  if (__builtin_add_overflow(*accum, val, accum)) {
+    THROW("integer overflow");
+  }
+#else
+  bool safe = *accum < 0 ? (val >= std::numeric_limits<B>::max() - *accum)
+                         : (val <= std::numeric_limits<B>::max() - *accum);
+  if (!safe) {
+    THROW("integer overflow");
+  }
+  *accum += val;
+#endif
+}
+
+std::string CSVEscape(string_view str) {
+  bool need_escape = false;
+
+  for (char ch : str) {
+    if (ch == '"' || ch == ',') {
+      need_escape = true;
+      break;
+    }
+  }
+
+  if (need_escape) {
+    std::string ret = "\"";
+    for (char ch : str) {
+      if (ch == '"') {
+        ret += "\"\"";
+      } else {
+        ret += ch;
+      }
+    }
+    ret += "\"";
+    return ret;
+  } else {
+    return std::string(str);
   }
 }
 
@@ -180,192 +242,61 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
   return LineReader(pipe, true);
 }
 
+extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
+                                int* status);
 
-// NameStripper ////////////////////////////////////////////////////////////////
-
-// C++ Symbol names can get really long because they include all the parameter
-// types.  For example:
-//
-// bloaty::RangeMap::ComputeRollup(std::vector<bloaty::RangeMap const*, std::allocator<bloaty::RangeMap const*> > const&, bloaty::Rollup*)
-//
-// In most cases, we can strip all of the parameter info.  We only need to keep
-// it in the case of overloaded functions.  This class can do the stripping, but
-// the caller needs to verify that the stripped name is still unique within the
-// binary, otherwise the full name should be used.
-
-class NameStripper {
- public:
-  bool StripName(const std::string& name) {
-    if (name[name.size() - 1] != ')') {
-      // (anonymous namespace)::ctype_w
-      stripped_ = &name;
-      return false;
-    }
-
-    int nesting = 0;
-    for (size_t n = name.size() - 1; n < name.size(); --n) {
-      if (name[n] == '(') {
-        if (--nesting == 0) {
-          storage_ = name.substr(0, n);
-          stripped_ = &storage_;
-          return true;
-        }
-      } else if (name[n] == ')') {
-        ++nesting;
-      }
-    }
-
-
-    stripped_ = &name;
-    return false;
+std::string ItaniumDemangle(absl::string_view symbol, DataSource source) {
+  if (source == DataSource::kRawSymbols) {
+    // No demangling.
+    return std::string(symbol);
   }
 
-  const std::string& stripped() { return *stripped_; }
-
- private:
-  const std::string* stripped_;
-  std::string storage_;
-};
-
-
-// Demangler ///////////////////////////////////////////////////////////////////
-
-// Demangles C++ symbols.
-//
-// There is no library we can (easily) link against for this, we have to shell
-// out to the "c++filt" program
-//
-// We can't use LineReader or popen() because we need to both read and write to
-// the subprocess.  So we need to roll our own.
-
-class Demangler {
- public:
-  Demangler();
-  ~Demangler();
-
-  std::string Demangle(const std::string& symbol);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Demangler);
-
-  FILE* write_file_;
-  std::unique_ptr<LineReader> reader_;
-  pid_t child_pid_;
-};
-
-Demangler::Demangler() {
-  int toproc_pipe_fd[2];
-  int fromproc_pipe_fd[2];
-  if (pipe(toproc_pipe_fd) < 0 || pipe(fromproc_pipe_fd) < 0) {
-    perror("pipe");
-    exit(1);
-  }
-
-  pid_t pid = fork();
-  if (pid < 0) {
-    perror("fork");
-    exit(1);
-  }
-
-  if (pid) {
-    // Parent.
-    CHECK_SYSCALL(close(toproc_pipe_fd[0]));
-    CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-    int write_fd = toproc_pipe_fd[1];
-    int read_fd = fromproc_pipe_fd[0];
-    write_file_ = fdopen(write_fd, "w");
-    FILE* read_file = fdopen(read_fd, "r");
-    if (write_file_ == nullptr || read_file == nullptr) {
-      perror("fdopen");
-      exit(1);
+  if (source == DataSource::kShortSymbols) {
+    char demangled[1024];
+    if (::Demangle(symbol.data(), demangled, sizeof(demangled))) {
+      return std::string(demangled);
+    } else {
+      return std::string(symbol);
     }
-    reader_.reset(new LineReader(read_file, false));
-    child_pid_ = pid;
+  } else if (source == DataSource::kFullSymbols) {
+    char* demangled =
+        __cxa_demangle(symbol.data(), NULL, NULL, NULL);
+    if (demangled) {
+      std::string ret(demangled);
+      free(demangled);
+      return ret;
+    } else {
+      return std::string(symbol);
+    }
   } else {
-    // Child.
-    CHECK_SYSCALL(close(STDIN_FILENO));
-    CHECK_SYSCALL(close(STDOUT_FILENO));
-    CHECK_SYSCALL(dup2(toproc_pipe_fd[0], STDIN_FILENO));
-    CHECK_SYSCALL(dup2(fromproc_pipe_fd[1], STDOUT_FILENO));
-
-    CHECK_SYSCALL(close(toproc_pipe_fd[0]));
-    CHECK_SYSCALL(close(fromproc_pipe_fd[1]));
-    CHECK_SYSCALL(close(toproc_pipe_fd[1]));
-    CHECK_SYSCALL(close(fromproc_pipe_fd[0]));
-
-    char prog[] = "c++filt";
-    char *const argv[] = {prog, nullptr};
-    CHECK_SYSCALL(execvp("c++filt", argv));
+    BLOATY_UNREACHABLE();
   }
-}
-
-Demangler::~Demangler() {
-  int status;
-  kill(child_pid_, SIGTERM);
-  waitpid(child_pid_, &status, WEXITED);
-  fclose(write_file_);
-}
-
-std::string Demangler::Demangle(const std::string& symbol) {
-  const char *writeptr = symbol.c_str();
-  const char *writeend = writeptr + symbol.size();
-
-  while (writeptr < writeend) {
-    size_t bytes = fwrite(writeptr, 1, writeend - writeptr, write_file_);
-    if (bytes == 0) {
-      perror("fread");
-      exit(1);
-    }
-    writeptr += bytes;
-  }
-  if (fwrite("\n", 1, 1, write_file_) != 1) {
-    perror("fwrite");
-    exit(1);
-  }
-  if (fflush(write_file_) != 0) {
-    perror("fflush");
-    exit(1);
-  }
-
-  reader_->Next();
-  return reader_->line();
 }
 
 
 // NameMunger //////////////////////////////////////////////////////////////////
 
-// Use to transform input names according to the user's configuration.
-// For example, the user can use regexes.
-class NameMunger {
- public:
-  NameMunger() {}
-
-  // Adds a regex that will be applied to all names.  All regexes will be
-  // applied in sequence.
-  void AddRegex(const std::string& regex, const std::string& replacement);
-
-  std::string Munge(StringPiece name) const;
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
-  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
-};
-
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
-  std::unique_ptr<RE2> re2(new RE2(StringPiece(regex)));
+  auto re2 = absl::make_unique<RE2>(regex);
   regexes_.push_back(std::make_pair(std::move(re2), replacement));
 }
 
-std::string NameMunger::Munge(StringPiece name) const {
-  std::string ret(name.as_string());
+std::string NameMunger::Munge(string_view name) const {
+  re2::StringPiece piece(name.data(), name.size());
+  std::string ret;
+
+  if (!name.empty() && name[0] == '[') {
+    // This is a special symbol, don't mangle.
+    return std::string(name);
+  }
 
   for (const auto& pair : regexes_) {
-    if (RE2::Replace(&ret, *pair.first, pair.second)) {
+    if (RE2::Extract(piece, *pair.first, pair.second, &ret)) {
       return ret;
     }
   }
 
-  return ret;
+  return std::string(name);
 }
 
 
@@ -399,6 +330,9 @@ class Rollup {
  public:
   Rollup() {}
 
+  Rollup(Rollup&& other) = default;
+  Rollup& operator=(Rollup&& other) = default;
+
   void AddSizes(const std::vector<std::string> names,
                 uint64_t size, bool is_vmsize) {
     // We start at 1 to exclude the base map (see base_map_).
@@ -406,20 +340,18 @@ class Rollup {
   }
 
   // Prints a graphical representation of the rollup.
-  bool ComputeWithBase(int row_limit, RollupOutput* row) const {
-    return ComputeWithBase(nullptr, row_limit, row);
+  void CreateRollupOutput(const Options& options, RollupOutput* row) const {
+    CreateDiffModeRollupOutput(nullptr, options, row);
   }
 
-  bool ComputeWithBase(Rollup* base, int row_limit, RollupOutput* output) const {
+  void CreateDiffModeRollupOutput(Rollup* base, const Options& options,
+                                  RollupOutput* output) const {
     RollupRow* row = &output->toplevel_row_;
     row->vmsize = vm_total_;
     row->filesize = file_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
-    output->longest_label_ = 0;
-    CHECK_RETURN(
-        CreateRows(0, row, &output->longest_label_, base, row_limit, true));
-    return true;
+    CreateRows(row, base, options, true);
   }
 
   // Subtract the values in "other" from this.
@@ -433,6 +365,20 @@ class Rollup {
         child.reset(new Rollup());
       }
       child->Subtract(*other_child.second);
+    }
+  }
+
+  // Add the values in "other" from this.
+  void Add(const Rollup& other) {
+    vm_total_ += other.vm_total_;
+    file_total_ += other.file_total_;
+
+    for (const auto& other_child : other.children_) {
+      auto& child = children_[other_child.first];
+      if (child.get() == NULL) {
+        child.reset(new Rollup());
+      }
+      child->Add(*other_child.second);
     }
   }
 
@@ -458,11 +404,11 @@ class Rollup {
   // Adds "size" bytes to the rollup under the label names[i].
   // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
   void AddInternal(const std::vector<std::string> names, size_t i,
-                   int64_t size, bool is_vmsize) {
+                   uint64_t size, bool is_vmsize) {
     if (is_vmsize) {
-      vm_total_ += size;
+      CheckedAdd(&vm_total_, size);
     } else {
-      file_total_ += size;
+      CheckedAdd(&file_total_, size);
     }
     if (i < names.size()) {
       auto& child = children_[names[i]];
@@ -477,16 +423,15 @@ class Rollup {
     return static_cast<double>(part) / static_cast<double>(whole) * 100;
   }
 
-  bool CreateRows(size_t indent, RollupRow* row, size_t* longest_label,
-                  const Rollup* base, int row_limit, bool is_toplevel) const;
-  bool ComputeRows(size_t indent, RollupRow* row,
-                   std::vector<RollupRow>* children, size_t* longest_label,
-                   const Rollup* base, int row_limit, bool is_toplevel) const;
+  void CreateRows(RollupRow* row, const Rollup* base, const Options& options,
+                  bool is_toplevel) const;
+  void ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
+                   const Rollup* base, const Options& options,
+                   bool is_toplevel) const;
 };
 
-bool Rollup::CreateRows(size_t indent, RollupRow* row, size_t* longest_label,
-                        const Rollup* base, int row_limit,
-                        bool is_toplevel) const {
+void Rollup::CreateRows(RollupRow* row, const Rollup* base,
+                        const Options& options, bool is_toplevel) const {
   if (base) {
     row->vmpercent = Percent(vm_total_, base->vm_total_);
     row->filepercent = Percent(file_total_, base->file_total_);
@@ -514,21 +459,16 @@ bool Rollup::CreateRows(size_t indent, RollupRow* row, size_t* longest_label,
     }
   }
 
-  CHECK_RETURN(ComputeRows(indent, row, &row->sorted_children, longest_label,
-                           base, row_limit, is_toplevel));
-  CHECK_RETURN(ComputeRows(indent, row, &row->shrinking, longest_label, base,
-                           row_limit, is_toplevel));
-  CHECK_RETURN(ComputeRows(indent, row, &row->mixed, longest_label, base,
-                           row_limit, is_toplevel));
-  return true;
+  ComputeRows(row, &row->sorted_children, base, options, is_toplevel);
+  ComputeRows(row, &row->shrinking, base, options, is_toplevel);
+  ComputeRows(row, &row->mixed, base, options, is_toplevel);
 }
 
 Rollup* Rollup::empty_;
 
-bool Rollup::ComputeRows(size_t indent, RollupRow* row,
-                         std::vector<RollupRow>* children,
-                         size_t* longest_label, const Rollup* base,
-                         int row_limit, bool is_toplevel) const {
+void Rollup::ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
+                         const Rollup* base, const Options& options,
+                         bool is_toplevel) const {
   std::vector<RollupRow>& child_rows = *children;
 
   // We don't want to output a solitary "[None]" or "[Unmapped]" row except at
@@ -545,36 +485,34 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
   }
 
   if (child_rows.empty()) {
-    return true;
+    return;
   }
 
   // Our overall sorting rank.
-  auto rank =
-      [](const RollupRow& row) {
-        int64_t val_to_rank;
-        switch (sortby) {
-          case SortBy::kVM:
-            val_to_rank = std::abs(row.vmsize);
-            break;
-          case SortBy::kFile:
-            val_to_rank = std::abs(row.filesize);
-            break;
-          case SortBy::kBoth:
-            val_to_rank =
-                std::max(std::abs(row.vmsize), std::abs(row.filesize));
-            break;
-          default:
-            assert(false);
-            val_to_rank = -1;
-            break;
-        }
+  auto rank = [options](const RollupRow& row) {
+    int64_t val_to_rank;
+    switch (options.sort_by()) {
+      case Options::SORTBY_VMSIZE:
+        val_to_rank = std::abs(row.vmsize);
+        break;
+      case Options::SORTBY_FILESIZE:
+        val_to_rank = std::abs(row.filesize);
+        break;
+      case Options::SORTBY_BOTH:
+        val_to_rank = std::max(std::abs(row.vmsize), std::abs(row.filesize));
+        break;
+      default:
+        assert(false);
+        val_to_rank = -1;
+        break;
+    }
 
-        // Reverse so that numerically we always sort high-to-low.
-        int64_t numeric_rank = INT64_MAX - val_to_rank;
+    // Reverse so that numerically we always sort high-to-low.
+    int64_t numeric_rank = INT64_MAX - val_to_rank;
 
-        // Use name to break ties in numeric rank (names sort low-to-high).
-        return std::make_tuple(numeric_rank, row.name);
-      };
+    // Use name to break ties in numeric rank (names sort low-to-high).
+    return std::make_tuple(numeric_rank, row.name);
+  };
 
   // Our sorting rank for the first pass, when we are deciding what to put in
   // [Other].  Certain things we don't want to put in [Other], so we rank them
@@ -595,14 +533,14 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
   // Filter out everything but the top 'row_limit'.  Add rows that were filtered
   // out to "others_row".
   size_t i = child_rows.size() - 1;
-  while (i >= row_limit) {
-    others_row.vmsize += child_rows[i].vmsize;
-    others_row.filesize += child_rows[i].filesize;
+  while (i >= options.max_rows_per_level()) {
+    CheckedAdd(&others_row.vmsize, child_rows[i].vmsize);
+    CheckedAdd(&others_row.filesize, child_rows[i].filesize);
     if (base) {
       auto it = base->children_.find(child_rows[i].name);
       if (it != base->children_.end()) {
-        others_base.vm_total_ += it->second->vm_total_;
-        others_base.file_total_ += it->second->file_total_;
+        CheckedAdd(&others_base.vm_total_, it->second->vm_total_);
+        CheckedAdd(&others_base.file_total_, it->second->file_total_);
       }
     }
 
@@ -612,8 +550,8 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
 
   if (std::abs(others_row.vmsize) > 0 || std::abs(others_row.filesize) > 0) {
     child_rows.push_back(others_row);
-    others_rollup.vm_total_ += others_row.vmsize;
-    others_rollup.file_total_ += others_row.filesize;
+    CheckedAdd(&others_rollup.vm_total_, others_row.vmsize);
+    CheckedAdd(&others_rollup.file_total_, others_row.filesize);
   }
 
   // Sort all rows (including "other") and include sort by name.
@@ -628,8 +566,6 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
   }
 
   // Recurse into sub-rows, (except "Other", which isn't a real row).
-  Demangler demangler;
-  NameStripper stripper;
   for (auto& child_row : child_rows) {
     const Rollup* child_rollup;
     const Rollup* child_base = nullptr;
@@ -642,9 +578,7 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
     } else {
       auto it = children_.find(child_row.name);
       if (it == children_.end()) {
-        std::cerr << "Should never happen, couldn't find name: "
-                  << child_row.name << "\n";
-        return false;
+        THROWF("internal error, couldn't find name $0", child_row.name);
       }
       child_rollup = it->second.get();
       assert(child_rollup);
@@ -659,16 +593,8 @@ bool Rollup::ComputeRows(size_t indent, RollupRow* row,
       }
     }
 
-    auto demangled = demangler.Demangle(child_row.name);
-    stripper.StripName(demangled);
-    size_t allowed_label_len =
-        std::min(stripper.stripped().size(), max_label_len);
-    child_row.name = stripper.stripped();
-    *longest_label = std::max(*longest_label, allowed_label_len + indent);
-    CHECK_RETURN(child_rollup->CreateRows(indent + 4, &child_row, longest_label,
-                                          child_base, row_limit, false));
+    child_rollup->CreateRows(&child_row, child_base, options, false);
   }
-  return true;
 }
 
 
@@ -774,20 +700,22 @@ std::string PercentString(double percent, bool diff_mode) {
   }
 }
 
-void RollupOutput::PrintRow(const RollupRow& row, size_t indent,
-                            std::ostream* out) const {
+void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
+                                  size_t longest_label,
+                                  std::ostream* out) const {
   *out << FixedWidthString("", indent) << " "
        << PercentString(row.vmpercent, row.diff_mode) << " "
        << SiPrint(row.vmsize, row.diff_mode) << " "
-       << FixedWidthString(row.name, longest_label_) << " "
+       << FixedWidthString(row.name, longest_label) << " "
        << SiPrint(row.filesize, row.diff_mode) << " "
        << PercentString(row.filepercent, row.diff_mode) << "\n";
 }
 
-void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
-                             std::ostream* out) const {
+void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
+                                   size_t longest_label,
+                                   std::ostream* out) const {
   // Rows are printed before their sub-rows.
-  PrintRow(row, indent, out);
+  PrettyPrintRow(row, indent, longest_label, out);
 
   // For now we don't print "confounding" sub-entries.  For example, if we're
   // doing a two-level analysis "-d section,symbol", and a section is growing
@@ -798,65 +726,99 @@ void RollupOutput::PrintTree(const RollupRow& row, size_t indent,
 
   if (row.vmsize > 0 || row.filesize > 0) {
     for (const auto& child : row.sorted_children) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
 
   if (row.vmsize < 0 || row.filesize < 0) {
     for (const auto& child : row.shrinking) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
 
   if ((row.vmsize < 0) != (row.filesize < 0)) {
     for (const auto& child : row.mixed) {
-      PrintTree(child, indent + 4, out);
+      PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
 }
 
-void RollupOutput::Print(std::ostream* out) const {
+size_t RollupOutput::CalculateLongestLabel(const RollupRow& row,
+                                           int indent) const {
+  size_t ret = indent + row.name.size();
+
+  for (const auto& child : row.sorted_children) {
+    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+  }
+
+  for (const auto& child : row.shrinking) {
+    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+  }
+
+  for (const auto& child : row.mixed) {
+    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+  }
+
+  return ret;
+}
+
+void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
+  size_t longest_label = toplevel_row_.name.size();
+  for (const auto& child : toplevel_row_.sorted_children) {
+    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  }
+
+  for (const auto& child : toplevel_row_.shrinking) {
+    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  }
+
+  for (const auto& child : toplevel_row_.mixed) {
+    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  }
+
+  longest_label = std::min(longest_label, max_label_len);
+
   *out << "     VM SIZE    ";
-  PrintSpaces(longest_label_, out);
+  PrintSpaces(longest_label, out);
   *out << "    FILE SIZE";
   *out << "\n";
 
   if (toplevel_row_.diff_mode) {
     *out << " ++++++++++++++ ";
-    *out << FixedWidthString("GROWING", longest_label_);
+    *out << FixedWidthString("GROWING", longest_label);
     *out << " ++++++++++++++";
     *out << "\n";
   } else {
     *out << " -------------- ";
-    PrintSpaces(longest_label_, out);
+    PrintSpaces(longest_label, out);
     *out << " --------------";
     *out << "\n";
   }
 
   for (const auto& child : toplevel_row_.sorted_children) {
-    PrintTree(child, 0, out);
+    PrettyPrintTree(child, 0, longest_label, out);
   }
 
   if (toplevel_row_.diff_mode) {
     if (toplevel_row_.shrinking.size() > 0) {
       *out << "\n";
       *out << " -------------- ";
-      *out << FixedWidthString("SHRINKING", longest_label_);
+      *out << FixedWidthString("SHRINKING", longest_label);
       *out << " --------------";
       *out << "\n";
       for (const auto& child : toplevel_row_.shrinking) {
-        PrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, longest_label, out);
       }
     }
 
     if (toplevel_row_.mixed.size() > 0) {
       *out << "\n";
       *out << " -+-+-+-+-+-+-+ ";
-      *out << FixedWidthString("MIXED", longest_label_);
+      *out << FixedWidthString("MIXED", longest_label);
       *out << " +-+-+-+-+-+-+-";
       *out << "\n";
       for (const auto& child : toplevel_row_.mixed) {
-        PrintTree(child, 0, out);
+        PrettyPrintTree(child, 0, longest_label, out);
       }
     }
 
@@ -865,9 +827,64 @@ void RollupOutput::Print(std::ostream* out) const {
   }
 
   // The "TOTAL" row comes after all other rows.
-  PrintRow(toplevel_row_, 0, out);
+  PrettyPrintRow(toplevel_row_, 0, longest_label, out);
 }
 
+void RollupOutput::PrintRowToCSV(const RollupRow& row,
+                                 string_view parent_labels,
+                                 std::ostream* out) const {
+  if (parent_labels.size() > 0) {
+    *out << parent_labels << ",";
+  }
+
+  *out << absl::StrJoin(std::make_tuple(CSVEscape(row.name),
+                                        row.vmsize,
+                                        row.filesize),
+                        ",") << "\n";
+}
+
+void RollupOutput::PrintTreeToCSV(const RollupRow& row,
+                                  string_view parent_labels,
+                                  std::ostream* out) const {
+  if (row.sorted_children.size() > 0 ||
+      row.shrinking.size() > 0 ||
+      row.mixed.size() > 0) {
+    std::string labels;
+    if (parent_labels.size() > 0) {
+      labels = absl::StrJoin(
+          std::make_tuple(parent_labels, CSVEscape(row.name)), ",");
+    } else {
+      labels = CSVEscape(row.name);
+    }
+    for (const auto& child_row : row.sorted_children) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+    for (const auto& child_row : row.shrinking) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+    for (const auto& child_row : row.mixed) {
+      PrintTreeToCSV(child_row, labels, out);
+    }
+  } else {
+    PrintRowToCSV(row, parent_labels, out);
+  }
+}
+
+void RollupOutput::PrintToCSV(std::ostream* out) const {
+  std::vector<std::string> names(source_names_);
+  names.push_back("vmsize");
+  names.push_back("filesize");
+  *out << absl::StrJoin(names, ",") << "\n";
+  for (const auto& child_row : toplevel_row_.sorted_children) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+  for (const auto& child_row : toplevel_row_.shrinking) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+  for (const auto& child_row : toplevel_row_.mixed) {
+    PrintTreeToCSV(child_row, "", out);
+  }
+}
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
@@ -927,6 +944,17 @@ bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
     return false;
   } else {
     *translated = TranslateWithEntry(iter, addr);
+    return true;
+  }
+}
+
+bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const {
+  auto iter = FindContaining(addr);
+  if (iter == mappings_.end()) {
+    return false;
+  } else {
+    *label = iter->second.label;
+    *offset = addr - iter->first;
     return true;
   }
 }
@@ -1113,126 +1141,98 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 }
 
 
-// MemoryMap ///////////////////////////////////////////////////////////////////
-
-// Contains a RangeMap for VM space and file space.
-
-class MemoryMap {
- public:
-  MemoryMap(std::unique_ptr<NameMunger>&& munger) : munger_(std::move(munger)) {}
-  virtual ~MemoryMap() {}
-
-  bool FindAtAddr(uint64_t vmaddr, std::string* name) const;
-  bool FindContainingAddr(uint64_t vmaddr, uint64_t* start,
-                          std::string* name) const;
-
-  const RangeMap* file_map() const { return &file_map_; }
-  const RangeMap* vm_map() const { return &vm_map_; }
-  RangeMap* file_map() { return &file_map_; }
-  RangeMap* vm_map() { return &vm_map_; }
-
- protected:
-  std::string ApplyNameRegexes(StringPiece name);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MemoryMap);
-  friend class RangeSink;
-
-  RangeMap vm_map_;
-  RangeMap file_map_;
-  std::unique_ptr<NameMunger> munger_;
-};
-
-std::string MemoryMap::ApplyNameRegexes(StringPiece name) {
-  return munger_ ? munger_->Munge(name) : std::string(name.as_string());
-}
-
-
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
 class MmapInputFile : public InputFile {
  public:
-  MmapInputFile(const std::string& filename) : InputFile(filename) {}
+  MmapInputFile(const std::string& filename);
   ~MmapInputFile() override;
-
-  bool Open();
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(MmapInputFile);
 };
 
-bool MmapInputFile::Open() {
-  int fd = open(filename().c_str(), O_RDONLY);
+class FileDescriptor {
+ public:
+  FileDescriptor(int fd) : fd_(fd) {}
+
+  ~FileDescriptor() {
+    if (fd_ >= 0 && close(fd_) < 0) {
+      fprintf(stderr, "bloaty: error calling close(): %s\n", strerror(errno));
+    }
+  }
+
+  int fd() { return fd_; }
+
+ private:
+  int fd_;
+};
+
+MmapInputFile::MmapInputFile(const std::string& filename)
+    : InputFile(filename) {
+  FileDescriptor fd(open(filename.c_str(), O_RDONLY));
   struct stat buf;
   const char *map;
 
-  if (fd < 0) {
-    fprintf(stderr, "bloaty: couldn't open file '%s': %s\n", filename().c_str(),
-            strerror(errno));
-    return false;
+  if (fd.fd() < 0) {
+    THROWF("couldn't open file '$0': $1", filename, strerror(errno));
   }
 
-  if (fstat(fd, &buf) < 0) {
-    fprintf(stderr, "bloaty: couldn't stat file '%s': %s\n", filename().c_str(),
-            strerror(errno));
-    return false;
+  if (fstat(fd.fd(), &buf) < 0) {
+    THROWF("couldn't stat file '$0': $1", filename, strerror(errno));
   }
 
   map = static_cast<char*>(
-      mmap(nullptr, buf.st_size, PROT_READ, MAP_SHARED, fd, 0));
+      mmap(nullptr, buf.st_size, PROT_READ, MAP_SHARED, fd.fd(), 0));
 
   if (map == MAP_FAILED) {
-    fprintf(stderr, "bloaty: couldn't mmap file '%s': %s\n", filename().c_str(),
-            strerror(errno));
-    return false;
+    THROWF("couldn't mmap file '$0': $1", filename, strerror(errno));
   }
 
-  data_.set(map, buf.st_size);
-  return true;
+  data_ = string_view(map, buf.st_size);
 }
 
 MmapInputFile::~MmapInputFile() {
-  if (data_.data() != nullptr) {
-    if (munmap(const_cast<char*>(data_.data()), data_.size()) != 0) {
-      fprintf(stderr, "bloaty: error calling munmap(): %s\n", strerror(errno));
-    }
+  if (data_.data() != nullptr &&
+      munmap(const_cast<char*>(data_.data()), data_.size()) != 0) {
+    fprintf(stderr, "bloaty: error calling munmap(): %s\n", strerror(errno));
   }
 }
 
-std::unique_ptr<InputFile> MmapInputFileFactory::TryOpenFile(
+std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
     const std::string& filename) const {
-  std::unique_ptr<MmapInputFile> file(new MmapInputFile(filename));
-  if (!file->Open()) {
-    file.reset();
-  }
-  return std::move(file);
+  return absl::make_unique<MmapInputFile>(filename);
 }
 
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 
 RangeSink::RangeSink(const InputFile* file, DataSource data_source,
-                     const MemoryMap* translator, MemoryMap* map)
+                     const DualMap* translator)
     : file_(file),
       data_source_(data_source),
-      translator_(translator),
-      map_(map) {
-  assert(map_);
-}
+      translator_(translator) {}
 
 RangeSink::~RangeSink() {}
 
-void RangeSink::AddFileRange(StringPiece name, uint64_t fileoff,
+void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
+  outputs_.push_back(std::make_pair(map, munger));
+}
+
+void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
                              uint64_t filesize) {
   if (verbose_level > 2) {
     fprintf(stderr, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             fileoff, filesize);
   }
-  const std::string label = map_->ApplyNameRegexes(name);
-  if (translator_) {
-    map_->file_map()->AddRangeWithTranslation(
-        fileoff, filesize, label, *translator_->file_map(), map_->vm_map());
+  for (auto& pair : outputs_) {
+    const std::string label = pair.second->Munge(name);
+    if (translator_) {
+      pair.first->file_map.AddRangeWithTranslation(fileoff, filesize, label,
+                                                    translator_->file_map,
+                                                    &pair.first->vm_map);
+    }
   }
 }
 
@@ -1244,9 +1244,11 @@ void RangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
             vmaddr, vmsize);
   }
   assert(translator_);
-  const std::string label = map_->ApplyNameRegexes(name);
-  map_->vm_map()->AddRangeWithTranslation(
-      vmaddr, vmsize, label, *translator_->vm_map(), map_->file_map());
+  for (auto& pair : outputs_) {
+    const std::string label = pair.second->Munge(name);
+    pair.first->vm_map.AddRangeWithTranslation(
+        vmaddr, vmsize, label, translator_->vm_map, &pair.first->file_map);
+  }
 }
 
 void RangeSink::AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
@@ -1262,7 +1264,7 @@ void RangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
   AddVMRange(vmaddr, vmsize, name);
 }
 
-void RangeSink::AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
+void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
                          uint64_t fileoff, uint64_t filesize) {
   if (verbose_level > 2) {
     fprintf(stderr, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
@@ -1270,15 +1272,57 @@ void RangeSink::AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
             GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
             vmaddr, vmsize, fileoff, filesize);
   }
-  const std::string label = map_->ApplyNameRegexes(name);
-  uint64_t common = std::min(vmsize, filesize);
+  for (auto& pair : outputs_) {
+    const std::string label = pair.second->Munge(name);
+    uint64_t common = std::min(vmsize, filesize);
 
-  map_->vm_map()->AddDualRange(vmaddr, common, fileoff, label);
-  map_->file_map()->AddDualRange(fileoff, common, vmaddr, label);
+    pair.first->vm_map.AddDualRange(vmaddr, common, fileoff, label);
+    pair.first->file_map.AddDualRange(fileoff, common, vmaddr, label);
 
-  map_->vm_map()->AddRange(vmaddr + common, vmsize - common, label);
-  map_->file_map()->AddRange(fileoff + common, filesize - common, label);
+    pair.first->vm_map.AddRange(vmaddr + common, vmsize - common, label);
+    pair.first->file_map.AddRange(fileoff + common, filesize - common, label);
+  }
 }
+
+
+// ThreadSafeIterIndex /////////////////////////////////////////////////////////
+
+class ThreadSafeIterIndex {
+ public:
+  ThreadSafeIterIndex(int max) : index_(0), max_(max) {}
+
+  bool TryGetNext(int* index) {
+    int ret = index_.fetch_add(1, std::memory_order_relaxed);
+    if (ret >= max_) {
+      return false;
+    } else {
+      *index = ret;
+      return true;
+    }
+  }
+
+  void Abort(string_view error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    index_ = max_;
+    error_ = std::string(error);
+  }
+
+  bool TryGetError(std::string* error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (error_.empty()) {
+      return false;
+    } else {
+      *error = error_;
+      return true;
+    }
+  }
+
+ private:
+  std::atomic<int> index_;
+  std::string error_;
+  std::mutex mutex_;
+  const int max_;
+};
 
 
 // Bloaty //////////////////////////////////////////////////////////////////////
@@ -1286,210 +1330,261 @@ void RangeSink::AddRange(StringPiece name, uint64_t vmaddr, uint64_t vmsize,
 // Represents a program execution and associated state.
 
 struct ConfiguredDataSource {
-  ConfiguredDataSource(const DataSourceDefinition& definition)
-      : source(definition.number), munger(new NameMunger()) {}
-  DataSource source;
+  ConfiguredDataSource(const DataSourceDefinition& definition_)
+      : definition(definition_),
+        effective_source(definition_.number),
+        munger(new NameMunger()) {}
+
+  const DataSourceDefinition& definition;
+  // This will differ from definition.number for kSymbols, where we use the
+  // --demangle flag to set the true/effective source.
+  DataSource effective_source;
   std::unique_ptr<NameMunger> munger;
 };
 
 class Bloaty {
  public:
-  Bloaty(const InputFileFactory& factory);
+  Bloaty(const InputFileFactory& factory, const Options& options);
 
-  bool AddFilename(const std::string& filename, bool base_file);
+  void AddFilename(const std::string& filename, bool base_file);
 
-  ConfiguredDataSource* FindDataSource(const std::string& name) const;
   size_t GetSourceCount() const {
     return sources_.size() + (filename_position_ >= 0 ? 1 : 0);
   }
 
-  bool AddDataSource(const std::string& name);
-  bool ScanAndRollup(RollupOutput* output);
-  void PrintDataSources() const {
-    for (const auto& source : all_known_sources_) {
-      const auto& definition = source.second;
-      fprintf(stderr, "%s\n", definition.name);
-    }
-  }
+  void DefineCustomDataSource(const CustomDataSource& source);
 
-  void SetRowLimit(int n) { row_limit_ = (n == 0) ? INT_MAX : n; }
+  void AddDataSource(const std::string& name);
+  void ScanAndRollup(const Options& options, RollupOutput* output);
+  void DisassembleFunction(string_view function, const Options& options,
+                           RollupOutput* output);
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
 
   template <size_t T>
-  void MakeAllSourcesMap(const DataSourceDefinition (&sources)[T]) {
+  void AddBuiltInSources(const DataSourceDefinition (&sources)[T],
+                         const Options& options) {
     for (size_t i = 0; i < T; i++) {
-      auto& source = sources[i];
-      all_known_sources_[source.name] = source;
+      const DataSourceDefinition& source = sources[i];
+      auto configured_source = absl::make_unique<ConfiguredDataSource>(source);
+
+      if (configured_source->effective_source == DataSource::kSymbols) {
+        configured_source->effective_source = EffectiveSymbolSource(options);
+      }
+
+      all_known_sources_[source.name] = std::move(configured_source);
     }
   }
 
-  bool ScanAndRollupFile(const InputFile& file, Rollup* rollup);
+  static DataSource EffectiveSymbolSource(const Options& options) {
+    switch (options.demangle()) {
+      case Options::DEMANGLE_NONE:
+        return DataSource::kRawSymbols;
+      case Options::DEMANGLE_SHORT:
+        return DataSource::kShortSymbols;
+      case Options::DEMANGLE_FULL:
+        return DataSource::kFullSymbols;
+      default:
+        BLOATY_UNREACHABLE();
+    }
+  }
+
+  void ScanAndRollupFiles(const std::vector<std::unique_ptr<ObjectFile>>& files,
+                          Rollup* rollup) const;
+  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const;
 
   const InputFileFactory& file_factory_;
-  std::map<std::string, DataSourceDefinition> all_known_sources_;
-  std::vector<ConfiguredDataSource> sources_;
-  std::map<std::string, ConfiguredDataSource*> sources_by_name_;
-  std::vector<std::unique_ptr<InputFile>> input_files_;
-  std::vector<std::unique_ptr<InputFile>> base_files_;
-  int row_limit_;
+
+  // All data sources, indexed by name.
+  // Contains both built-in sources and custom sources.
+  std::map<std::string, std::unique_ptr<ConfiguredDataSource>>
+      all_known_sources_;
+
+  // Sources the user has actually selected, in the order selected.
+  // Points to entries in all_known_sources_.
+  std::vector<ConfiguredDataSource*> sources_;
+
+  std::vector<std::unique_ptr<ObjectFile>> input_files_;
+  std::vector<std::unique_ptr<ObjectFile>> base_files_;
   int filename_position_;
 };
 
-Bloaty::Bloaty(const InputFileFactory& factory)
-    : file_factory_(factory), row_limit_(20), filename_position_(-1) {
-  MakeAllSourcesMap(data_sources);
+Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
+    : file_factory_(factory), filename_position_(-1) {
+  AddBuiltInSources(data_sources, options);
 }
 
-bool Bloaty::AddFilename(const std::string& filename, bool is_base) {
-  std::unique_ptr<InputFile> file(file_factory_.TryOpenFile(filename));
-  if (!file.get()) {
-    std::cerr << "bloaty: couldn't open file '" << filename << "'\n";
-    return false;
+void Bloaty::AddFilename(const std::string& filename, bool is_base) {
+  std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
+  auto object_file = TryOpenELFFile(file);
+
+  if (!object_file.get()) {
+    object_file = TryOpenMachOFile(file);
+  }
+
+  if (!object_file.get()) {
+    THROWF("unknown file type for file '$0'", filename.c_str());
   }
 
   if (is_base) {
-    base_files_.push_back(std::move(file));
+    base_files_.push_back(std::move(object_file));
   } else {
-    input_files_.push_back(std::move(file));
+    input_files_.push_back(std::move(object_file));
   }
-
-  return true;
 }
 
-bool Bloaty::AddDataSource(const std::string& name) {
+void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
+  if (source.base_data_source() == "symbols") {
+    THROW(
+        "For custom data sources, use one of {rawsymbols, shortsymbols, "
+        "fullsymbols} for base_data_source instead of 'symbols', so you aren't "
+        "sensitive to the --demangle parameter.");
+  }
+
+  auto iter = all_known_sources_.find(source.base_data_source());
+
+  if (iter == all_known_sources_.end()) {
+    THROWF("custom data source '$0': no such base source '$1'", source.name(),
+           source.base_data_source());
+  } else if (!iter->second->munger->IsEmpty()) {
+    THROWF("custom data source '$0' tries to depend on custom data source '$1'",
+           source.name(), source.base_data_source());
+  }
+
+  all_known_sources_[source.name()] =
+      absl::make_unique<ConfiguredDataSource>(iter->second->definition);
+  NameMunger* munger = all_known_sources_[source.name()]->munger.get();
+  for (const auto& regex : source.rewrite()) {
+    munger->AddRegex(regex.pattern(), regex.replacement());
+  }
+}
+
+void Bloaty::AddDataSource(const std::string& name) {
   if (name == "inputfiles") {
     filename_position_ = sources_.size() + 1;
-    return true;
+    return;
   }
 
   auto it = all_known_sources_.find(name);
   if (it == all_known_sources_.end()) {
-    std::cerr << "bloaty: no such data source: " << name << "\n";
-    return false;
+    THROWF("no such data source: $0", name);
   }
 
-  sources_.emplace_back(it->second);
-  sources_by_name_[name] = &sources_.back();
-  return true;
+  sources_.emplace_back(it->second.get());
 }
 
-ConfiguredDataSource* Bloaty::FindDataSource(const std::string& name) const {
-  auto it = sources_by_name_.find(name);
-  if (it != sources_by_name_.end()) {
-    return it->second;
-  } else {
-    return NULL;
-  }
-}
-
-bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
-  const std::string& filename = file.filename();
-  auto file_handler = TryOpenELFFile(file);
-
-  if (!file_handler.get()) {
-    file_handler = TryOpenMachOFile(file);
+// All of the DualMaps for a given file.
+struct DualMaps {
+ public:
+  DualMaps() {
+    // Base map.
+    AppendMap();
   }
 
-  if (!file_handler.get()) {
-    fprintf(stderr, "bloaty: Unknown file type: %s\n", filename.c_str());
-    return false;
+  DualMap* AppendMap() {
+    maps_.emplace_back(new DualMap);
+    return maps_.back().get();
   }
 
-  struct Maps {
-   public:
-    Maps() : base_map_(nullptr) { PushMap(&base_map_); }
+  void ComputeRollup(const std::string& filename, int filename_position,
+                     Rollup* rollup) {
+    RangeMap::ComputeRollup(VmMaps(), filename, filename_position,
+                            [=](const std::vector<std::string>& keys,
+                                uint64_t addr, uint64_t end) {
+                              return rollup->AddSizes(keys, end - addr, true);
+                            });
+    RangeMap::ComputeRollup(FileMaps(), filename, filename_position,
+                            [=](const std::vector<std::string>& keys,
+                                uint64_t addr, uint64_t end) {
+                              return rollup->AddSizes(keys, end - addr,
+                                                      false);
+                            });
+  }
 
-    void PushAndOwnMap(MemoryMap* map) {
-      maps_.emplace_back(map);
-      PushMap(map);
-    }
+  void PrintMaps(const std::vector<const RangeMap*> maps,
+                 const std::string& filename, int filename_position) {
+    uint64_t last = 0;
+    RangeMap::ComputeRollup(maps, filename, filename_position,
+                            [&](const std::vector<std::string>& keys,
+                                uint64_t addr, uint64_t end) {
+                              if (addr > last) {
+                                PrintMapRow("NO ENTRY", last, addr);
+                              }
+                              PrintMapRow(KeysToString(keys), addr, end);
+                              last = end;
+                            });
+  }
 
-    void PushMap(MemoryMap* map) {
-      vm_maps_.push_back(map->vm_map());
-      file_maps_.push_back(map->file_map());
-    }
+  void PrintFileMaps(const std::string& filename, int filename_position) {
+    PrintMaps(FileMaps(), filename, filename_position);
+  }
 
-    void ComputeRollup(const std::string& filename, int filename_position,
-                       Rollup* rollup) {
-      RangeMap::ComputeRollup(
-          vm_maps_, filename, filename_position,
-          [=](const std::vector<std::string>& keys, uint64_t addr,
-              uint64_t end) { rollup->AddSizes(keys, end - addr, true); });
-      RangeMap::ComputeRollup(
-          file_maps_, filename, filename_position,
-          [=](const std::vector<std::string>& keys, uint64_t addr,
-              uint64_t end) { rollup->AddSizes(keys, end - addr, false); });
-    }
+  void PrintVMMaps(const std::string& filename, int filename_position) {
+    PrintMaps(VmMaps(), filename, filename_position);
+  }
 
-    void PrintMaps(const std::vector<const RangeMap*> maps,
-                   const std::string& filename, int filename_position) {
-      uint64_t last = 0;
-      RangeMap::ComputeRollup(maps, filename, filename_position,
-                              [&](const std::vector<std::string>& keys,
-                                  uint64_t addr, uint64_t end) {
-                                if (addr > last) {
-                                  PrintMapRow("NO ENTRY", last, addr);
-                                }
-                                PrintMapRow(KeysToString(keys), addr, end);
-                                last = end;
-                              });
-    }
+  std::string KeysToString(const std::vector<std::string>& keys) {
+    std::string ret;
 
-    void PrintFileMaps(const std::string& filename, int filename_position) {
-      PrintMaps(file_maps_, filename, filename_position);
-    }
-
-    void PrintVMMaps(const std::string& filename, int filename_position) {
-      PrintMaps(vm_maps_, filename, filename_position);
-    }
-
-    std::string KeysToString(const std::vector<std::string>& keys) {
-      std::string ret;
-
-      for (size_t i = 0; i < keys.size(); i++) {
-        if (i > 0) {
-          ret += ", ";
-        }
-        ret += keys[i];
+    for (size_t i = 0; i < keys.size(); i++) {
+      if (i > 0) {
+        ret += ", ";
       }
-
-      return ret;
+      ret += keys[i];
     }
 
-    void PrintMapRow(StringPiece str, uint64_t start, uint64_t end) {
-      printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
-             str.data());
+    return ret;
+  }
+
+  void PrintMapRow(string_view str, uint64_t start, uint64_t end) {
+    printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
+           str.data());
+  }
+
+  DualMap* base_map() { return maps_[0].get(); }
+
+ private:
+  std::vector<const RangeMap*> VmMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->vm_map);
     }
+    return ret;
+  }
 
-    MemoryMap* base_map() { return &base_map_; }
+  std::vector<const RangeMap*> FileMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->file_map);
+    }
+    return ret;
+  }
 
-   private:
-    MemoryMap base_map_;
-    std::vector<std::unique_ptr<MemoryMap>> maps_;
-    std::vector<const RangeMap*> vm_maps_;
-    std::vector<const RangeMap*> file_maps_;
+  std::vector<std::unique_ptr<DualMap>> maps_;
+};
 
-  } maps;
-
-  RangeSink sink(&file, DataSource::kSegments, nullptr, maps.base_map());
-  file_handler->ProcessBaseMap(&sink);
-  maps.base_map()->file_map()->AddRange(0, file.data().size(), "[None]");
+void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const {
+  const std::string& filename = file->file_data().filename();
+  DualMaps maps;
+  RangeSink sink(&file->file_data(), DataSource::kSegments, nullptr);
+  NameMunger empty_munger;
+  sink.AddOutput(maps.base_map(), &empty_munger);
+  file->ProcessBaseMap(&sink);
+  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
+                                     "[None]");
 
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
 
-  for (size_t i = 0; i < sources_.size(); i++) {
-    auto& source = sources_[i];
-    auto map = new MemoryMap(std::move(source.munger));
-    maps.PushAndOwnMap(map);
-    sinks.push_back(std::unique_ptr<RangeSink>(
-        new RangeSink(&file, source.source, maps.base_map(), map)));
+  for (auto source : sources_) {
+    sinks.push_back(absl::make_unique<RangeSink>(
+        &file->file_data(), source->effective_source, maps.base_map()));
+    sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  CHECK_RETURN(file_handler->ProcessFile(sink_ptrs));
+  file->ProcessFile(sink_ptrs);
 
   maps.ComputeRollup(filename, filename_position_, rollup);
   if (verbose_level > 0) {
@@ -1498,35 +1593,79 @@ bool Bloaty::ScanAndRollupFile(const InputFile& file, Rollup* rollup) {
     fprintf(stderr, "VM MAP:\n");
     maps.PrintVMMaps(filename, filename_position_);
   }
-  return true;
 }
 
-bool Bloaty::ScanAndRollup(RollupOutput* output) {
+void Bloaty::ScanAndRollupFiles(
+    const std::vector<std::unique_ptr<ObjectFile>>& files,
+    Rollup* rollup) const {
+  int num_cpus = std::thread::hardware_concurrency();
+  int num_threads = std::min(num_cpus, static_cast<int>(files.size()));
+  std::vector<Rollup> rollups(num_threads);
+  std::vector<std::thread> threads(num_threads);
+  ThreadSafeIterIndex index(files.size());
+
+  for (int i = 0; i < num_threads; i++) {
+    threads[i] = std::thread([this, &index, &files](Rollup* r) {
+      try {
+        int j;
+        while (index.TryGetNext(&j)) {
+          ScanAndRollupFile(files[j].get(), r);
+        }
+      } catch (const bloaty::Error& e) {
+        index.Abort(e.what());
+      }
+    }, &rollups[i]);
+  }
+
+  for (int i = 0; i < num_threads; i++) {
+    threads[i].join();
+    if (i == 0) {
+      *rollup = std::move(rollups[i]);
+    } else {
+      rollup->Add(rollups[i]);
+    }
+  }
+
+  std::string error;
+  if (index.TryGetError(&error)) {
+    THROW(error.c_str());
+  }
+}
+
+void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   if (input_files_.empty()) {
-    fputs("bloaty: no filename specified, exiting.\n", stderr);
-    return false;
+    THROW("no filename specified");
+  }
+
+  for (auto source : sources_) {
+    output->AddDataSourceName(source->definition.name);
   }
 
   Rollup rollup;
-
-  for (const auto& file : input_files_) {
-    CHECK_RETURN(ScanAndRollupFile(*file, &rollup));
-  }
+  ScanAndRollupFiles(input_files_, &rollup);
 
   if (!base_files_.empty()) {
     Rollup base;
-
-    for (const auto& base_file : base_files_) {
-      CHECK_RETURN(ScanAndRollupFile(*base_file, &base));
-    }
-
+    ScanAndRollupFiles(base_files_, &base);
     rollup.Subtract(base);
-    CHECK_RETURN(rollup.ComputeWithBase(&base, row_limit_, output));
+    rollup.CreateDiffModeRollupOutput(&base, options, output);
   } else {
-    CHECK_RETURN(rollup.ComputeWithBase(nullptr, row_limit_, output));
+    rollup.CreateRollupOutput(options, output);
+  }
+}
+
+void Bloaty::DisassembleFunction(string_view function, const Options& options,
+                                 RollupOutput* output) {
+  DisassemblyInfo info;
+  for (auto& file : input_files_) {
+    if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
+                                 &info)) {
+      output->SetDisassembly(::bloaty::DisassembleFunction(info));
+      return;
+    }
   }
 
-  return true;
+  THROWF("Couldn't find function $0 to disassemble", function);
 }
 
 const char usage[] = R"(Bloaty McBloatface: a size profiler for binaries.
@@ -1535,132 +1674,260 @@ USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
-  -d <sources>     Comma-separated list of sources to scan.
-  -n <num>         How many rows to show per level before collapsing
-                   other keys into '[Other]'.  Set to '0' for unlimited.
-                   Defaults to 20.
-  -r <regex>       Add regex to the list of regexes.
-                   Format for regex is:
-                     SOURCE:s/PATTERN/REPLACEMENT/
-  -s <sortby>      Whether to sort by VM or File size.  Possible values
-                   are:
-                     -s vm
-                     -s file
-                     -s both (the default: sorts by max(vm, file)).
-  -v               Verbose output.  Dumps warnings encountered during
-                   processing and full VM/file maps at the end.
-                   Add more v's (-vv, -vvv) for even more.
-  -w               Wide output; don't truncate long labels.
-  --help           Display this message and exit.
-  --list-sources   Show a list of available sources and exit.
+  --csv              Output in CSV format instead of human-readable.
+  -c <file>          Load configuration from <file>.
+  -d <sources>       Comma-separated list of sources to scan.
+  -C <mode>          How to demangle symbols.  Possible values are:
+  --demangle=<mode>    --demangle=none   no demangling, print raw symbols
+                       --demangle=short  demangle, but omit arg/return types
+                       --demangle=full   print full demangled type
+                     The default is --demangle=short.
+  --disassemble=<function>
+                     Disassemble this function (EXPERIMENTAL)
+  -n <num>           How many rows to show per level before collapsing
+                     other keys into '[Other]'.  Set to '0' for unlimited.
+                     Defaults to 20.
+  -s <sortby>        Whether to sort by VM or File size.  Possible values
+                     are:
+                       -s vm
+                       -s file
+                       -s both (the default: sorts by max(vm, file)).
+  -v                 Verbose output.  Dumps warnings encountered during
+                     processing and full VM/file maps at the end.
+                     Add more v's (-vv, -vvv) for even more.
+  -w                 Wide output; don't truncate long labels.
+  --help             Display this message and exit.
+  --list-sources     Show a list of available sources and exit.
 )";
 
-bool CheckNextArg(int i, int argc, const char *option) {
-  if (i + 1 >= argc) {
-    fprintf(stderr, "bloaty: option '%s' requires an argument\n", option);
-    return false;
+class ArgParser {
+ public:
+  ArgParser(int* argc, char** argv[])
+      : argc_(*argc),
+        argv_(*argv, *argv + *argc),
+        out_argc_(argc),
+        out_argv_(argv) {
+    *out_argc_ = 0;
+    ConsumeAndSaveArg();  // Executable name.
   }
-  return true;
-}
 
-void Split(const std::string& str, char delim, std::vector<std::string>* out) {
-  std::stringstream stream(str);
-  std::string item;
-  while (std::getline(stream, item, delim)) {
-    out->push_back(item);
+  bool IsDone() { return index_ == argc_; }
+
+  string_view Arg() {
+    assert(!IsDone());
+    return string_view(argv_[index_]);
   }
-}
 
-bool BloatyMain(int argc, char* argv[], const InputFileFactory& file_factory,
-                RollupOutput* output) {
-  bloaty::Bloaty bloaty(file_factory);
+  string_view ConsumeArg() {
+    string_view ret = Arg();
+    index_++;
+    return ret;
+  }
 
-  RE2 regex_pattern("(\\w+)\\:s/(.*)/(.*)/");
-  bool base_files = false;
+  void ConsumeAndSaveArg() {
+    (*out_argv_)[(*out_argc_)++] = argv_[index_++];
+  }
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--") == 0) {
-      if (base_files) {
-        std::cerr << "bloaty: '--' option should only be specified once.\n";
-        return false;
-      }
-      base_files = true;
-    } else if (strcmp(argv[i], "-d") == 0) {
-      if (!CheckNextArg(i, argc, "-d")) {
-        return false;
-      }
-      std::vector<std::string> names;
-      Split(argv[++i], ',', &names);
-      for (const auto& name : names) {
-        CHECK_RETURN(bloaty.AddDataSource(name));
-      }
-    } else if (strcmp(argv[i], "-r") == 0) {
-      std::string source_name, regex, substitution;
-      if (!RE2::FullMatch(argv[++i], regex_pattern,
-                          &source_name, &regex, &substitution)) {
-        std::cerr << "Bad format for regex, should be: "
-                  << "source+=/pattern/replacement/\n";
-        return false;
-      }
-
-      auto source = bloaty.FindDataSource(source_name);
-      if (!source) {
-        std::cerr << "Data source '" << source_name
-                  << "' not found in previous "
-                  << "-d option\n";
-        return false;
-      }
-
-      source->munger->AddRegex(regex, substitution);
-    } else if (strcmp(argv[i], "-n") == 0) {
-      if (!CheckNextArg(i, argc, "-n")) {
-        return false;
-      }
-      bloaty.SetRowLimit(strtod(argv[++i], NULL));
-    } else if (strcmp(argv[i], "-s") == 0) {
-      if (!CheckNextArg(i, argc, "-s")) {
-        return false;
-      }
-      i++;
-      if (strcmp(argv[i], "vm") == 0) {
-        sortby = SortBy::kVM;
-      } else if (strcmp(argv[i], "file") == 0) {
-        sortby = SortBy::kFile;
-      } else if (strcmp(argv[i], "both") == 0) {
-        sortby = SortBy::kBoth;
-      } else {
-        std::cerr << "Unknown value for -s: " << argv[i] << "\n";
-        return false;
-      }
-    } else if (strcmp(argv[i], "-v") == 0) {
-      verbose_level = 1;
-    } else if (strcmp(argv[i], "-vv") == 0) {
-      verbose_level = 2;
-    } else if (strcmp(argv[i], "-vvv") == 0) {
-      verbose_level = 3;
-    } else if (strcmp(argv[i], "-w") == 0) {
-      max_label_len = SIZE_MAX;
-    } else if (strcmp(argv[i], "--list-sources") == 0) {
-      bloaty.PrintDataSources();
-      return false;
-    } else if (strcmp(argv[i], "--help") == 0) {
-      fputs(usage, stderr);
-      return false;
-    } else if (argv[i][0] == '-') {
-      std::cerr << "Unknown option: " << argv[i] << "\n";
-      return false;
+  // Singular flag like --csv or -v.
+  bool TryParseFlag(string_view flag) {
+    if (Arg() == flag) {
+      ConsumeArg();
+      return true;
     } else {
-      CHECK_RETURN(bloaty.AddFilename(argv[i], base_files));
+      return false;
     }
   }
 
-  if (bloaty.GetSourceCount() == 0) {
-    // Default when no sources are specified.
-    bloaty.AddDataSource("sections");
+  // Option taking an argument, for example:
+  //   -n 20
+  //   --config=file.bloaty
+  //
+  // For --long-options we accept both:
+  //   --long_option value
+  //   --long_option=value
+  bool TryParseOption(string_view flag, string_view* val) {
+    assert(flag.size() > 1);
+    bool is_long = flag[1] == '-';
+    string_view arg = Arg();
+    if (TryParseFlag(flag)) {
+      if (IsDone()) {
+        THROWF("option '$0' requires an argument", flag);
+      }
+      *val = ConsumeArg();
+      return true;
+    } else if (is_long && absl::ConsumePrefix(&arg, std::string(flag) + "=")) {
+      *val = arg;
+      index_++;
+      return true;
+    } else {
+      return false;
+    }
   }
 
-  CHECK_RETURN(bloaty.ScanAndRollup(output));
+  bool TryParseIntegerOption(string_view flag, int* val) {
+    string_view val_str;
+    return TryParseOption(flag, &val_str) && absl::SimpleAtoi(val_str, val);
+  }
+
+ public:
+  int argc_;
+  std::vector<char*> argv_;
+  int* out_argc_;
+  char*** out_argv_;
+  int index_ = 0;
+};
+
+bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
+                    Options* options, OutputOptions* output_options) {
+  bool saw_separator = false;
+  ArgParser args(argc, argv);
+  string_view option;
+  int int_option;
+
+  while (!args.IsDone()) {
+    if (args.TryParseFlag("--")) {
+      if (saw_separator) {
+        THROW("'--' option should only be specified once");
+      }
+      saw_separator = true;
+    } else if (args.TryParseFlag("--csv")) {
+      output_options->output_format = OutputFormat::kCSV;
+    } else if (args.TryParseOption("-c", &option)) {
+      std::ifstream input_file(std::string(option), std::ios::in);
+      if (!input_file.is_open()) {
+        THROWF("couldn't open file $0", option);
+      }
+      google::protobuf::io::IstreamInputStream stream(&input_file);
+      if (!google::protobuf::TextFormat::Merge(&stream, options)) {
+        THROWF("error parsing configuration out of file $0", option);
+      }
+    } else if (args.TryParseOption("-d", &option)) {
+      std::vector<std::string> names = absl::StrSplit(option, ',');
+      for (const auto& name : names) {
+        options->add_data_source(name);
+      }
+    } else if (args.TryParseOption("-C", &option) ||
+               args.TryParseOption("--demangle", &option)) {
+      if (option == "none") {
+        options->set_demangle(Options::DEMANGLE_NONE);
+      } else if (option == "short") {
+        options->set_demangle(Options::DEMANGLE_SHORT);
+      } else if (option == "full") {
+        options->set_demangle(Options::DEMANGLE_FULL);
+      } else {
+        THROWF("unknown value for --demangle: $0", option);
+      }
+    } else if (args.TryParseOption("--disassemble", &option)) {
+      options->mutable_disassemble_function()->assign(std::string(option));
+    } else if (args.TryParseIntegerOption("-n", &int_option)) {
+      options->set_max_rows_per_level(int_option);
+    } else if (args.TryParseOption("-s", &option)) {
+      if (option == "vm") {
+        options->set_sort_by(Options::SORTBY_VMSIZE);
+      } else if (option == "file") {
+        options->set_sort_by(Options::SORTBY_FILESIZE);
+      } else if (option == "both") {
+        options->set_sort_by(Options::SORTBY_BOTH);
+      } else {
+        THROWF("unknown value for -s: $0", option);
+      }
+    } else if (args.TryParseFlag("-v")) {
+      options->set_verbose_level(1);
+    } else if (args.TryParseFlag("-vv")) {
+      options->set_verbose_level(2);
+    } else if (args.TryParseFlag("-vvv")) {
+      options->set_verbose_level(3);
+    } else if (args.TryParseFlag("-w")) {
+      output_options->max_label_len = SIZE_MAX;
+    } else if (args.TryParseFlag("--list-sources")) {
+      for (const auto& source : data_sources) {
+        fprintf(stderr, "%s %s\n", FixedWidthString(source.name, 15).c_str(),
+                source.description);
+      }
+      return false;
+    } else if (args.TryParseFlag("--help")) {
+      fputs(usage, stderr);
+      return false;
+    } else if (absl::StartsWith(args.Arg(), "-")) {
+      if (skip_unknown) {
+        args.ConsumeAndSaveArg();
+      } else {
+        THROWF("Unknown option: $0", args.Arg());
+      }
+    } else {
+      if (saw_separator) {
+        options->add_base_filename(std::string(args.ConsumeArg()));
+      } else {
+        options->add_filename(std::string(args.ConsumeArg()));
+      }
+    }
+  }
+
+  if (options->data_source_size() == 0 &&
+      !options->has_disassemble_function()) {
+    // Default when no sources are specified.
+    options->add_data_source("sections");
+  }
+
   return true;
+}
+
+bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,
+                  OutputOptions* output_options, std::string* error) {
+  try {
+    return DoParseOptions(skip_unknown, argc, argv, options, output_options);
+  } catch (const bloaty::Error& e) {
+    error->assign(e.what());
+    return false;
+  }
+}
+
+void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
+                  RollupOutput* output) {
+  bloaty::Bloaty bloaty(file_factory, options);
+
+  if (options.filename_size() == 0) {
+    THROW("must specify at least one file");
+  }
+
+  if (options.max_rows_per_level() < 1) {
+    THROW("max_rows_per_level must be at least 1");
+  }
+
+  for (auto& filename : options.filename()) {
+    bloaty.AddFilename(filename, false);
+  }
+
+  for (auto& base_filename : options.base_filename()) {
+    bloaty.AddFilename(base_filename, true);
+  }
+
+  for (const auto& custom_data_source : options.custom_data_source()) {
+    bloaty.DefineCustomDataSource(custom_data_source);
+  }
+
+  for (const auto& data_source : options.data_source()) {
+    bloaty.AddDataSource(data_source);
+  }
+
+  verbose_level = options.verbose_level();
+
+  if (options.data_source_size() > 0) {
+    bloaty.ScanAndRollup(options, output);
+  } else if (options.has_disassemble_function()) {
+    bloaty.DisassembleFunction(options.disassemble_function(), options, output);
+  }
+}
+
+bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
+                RollupOutput* output, std::string* error) {
+  try {
+    BloatyDoMain(options, file_factory, output);
+    return true;
+  } catch (const bloaty::Error& e) {
+    error->assign(e.what());
+    return false;
+  }
 }
 
 }  // namespace bloaty

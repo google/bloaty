@@ -4,6 +4,15 @@
 [submodule "third_party/googletest"]
 	path = third_party/googletest
 	url = https://github.com/google/googletest.git
-[submodule "third_party/libFuzzer"]
-	path = third_party/libFuzzer
-	url = https://chromium.googlesource.com/chromium/llvm-project/llvm/lib/Fuzzer
+[submodule "third_party/abseil-cpp"]
+	path = third_party/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "third_party/protobuf"]
+	path = third_party/protobuf
+	url = https://github.com/google/protobuf.git
+[submodule "third_party/capstone"]
+	path = third_party/capstone
+	url = https://github.com/aquynh/capstone.git
+[submodule "third_party/demumble"]
+	path = third_party/demumble
+	url = https://github.com/nico/demumble.git

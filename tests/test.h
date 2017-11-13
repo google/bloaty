@@ -15,8 +15,6 @@
 #ifndef BLOATY_TESTS_TEST_H_
 #define BLOATY_TESTS_TEST_H_
 
-#include "bloaty.h"
-
 #include <fstream>
 #include <memory>
 #include <string>
@@ -27,6 +25,8 @@
 #include "gmock/gmock.h"
 
 #include "strarr.h"
+#include "bloaty.h"
+#include "bloaty.pb.h"
 
 bool GetFileSize(const std::string& filename, uint64_t* size) {
   FILE* file = fopen(filename.c_str(), "rb");
@@ -102,14 +102,26 @@ class BloatyTest : public ::testing::Test {
     std::cerr << "Running bloaty: " << JoinStrings(strings) << "\n";
     output_.reset(new bloaty::RollupOutput);
     top_row_ = &output_->toplevel_row();
+    bloaty::Options options;
+    bloaty::OutputOptions output_options;
+    std::string error;
+    StrArr str_arr(strings);
+    int argc = strings.size();
+    char** argv = str_arr.get();
+    bool ok = bloaty::ParseOptions(false, &argc, &argv, &options,
+                                   &output_options, &error);
+    if (!ok) {
+      std::cerr << "Error parsing options: " << error;
+      return false;
+    }
+
     bloaty::MmapInputFileFactory factory;
-    if (bloaty::BloatyMain(strings.size(), StrArr(strings).get(), factory,
-                           output_.get())) {
+    if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
       CheckConsistency();
-      output_->Print(&std::cerr);
+      output_->Print(output_options, &std::cerr);
       return true;
     } else {
-      std::cerr << "Bloaty returned error." << "\n";
+      std::cerr << "Bloaty returned error:" << error << "\n";
       return false;
     }
   }

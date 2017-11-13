@@ -13,13 +13,18 @@
 // limitations under the License.
 
 #include "bloaty.h"
+#include "bloaty.pb.h"
 #include "strarr.h"
+
+#include "absl/strings/string_view.h"
+
+using absl::string_view;
 
 namespace bloaty {
 
 class StringPieceInputFile : public InputFile {
  public:
-  StringPieceInputFile(StringPiece data)
+  StringPieceInputFile(string_view data)
       : InputFile("fake_StringPieceInputFile_file") {
     data_ = data;
   }
@@ -27,11 +32,11 @@ class StringPieceInputFile : public InputFile {
 
 class StringPieceInputFileFactory : public InputFileFactory {
  public:
-  StringPieceInputFileFactory(StringPiece data) : data_(data) {}
+  StringPieceInputFileFactory(string_view data) : data_(data) {}
  private:
-  StringPiece data_;
-  std::unique_ptr<InputFile> TryOpenFile(
-      const std::string& filename) const override {
+  string_view data_;
+  std::unique_ptr<InputFile> OpenFile(
+      const std::string& /* filename */) const override {
     return std::unique_ptr<InputFile>(new StringPieceInputFile(data_));
   }
 };
@@ -39,15 +44,18 @@ class StringPieceInputFileFactory : public InputFileFactory {
 void RunBloaty(const InputFileFactory& factory,
                const std::string& data_source) {
   bloaty::RollupOutput output;
-  StrArr args({"bloaty", "-d", data_source, "dummy_filename"});
-  bloaty::BloatyMain(args.size(), args.get(), factory, &output);
+  bloaty::Options options;
+  std::string error;
+  options.add_data_source(data_source);
+  options.add_filename("dummy_filename");
+  bloaty::BloatyMain(options, factory, &output, &error);
 }
 
 }  // namespace bloaty
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   const char *data2 = reinterpret_cast<const char*>(data);
-  bloaty::StringPieceInputFileFactory factory(bloaty::StringPiece(data2, size));
+  bloaty::StringPieceInputFileFactory factory(string_view(data2, size));
 
   // Try all of the data sources.
   RunBloaty(factory, "segments");
