@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <string>
 #include <iostream>
+#include "absl/numeric/int128.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "re2/re2.h"
@@ -38,11 +39,22 @@ static void Throw(const char *str, int line) {
 
 namespace {
 
-size_t CheckedAdd(size_t a, size_t b) {
-  if (SIZE_MAX - b < a) {
-    THROW("integer overflow");
+uint64_t CheckedAdd(uint64_t a, uint64_t b) {
+  absl::uint128 a_128(a), b_128(b);
+  absl::uint128 c = a + b;
+  if (c > UINT64_MAX) {
+    THROW("integer overflow in addition");
   }
-  return a + b;
+  return static_cast<uint64_t>(c);
+}
+
+uint64_t CheckedMul(uint64_t a, uint64_t b) {
+  absl::uint128 a_128(a), b_128(b);
+  absl::uint128 c = a * b;
+  if (c > UINT64_MAX) {
+    THROW("integer overflow in multiply");
+  }
+  return static_cast<uint64_t>(c);
 }
 
 }
@@ -150,8 +162,9 @@ class ElfFile {
 
   bool Initialize();
 
-  string_view GetRegion(size_t start, size_t n) const {
-    if (SIZE_MAX - n <= start || start + n > data_.size()) {
+  string_view GetRegion(uint64_t start, uint64_t n) const {
+    uint64_t end = CheckedAdd(start, n);
+    if (end > data_.size()) {
       THROW("ELF region out-of-bounds");
     }
     return data_.substr(start, n);
@@ -165,7 +178,7 @@ class ElfFile {
         : elf_(elf), data_(data) {}
 
     template <class T32, class T64, class Munger>
-    void Read(size_t offset, Munger /*munger*/, T64* out) const {
+    void Read(uint64_t offset, Munger /*munger*/, T64* out) const {
       if (elf_.is_64bit() && elf_.is_native_endian()) {
         return Memcpy(offset, out);
       } else {
@@ -178,20 +191,20 @@ class ElfFile {
     string_view data_;
 
     template <class T32, class T64, class Munger>
-    void ReadFallback(size_t offset, T64* out) const;
+    void ReadFallback(uint64_t offset, T64* out) const;
 
     template <class T>
-    void Memcpy(size_t offset, T* out) const {
-      size_t end = CheckedAdd(offset, sizeof(T));
+    void Memcpy(uint64_t offset, T* out) const {
+      uint64_t end = CheckedAdd(offset, sizeof(T));
       if (end > data_.size()) {
-        THROW("can't memcpy that data from ELF file");
+        THROW("out-of-bounds read to ELF file");
       }
       memcpy(out, data_.data() + offset, sizeof(*out));
     }
   };
 
   template <class T32, class T64, class Munger>
-  void ReadStruct(size_t offset, Munger munger, T64* out) const {
+  void ReadStruct(uint64_t offset, Munger munger, T64* out) const {
     StructReader(*this, data_).Read<T32>(offset, munger, out);
   }
 
@@ -299,7 +312,7 @@ struct RelaMunger {
 };
 
 template <class T32, class T64, class Munger>
-void ElfFile::StructReader::ReadFallback(size_t offset, T64* out) const {
+void ElfFile::StructReader::ReadFallback(uint64_t offset, T64* out) const {
   if (elf_.is_64bit()) {
     assert(!elf_.is_native_endian());
     Memcpy(offset, out);
@@ -432,10 +445,10 @@ bool ElfFile::Initialize() {
   }
 
   header_region_ = GetRegion(0, header_.e_ehsize);
-  section_headers_ =
-      GetRegion(header_.e_shoff, header_.e_shentsize * section_count_);
-  segment_headers_ =
-      GetRegion(header_.e_phoff, header_.e_phentsize * header_.e_phnum);
+  section_headers_ = GetRegion(header_.e_shoff,
+                               CheckedMul(header_.e_shentsize, section_count_));
+  segment_headers_ = GetRegion(
+      header_.e_phoff, CheckedMul(header_.e_phentsize, header_.e_phnum));
 
   if (section_count_ > 0) {
     ReadSection(section_string_index_, &section_name_table_);
@@ -454,8 +467,9 @@ void ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
   }
 
   Elf64_Phdr* header = &segment->header_;
-  ReadStruct<Elf32_Phdr>(header_.e_phoff + header_.e_phentsize * index,
-                         PhdrMunger(), header);
+  ReadStruct<Elf32_Phdr>(
+      CheckedAdd(header_.e_phoff, CheckedMul(header_.e_phentsize, index)),
+      PhdrMunger(), header);
   segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
 }
 
@@ -466,8 +480,9 @@ void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   }
 
   Elf64_Shdr* header = &section->header_;
-  ReadStruct<Elf32_Shdr>(header_.e_shoff + header_.e_shentsize * index,
-                         ShdrMunger(), header);
+  ReadStruct<Elf32_Shdr>(
+      CheckedAdd(header_.e_shoff, CheckedMul(header_.e_shentsize, index)),
+      ShdrMunger(), header);
 
   if (header->sh_type == SHT_NOBITS) {
     section->contents_ = string_view();

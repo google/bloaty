@@ -1757,8 +1757,7 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
                                  DW_AT_high_pc});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
-    WARN("debug info is present, but empty");
-    return;
+    THROW("debug info is present, but empty");
   }
 
   do {
@@ -1838,7 +1837,7 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
   dwarf::FixedAttrReader<uint64_t> attr_reader(&die_reader, {DW_AT_stmt_list});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
-    WARN("debug info is present, but empty");
+    THROW("debug info is present, but empty");
   }
 
   while (true) {
