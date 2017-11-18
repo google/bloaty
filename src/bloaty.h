@@ -38,10 +38,22 @@
   class_name(const class_name&) = delete; \
   void operator=(const class_name&) = delete;
 
+#if ABSL_HAVE_BUILTIN(__builtin_unreachable)
 #define BLOATY_UNREACHABLE() do { \
   assert(false); \
   __builtin_unreachable(); \
 } while (0)
+#else
+#define BLOATY_UNREACHABLE() do { \
+  assert(false); \
+} while (0)
+#endif
+
+#if ABSL_HAVE_BUILTIN(__builtin_expect)
+#define BLOATY_EXPECT(pred, val) __builtin_expect(pred, val)
+#else
+#define BLOATY_EXPECT(pred, val) pred
+#endif
 
 #ifdef NDEBUG
 // Prevent "unused variable" warnings.
@@ -77,6 +89,7 @@ class Error : public std::runtime_error {
  public:
   Error(const char* msg, const char* file, int line)
       : std::runtime_error(msg), file_(file), line_(line) {}
+  Error(const char* msg) : std::runtime_error(msg) {}
 
   // TODO(haberman): add these to Bloaty's error message when verbose is
   // enabled.
@@ -84,9 +97,11 @@ class Error : public std::runtime_error {
   int line() const { return line_; }
 
  private:
-  const char* file_;
-  int line_;
+  const char* file_ = nullptr;
+  int line_ = 0;
 };
+
+void ThrowBloatyError(const char *str);
 
 class InputFile {
  public:
@@ -600,6 +615,195 @@ struct ByteSwapper<T, 8> {
 
 template <class T>
 T ByteSwap(T val) { return ByteSwapper<T, sizeof(T)>()(val); }
+
+struct ByteSwapFunc {
+  template <class T>
+  T operator()(T val) {
+    return ByteSwap(val);
+  }
+};
+
+struct NullFunc {
+  template <class T>
+  T operator()(T val) { return val; }
+};
+
+// File formats like ELF/Mach-O vary between 32/64 bits and also can be both
+// big/little endian.  For applications that only care about reading "native"
+// files (binaries that match the system you're running on), this doesn't
+// usually matter, but we want Bloaty to handle reading non-native files.
+// Maybe you are cross-compiling or analyzing a binary from another system.
+//
+// The 32/64 bit structures can vary in member sizes and even orders!  For
+// example, take ELF segment headers:
+//
+// typedef struct {
+// 	Elf32_Word	p_type;		/* Entry type. */
+// 	Elf32_Off	p_offset;	/* File offset of contents. */
+// 	Elf32_Addr	p_vaddr;	/* Virtual address in memory image. */
+// 	Elf32_Addr	p_paddr;	/* Physical address (not used). */
+// 	Elf32_Word	p_filesz;	/* Size of contents in file. */
+// 	Elf32_Word	p_memsz;	/* Size of contents in memory. */
+// 	Elf32_Word	p_flags;	/* Access permission flags. */
+// 	Elf32_Word	p_align;	/* Alignment in memory and file. */
+// } Elf32_Phdr;
+//
+// typedef struct {
+// 	Elf64_Word	p_type;		/* Entry type. */
+// 	Elf64_Word	p_flags;	/* Access permission flags. */
+// 	Elf64_Off	p_offset;	/* File offset of contents. */
+// 	Elf64_Addr	p_vaddr;	/* Virtual address in memory image. */
+// 	Elf64_Addr	p_paddr;	/* Physical address (not used). */
+// 	Elf64_Xword	p_filesz;	/* Size of contents in file. */
+// 	Elf64_Xword	p_memsz;	/* Size of contents in memory. */
+// 	Elf64_Xword	p_align;	/* Alignment in memory and file. */
+// } Elf64_Phdr;
+//
+// Bloaty will always use 64-bit data-types internally, so that 64-bit files
+// can be analyzed with any build of Bloaty.  So when we're analyzing 32-bit
+// files, we need to convert from the 32-bit struct to the 64-bit one.
+//
+// StructPtr encodes a pointer to a struct, along with tags for bit size and
+// endianness.  The client always reads the 64-bit structure members, and
+// StructPtr will convert from 32-bits if necessary, and byte-swap if
+// necessary.
+//
+// To define the 32/64-bit structure types and the mapping between them, you
+// create a class like so:
+//
+// struct ElfPhdr {
+//   typedef Elf32_Phdr Struct32;
+//   typedef Elf64_Phdr Struct64;
+//
+//   template <class From, class Func>
+//   void operator()(const From& from, Struct64* to, Func func) {
+//     to->p_type   = func(from.p_type);
+//     to->p_flags  = func(from.p_flags);
+//     to->p_offset = func(from.p_offset);
+//     to->p_vaddr  = func(from.p_vaddr);
+//     to->p_paddr  = func(from.p_paddr);
+//     to->p_filesz = func(from.p_filesz);
+//     to->p_memsz  = func(from.p_memsz);
+//     to->p_align  = func(from.p_align);
+//   }
+// };
+//
+// Then use it like so:
+//
+//   // Throws if buffer isn't large enough for this struct.
+//   StructPtr<ElfPhdr> phdr(is_cross_endian, is_32bit, data);
+//
+//   // We can read & convert the whole struct at once if we want to.
+//   // For the trivial case (64-bit, native endian) this will just be memcpy().
+//   Elf64_Phdr phdr64;
+//   phdr.ReadStruct(&phdr64);
+//
+//   // We can also read specific members, to avoid the work of converting
+//   // the whole structure.  Reading multiple members at once will probably
+//   // help the compiler hoist the checks for whether we have to convert.
+//   Elf64_Off offset = phdr.ReadMember(&Elf64::p_offset);
+//   Elf64_Off flags = phdr.ReadMember(&Elf64::p_flags);
+//
+//   // For reading multiple at a time.
+//   std::tie(offset, flags) =
+//       phdr.ReadTuple(&Elf64::p_offset, &Elf64::p_flags);
+template <class T>
+class StructPtr {
+ public:
+  StructPtr(bool is_cross_endian, bool is_32bit, absl::string_view data)
+      : StructPtr(is_cross_endian | (is_32bit << 1), data) {}
+
+  // Takes endianness and 32-bit-ness from another StructPtr.
+  template <typename U>
+  StructPtr(StructPtr<U> other, absl::string_view data)
+      : StructPtr(other.GetFlags(), data) {}
+
+  StructPtr() : tagged_ptr_(0) {}
+
+  void Reset(bool is_cross_endian, bool is_32bit, absl::string_view data) {
+    *this = StructPtr<T>(is_cross_endian, is_32bit, data);
+  }
+
+  void Advance(absl::string_view* data) {
+    data->remove_prefix(GetSize());
+  }
+
+  void ReadStruct(typename T::Struct64* data) {
+    switch (BLOATY_EXPECT(GetFlags(), 0)) {
+      case 0:
+        memcpy(data, Ptr64Unsafe(), sizeof(typename T::Struct64));
+        break;
+      case kIsCrossEndian:
+        T()(*Ptr64(), data, ByteSwapFunc());
+        break;
+      case kIs32Bit:
+        T()(*Ptr32(), data, NullFunc());
+        break;
+      case kIsCrossEndian | kIs32Bit:
+        T()(*Ptr32(), data, ByteSwapFunc());
+        break;
+      default:
+        BLOATY_UNREACHABLE();
+    }
+  }
+
+  template <typename U>
+  U ReadMember(U T::Struct64::*member) const {
+    // Compiler should be smart enough to skip converting the struct members
+    // that aren't used.
+    typename T::Struct64 tmp;
+    ReadStruct(&tmp);
+    return tmp.*member;
+  }
+
+  template <typename... Args>
+  std::tuple<Args...> ReadTuple(Args T::*...args) {
+    // Compiler should be smart enough to skip converting the struct members
+    // that aren't used.
+    typename T::Struct64 tmp;
+    ReadStruct(&tmp);
+    return std::make_tuple(tmp.*args...);
+  }
+
+ private:
+  template <typename U>
+  friend class StructPtr;
+
+  static const char kIsCrossEndian = 0x1;
+  static const char kIs32Bit = 0x2;
+
+  size_t GetSize() {
+    return Is32Bit() ? sizeof(typename T::Struct32)
+                     : sizeof(typename T::Struct64);
+  }
+
+  char GetFlags() { return tagged_ptr_ & 0x3; }
+  bool Is32Bit() { return tagged_ptr_ & kIs32Bit; }
+
+  typename T::Struct64* Ptr64Unsafe() {
+    assert(GetFlags() == 0);
+    return reinterpret_cast<typename T::Struct64*>(tagged_ptr_);
+  }
+
+  typename T::Struct64* Ptr64() {
+    assert(!Is32Bit());
+    return reinterpret_cast<typename T::Struct64*>(tagged_ptr_ & ~3);
+  }
+
+  typename T::Struct32* Ptr32() {
+    assert(Is32Bit());
+    return reinterpret_cast<typename T::Struct32*>(tagged_ptr_ & ~3);
+  }
+
+  StructPtr(char flags, absl::string_view data)
+      : tagged_ptr_(reinterpret_cast<intptr_t>(data.data()) | flags) {
+    if (GetSize() > data.size()) {
+      ThrowBloatyError("Premature EOF reading struct");
+    }
+  }
+
+  intptr_t tagged_ptr_;
+};
 
 }  // namespace bloaty
 

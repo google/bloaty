@@ -69,6 +69,10 @@ static void Throw(const char *str, int line) {
 
 namespace bloaty {
 
+void ThrowBloatyError(const char *str) {
+  throw bloaty::Error(str);
+}
+
 // Use a global since we would have to plumb it through so many call-stacks
 // otherwise.  We would make this thread_local but that's not supported on OS X
 // right now.
