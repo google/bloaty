@@ -13,11 +13,14 @@
 // limitations under the License.
 
 #include <iostream>
+#include "string.h"
 #include "bloaty.h"
 #include "re2/re2.h"
 
 #include <cassert>
 
+#include "absl/strings/string_view.h"
+#include "absl/strings/str_join.h"
 #include "third_party/darwin_xnu_macho/mach-o/loader.h"
 #include "third_party/darwin_xnu_macho/mach-o/fat.h"
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
@@ -28,6 +31,8 @@ static void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }
 
+using absl::string_view;
+
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 #define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
@@ -35,189 +40,195 @@ static void Throw(const char *str, int line) {
 // segname (& sectname) may NOT be NULL-terminated,
 //   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
 //   hence specifying size when constructing std::string
-static std::string str_from_char(const char *s, size_t maxlen) {
-  return std::string(s, strnlen(s, maxlen));
+static string_view ArrayToStr(const char* s, size_t maxlen) {
+  return string_view(s, strnlen(s, maxlen));
+}
+
+static uint64_t CheckedAdd(uint64_t a, uint64_t b) {
+  absl::uint128 a_128(a), b_128(b);
+  absl::uint128 c = a + b;
+  if (c > UINT64_MAX) {
+    THROW("integer overflow in addition");
+  }
+  return static_cast<uint64_t>(c);
+}
+
+static string_view StrictSubstr(string_view data, size_t off, size_t n) {
+  uint64_t end = CheckedAdd(off, n);
+  if (end > data.size()) {
+    THROW("Mach-O region out-of-bounds");
+  }
+  return data.substr(off, n);
 }
 
 namespace bloaty {
 
-uint32_t MaybeByteSwap(uint32_t val, bool is_native_endian) {
-  if (!is_native_endian) {
-    val = ByteSwap(val);
+uint32_t ReadMagic(string_view data) {
+  if (data.size() < sizeof(uint32_t)) {
+    THROW("Malformed Mach-O file");
   }
-  return val;
+  uint32_t magic;
+  memcpy(&magic, data.data(), sizeof(magic));
+  return magic;
 }
 
-static void ParseMachOLoadCommands(RangeSink* sink) {
-  const uint8_t *raw_data = (const uint8_t *) sink->input_file().data().data();
-  uint32_t magic = *(uint32_t *) raw_data;
+template <class T>
+const T* GetStructPointer(string_view data) {
+  if (sizeof(T) > data.size()) {
+    THROW("Premature EOF reading Mach-O data.");
+  }
+  return reinterpret_cast<const T*>(data.data());
+}
 
-  uint32_t offset = 0; // file offset for 64 bit in fat binaries (0 for 64 bit native)
+template <class T>
+void AdvancePastStruct(string_view* data) {
+  *data = data->substr(sizeof(T));
+}
 
-  if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
-    bool is_native_endian = (magic == FAT_MAGIC);
-    struct fat_header *fat_header = (struct fat_header *) raw_data;
-    struct fat_arch *arch = (struct fat_arch *) (fat_header + 1);
+template <class T>
+const T* GetStructPointerAndAdvance(string_view* data) {
+  const T* ret = GetStructPointer<T>(*data);
+  AdvancePastStruct<T>(data);
+  return ret;
+}
 
-    for (uint32_t i = 0; i < MaybeByteSwap(fat_header->nfat_arch, is_native_endian); i++, arch++) {
-      if (MaybeByteSwap(arch->cputype, is_native_endian) & CPU_ARCH_ABI64) {
-        offset = MaybeByteSwap(arch->offset, is_native_endian);
-      } else {
-        sink->AddRange("[Non-64bit arch in fat binary]", 0, 0,
-                       MaybeByteSwap(arch->offset, is_native_endian),
-                       MaybeByteSwap(arch->size, is_native_endian));
-      }
-    }
+template <class Segment, class Section>
+void ParseMachOSegment(string_view command_data, RangeSink* sink) {
+  auto segment = GetStructPointerAndAdvance<Segment>(&command_data);
 
-    assert(offset);
+  if (segment->maxprot == VM_PROT_NONE) {
+    return;
   }
 
-  struct mach_header_64 *header = (struct mach_header_64 *) (raw_data + offset);
+  string_view segname = ArrayToStr(segment->segname, 16);
 
-  // advance past mach header to get to first load command
-  struct load_command *command = (struct load_command *) (header + 1);
-  struct segment_command_64 *__linkedit_segment = NULL;
+  if (sink->data_source() == DataSource::kSegments) {
+    sink->AddRange(segname, segment->vmaddr, segment->vmsize, segment->fileoff,
+                   segment->filesize);
+  } else if (sink->data_source() == DataSource::kSections) {
+    uint32_t nsects = segment->nsects;
+    for (uint32_t j = 0; j < nsects; j++) {
+      auto section = GetStructPointerAndAdvance<Section>(&command_data);
 
-  for (uint32_t i = 0;
-      i < header->ncmds;
-      i++, command = (struct load_command *) ((char *) command + command->cmdsize))
-  {
-    if (command->cmd == LC_SEGMENT_64) {
-      struct segment_command_64 *segment = (struct segment_command_64 *) command;
-
-      // __PAGEZERO is a special blank segment usually used to trap NULL-dereferences
-      // (since all protection bits are 0 it cannot be read from, written to, or executed)
-      if (str_from_char(segment->segname, 16) == SEG_PAGEZERO) {
-        // theoretically __PAGEZERO *should* count towards VM size
-        // however on x86_64 __PAGEZERO takes up all lower 4 GiB
-        // hence we skip it to avoid skewing the results (such as showing 99.99% or 100% for __PAGEZERO)
-        continue;
+      // filesize equals vmsize unless the section is zerofill
+      uint64_t filesize = section->size;
+      switch (section->flags & SECTION_TYPE) {
+        case S_ZEROFILL:
+        case S_GB_ZEROFILL:
+        case S_THREAD_LOCAL_ZEROFILL:
+          filesize = 0;
+          break;
+        default:
+          break;
       }
 
-      if (str_from_char(segment->segname, 16) == SEG_LINKEDIT) {
-        __linkedit_segment = segment;
-      }
-
-      if (sink->data_source() == DataSource::kSegments) { // if segments are all we need this is enough
-        sink->AddRange(str_from_char(segment->segname, 16),
-                       segment->vmaddr,
-                       segment->vmsize,
-                       segment->fileoff,
-                       segment->filesize);
-      } else if (sink->data_source() == DataSource::kSections) { // otherwise load sections
-        // advance past segment command header
-        struct section_64 *section = (struct section_64 *) (segment + 1);
-        for (uint32_t j = 0; j < segment->nsects; j++, section++) {
-          // filesize equals vmsize unless the section is zerofill
-          // note that the flags check (& 0x01) in the original implementation is incorrect
-          // the lowest byte is interpreted similar to a enum rather than a bitmask
-          // e.g. __mod_init_func (S_MOD_INIT_FUNC_POINTERS, 0x09) has lowest bit set but is not a zerofill
-          uint64_t filesize = section->size;
-          switch (section->flags & SECTION_TYPE) {
-            case S_ZEROFILL:
-            case S_GB_ZEROFILL:
-            case S_THREAD_LOCAL_ZEROFILL:
-              filesize = 0;
-              break;
-
-            default:
-              break;
-          }
-
-          std::string label = str_from_char(section->segname, 16) + "," + str_from_char(section->sectname, 16);
-          sink->AddRange(label, section->addr, section->size, section->offset, filesize);
-        }
-      } else {
-        BLOATY_UNREACHABLE();
-      }
+      std::string label = absl::StrJoin(
+          std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
+      sink->AddRange(label, section->addr, section->size, section->offset,
+                     filesize);
     }
-
-    // additional __LINKEDIT info
-    // not "sections" per se, but nevertheless useful (and more complex parsing logic)
-    if (sink->data_source() == DataSource::kSections) {
-      if (command->cmd == LC_DYLD_INFO || command->cmd == LC_DYLD_INFO_ONLY) {
-        // technically load commands can come in any order
-        // however unless deliberately hand crafted, LC_SEGMENT_64 comes before any others
-        // hence __LINKEDIT should've been identified
-        // while technically dyld info can point to any segment, "normal" binaries have it points into __LINKEDIT
-        assert(__linkedit_segment);
-
-        struct dyld_info_command *dyld_info = (struct dyld_info_command *) command;
-
-        #define ADD_DYLD_INFO_RANGE(section, desc) \
-        sink->AddRange(SEG_LINKEDIT "," desc, \
-                       __linkedit_segment->vmaddr + dyld_info-> section##_off - __linkedit_segment->fileoff, \
-                       dyld_info-> section##_size, \
-                       dyld_info-> section##_off, \
-                       dyld_info-> section##_size)
-
-        ADD_DYLD_INFO_RANGE(rebase, "Rebase Info");
-        ADD_DYLD_INFO_RANGE(bind, "Binding Info");
-        ADD_DYLD_INFO_RANGE(weak_bind, "Weak Binding Info");
-        ADD_DYLD_INFO_RANGE(lazy_bind, "Lazy Binding Info");
-        ADD_DYLD_INFO_RANGE(export, "Export Info");
-      }
-    }
-
-    if (command->cmd == LC_SYMTAB) {
-      assert(__linkedit_segment);
-
-      struct symtab_command *symtab  = (struct symtab_command *) command;
-
-      sink->AddRange(SEG_LINKEDIT ",Symbol Table",
-                     __linkedit_segment->vmaddr + symtab->symoff - __linkedit_segment->fileoff,
-                     symtab->nsyms * sizeof(struct nlist_64),
-                     symtab->symoff,
-                     symtab->nsyms * sizeof(struct nlist_64));
-
-      sink->AddRange(SEG_LINKEDIT ",String Table",
-                     __linkedit_segment->vmaddr + symtab->stroff - __linkedit_segment->fileoff,
-                     symtab->strsize,
-                     symtab->stroff,
-                     symtab->strsize);
-    }
-
-    if (command->cmd == LC_DYSYMTAB) {
-      assert(__linkedit_segment);
-
-      struct dysymtab_command *dysymtab = (struct dysymtab_command *) command;
-
-      #define ADD_DYSYM_RANGE(desc, offset, num, entry_type) \
-      sink->AddRange(SEG_LINKEDIT "," desc, \
-                     __linkedit_segment->vmaddr + dysymtab-> offset - __linkedit_segment->fileoff, \
-                     dysymtab-> num * sizeof(entry_type), \
-                     dysymtab-> offset, \
-                     dysymtab-> num * sizeof(entry_type))
-
-      ADD_DYSYM_RANGE("Table of Contents", tocoff, ntoc, struct dylib_table_of_contents);
-      ADD_DYSYM_RANGE("Module Table", modtaboff, nmodtab, struct dylib_module_64);
-      ADD_DYSYM_RANGE("Referenced Symbol Table", extrefsymoff, nextrefsyms, struct dylib_reference);
-      ADD_DYSYM_RANGE("Indirect Symbol Table", indirectsymoff, nindirectsyms, uint32_t);
-      ADD_DYSYM_RANGE("External Relocation Entries", extreloff, nextrel, struct relocation_info);
-      ADD_DYSYM_RANGE("Local Relocation Entries", locreloff, nlocrel, struct relocation_info);
-    }
-
-    #define CHECK_LINKEDIT_DATA_COMMAND(lc, desc) \
-    if (command->cmd == lc) { \
-      assert(__linkedit_segment); \
-      struct linkedit_data_command *linkedit_data = (struct linkedit_data_command *) command; \
-      sink->AddRange(SEG_LINKEDIT "," desc, \
-                     __linkedit_segment->vmaddr + linkedit_data->dataoff - __linkedit_segment->fileoff, \
-                     linkedit_data->datasize, \
-                     linkedit_data->dataoff, \
-                     linkedit_data->datasize); \
-    }
-
-    CHECK_LINKEDIT_DATA_COMMAND(LC_CODE_SIGNATURE, "Code Signature");
-    CHECK_LINKEDIT_DATA_COMMAND(LC_SEGMENT_SPLIT_INFO, "Segment Split Info");
-    CHECK_LINKEDIT_DATA_COMMAND(LC_FUNCTION_STARTS, "Function Start Addresses");
-    CHECK_LINKEDIT_DATA_COMMAND(LC_DATA_IN_CODE, "Table of Non-instructions");
-    CHECK_LINKEDIT_DATA_COMMAND(LC_DYLIB_CODE_SIGN_DRS, "Code Signing DRs");
-    CHECK_LINKEDIT_DATA_COMMAND(LC_LINKER_OPTIMIZATION_HINT, "Optimizatio nHints");
+  } else {
+    BLOATY_UNREACHABLE();
   }
 }
 
-static void ParseMachOSymbols(RangeSink* sink) {
+static void ParseMachODyldInfo(string_view command_data, RangeSink* sink) {
+  auto info = GetStructPointer<dyld_info_command>(command_data);
+
+  sink->AddFileRange("Rebase Info", info->rebase_off, info->rebase_size);
+  sink->AddFileRange("Binding Info", info->bind_off, info->bind_size);
+  sink->AddFileRange("Weak Binding Info", info->weak_bind_off,
+                     info->weak_bind_size);
+  sink->AddFileRange("Lazy Binding Info", info->lazy_bind_off,
+                     info->lazy_bind_size);
+  sink->AddFileRange("Export Info", info->export_off, info->export_size);
+}
+
+static void ParseSymbolTable(string_view command_data, RangeSink* sink) {
+  auto symtab = GetStructPointer<symtab_command>(command_data);
+
+  // TODO(haberman): use 32-bit symbol size where appropriate.
+  sink->AddFileRange("Symbol Table", symtab->symoff,
+                     symtab->nsyms * sizeof(nlist_64));
+  sink->AddFileRange("String Table", symtab->stroff, symtab->strsize);
+}
+
+static void ParseDynamicSymbolTable(string_view command_data, RangeSink* sink) {
+  auto dysymtab = GetStructPointer<dysymtab_command>(command_data);
+
+  sink->AddFileRange("Table of Contents", dysymtab->tocoff,
+                     dysymtab->ntoc * sizeof(dylib_table_of_contents));
+  sink->AddFileRange("Module Table", dysymtab->modtaboff,
+                     dysymtab->nmodtab * sizeof(dylib_module_64));
+  sink->AddFileRange("Referenced Symbol Table", dysymtab->extrefsymoff,
+                     dysymtab->nextrefsyms * sizeof(dylib_reference));
+  sink->AddFileRange("Indirect Symbol Table", dysymtab->indirectsymoff,
+                     dysymtab->nindirectsyms * sizeof(uint32_t));
+  sink->AddFileRange("External Relocation Entries", dysymtab->extreloff,
+                     dysymtab->nextrel * sizeof(relocation_info));
+  sink->AddFileRange("Local Relocation Entries", dysymtab->locreloff,
+                     dysymtab->nlocrel * sizeof(struct relocation_info));
+}
+
+static void ParseLinkeditCommand(string_view label, string_view command_data,
+                                 RangeSink* sink) {
+  auto linkedit = GetStructPointer<linkedit_data_command>(command_data);
+  sink->AddFileRange(label, linkedit->dataoff, linkedit->datasize);
+}
+
+void ParseMachOLoadCommand(uint32_t cmd, string_view command_data,
+                           RangeSink* sink) {
+  switch (cmd) {
+    case LC_SEGMENT_64:
+      ParseMachOSegment<segment_command_64, section_64>(command_data, sink);
+      break;
+    case LC_SEGMENT:
+      ParseMachOSegment<segment_command, section>(command_data, sink);
+      break;
+    case LC_DYLD_INFO:
+    case LC_DYLD_INFO_ONLY:
+      ParseMachODyldInfo(command_data, sink);
+      break;
+    case LC_SYMTAB:
+      ParseSymbolTable(command_data, sink);
+      break;
+    case LC_DYSYMTAB:
+      ParseDynamicSymbolTable(command_data, sink);
+      break;
+    case LC_CODE_SIGNATURE:
+      ParseLinkeditCommand("Code Signature", command_data, sink);
+      break;
+    case LC_SEGMENT_SPLIT_INFO:
+      ParseLinkeditCommand("Segment Split Info", command_data, sink);
+      break;
+    case LC_FUNCTION_STARTS:
+      ParseLinkeditCommand("Function Start Addresses", command_data, sink);
+      break;
+    case LC_DATA_IN_CODE:
+      ParseLinkeditCommand("Table of Non-instructions", command_data, sink);
+      break;
+    case LC_DYLIB_CODE_SIGN_DRS:
+      ParseLinkeditCommand("Code Signing DRs", command_data, sink);
+      break;
+    case LC_LINKER_OPTIMIZATION_HINT:
+      ParseLinkeditCommand("Optimization Hints", command_data, sink);
+      break;
+  }
+}
+
+static void ParseMachOSymbols(string_view command_data, string_view file_data,
+                              RangeSink* sink) {
+  (void)command_data;
+  (void)file_data;
+#if 0
+  auto symtab = GetStructPointer<symtab_command>(command_data);
+
+  // TODO(haberman): use 32-bit symbol size where appropriate.
+  sink->AddFileRange("Symbol Table", symtab->symoff,
+                     symtab->nsyms * sizeof(nlist_64));
+  sink->AddFileRange("String Table", symtab->stroff, symtab->strsize);
+#endif
+
   std::string cmd = std::string("symbols -noSources -noDemangling ") +
                     sink->input_file().filename();
 
@@ -242,13 +253,109 @@ static void ParseMachOSymbols(RangeSink* sink) {
   }
 }
 
+
+template <class Struct>
+void ParseMachOHeaderImpl(string_view file_data, RangeSink* sink) {
+  string_view header_data = file_data;
+  auto header = GetStructPointerAndAdvance<Struct>(&header_data);
+  uint32_t ncmds = header->ncmds;
+
+  for (uint32_t i = 0; i < ncmds; i++) {
+    auto command = GetStructPointer<load_command>(header_data);
+    string_view command_data = StrictSubstr(header_data, 0, command->cmdsize);
+    switch (sink->data_source()) {
+      case DataSource::kSegments:
+      case DataSource::kSections:
+        ParseMachOLoadCommand(command->cmd, command_data, sink);
+        break;
+      case DataSource::kSymbols:
+      case DataSource::kRawSymbols:
+      case DataSource::kShortSymbols:
+      case DataSource::kFullSymbols:
+        if (command->cmd == LC_SYMTAB) {
+          ParseMachOSymbols(command_data, file_data, sink);
+        }
+        break;
+      default:
+        THROW("Unexpected data source");
+    }
+    header_data = header_data.substr(command->cmdsize);
+  }
+}
+
+static void ParseMachOHeader(string_view file_data, RangeSink* sink) {
+  uint32_t magic = ReadMagic(file_data);
+  switch (magic) {
+    case MH_MAGIC:
+      // We don't expect to see many 32-bit binaries out in the wild.  Apple is
+      // aggressively phasing out support for 32-bit binaries:
+      //   https://www.macrumors.com/2017/06/06/apple-to-phase-out-32-bit-mac-apps/
+      //
+      // Still, you can build 32-bit binaries as of this writing, and there are
+      // existing 32-bit binaries floating around, so we might as well support
+      // them.
+      ParseMachOHeaderImpl<mach_header>(file_data, sink);
+      break;
+    case MH_MAGIC_64:
+      ParseMachOHeaderImpl<mach_header_64>(file_data, sink);
+      break;
+    case MH_CIGAM:
+    case MH_CIGAM_64:
+      // OS X and Darwin currently only run on x86/x86-64 (little-endian
+      // platforms), so we expect basically all Mach-O files to be
+      // little-endian.  Additionally, pretty much all CPU architectures are
+      // little-endian these days.  ARM has the option to be big-endian, but I
+      // can't find any OS that is actually compiled to use big-endian mode.
+      // debian-mips is the only big-endian OS I can find (and maybe SPARC).
+      //
+      // All of this is to say, this case should only happen if you are running
+      // Bloaty on debian-mips.  I consider that uncommon enough (and hard
+      // enough to test) that we don't support this until there is a
+      // demonstrated need.
+      THROW("We don't support cross-endian Mach-O files.");
+    default:
+      THROW("Corrupt Mach-O file");
+  }
+}
+
+static void ParseMachOFatHeader(string_view file_data, RangeSink* sink) {
+  string_view header_data = file_data;
+  auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+  assert(ByteSwap(header->magic) == FAT_MAGIC);
+  uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+  for (uint32_t i = 0; i < nfat_arch; i++) {
+    auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+    string_view arch_data =
+        StrictSubstr(file_data, ByteSwap(arch->offset), ByteSwap(arch->size));
+    ParseMachOHeader(arch_data, sink);
+  }
+}
+
+static void ParseMachOFile(RangeSink* sink) {
+  string_view file_data = sink->input_file().data();
+  uint32_t magic = ReadMagic(file_data);
+  switch (magic) {
+    case MH_MAGIC:
+    case MH_MAGIC_64:
+    case MH_CIGAM:
+    case MH_CIGAM_64:
+      ParseMachOHeader(file_data, sink);
+      break;
+    case FAT_CIGAM:
+      ParseMachOFatHeader(file_data, sink);
+    default:
+      // TODO: .a file (AR).
+      THROW("Unrecognized Mach-O file");
+  }
+}
+
 class MachOObjectFile : public ObjectFile {
  public:
   MachOObjectFile(std::unique_ptr<InputFile> file_data)
       : ObjectFile(std::move(file_data)) {}
 
   void ProcessBaseMap(RangeSink* sink) override {
-    ParseMachOLoadCommands(sink);
+    ParseMachOFile(sink);
   }
 
   void ProcessFile(const std::vector<RangeSink*>& sinks) override {
@@ -256,12 +363,11 @@ class MachOObjectFile : public ObjectFile {
       switch (sink->data_source()) {
         case DataSource::kSegments:
         case DataSource::kSections:
-          ParseMachOLoadCommands(sink);
-          break;
+        case DataSource::kSymbols:
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ParseMachOSymbols(sink);
+          ParseMachOFile(sink);
           break;
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
@@ -281,17 +387,12 @@ class MachOObjectFile : public ObjectFile {
 };
 
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
-  uint32_t magic = *(uint32_t *) file->data().data();
+  uint32_t magic = ReadMagic(file->data());
 
-  // 32 bit binaries are effectively deprecated, don't bother
-  // note check for MH_CIGAM_64 is unneccessary as long as this tool is executed on
-  //   the same architecture as the target binary
-  // check for FAT_CIGAM *is* neccessary since fat header is always big-endian and would read FAT_CIGAM on Intel
-  // to allow checking for target binaries complied for a different architecture (e.g. checking ARM
-  //   binaries on Intel), corresponding changes also need to be made to swap byte-order when
-  //   reading sizes and offsets from load commands
-  // for fat binaries, reports info on 64 bit binary (file size and offsets relative to only the 64 bit part)
-  if (magic == MH_MAGIC_64 || magic == FAT_CIGAM || magic == FAT_MAGIC) {
+  // We only support little-endian host and little endian binaries (see
+  // ParseMachOHeader() for more rationale).  Fat headers are always on disk as
+  // big-endian.
+  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {
     return std::unique_ptr<ObjectFile>(new MachOObjectFile(std::move(file)));
   }
 
@@ -299,6 +400,3 @@ std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
 }
 
 }  // namespace bloaty
-
-// vim: expandtab:ts=2:sw=2
-
