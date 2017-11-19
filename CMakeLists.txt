@@ -112,6 +112,11 @@ endif()
 
 enable_testing()
 
+if($ENV{LIB_FUZZING_ENGINE})
+  add_executable(fuzz_target tests/fuzz_target.cc)
+  target_link_libraries(fuzz_target "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}" $ENV{LIB_FUZZING_ENGINE})
+endif()
+
 if(BUILD_TESTING)
   add_subdirectory(third_party/googletest)
   include_directories(third_party/googletest/googletest/include)
@@ -128,11 +133,7 @@ if(BUILD_TESTING)
     target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
   endforeach(target)
 
-  if($ENV{LIB_FUZZING_ENGINE})
-    add_executable(fuzz_test tests/fuzz_target.cc)
-  else()
-    add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
-  endif()
+  add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
   target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
 
   file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
