@@ -98,7 +98,8 @@ add_library(libbloaty
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
 
 
-if(ENV{LIB_FUZZING_ENGINE})
+if(DEFINED ENV{LIB_FUZZING_ENGINE})
+  message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
   add_executable(fuzz_target tests/fuzz_target.cc)
   target_link_libraries(fuzz_target "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}" ENV{LIB_FUZZING_ENGINE})
 else()
