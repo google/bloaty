@@ -46,9 +46,11 @@ static void Throw(const char *str, int line) {
 
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
 namespace bloaty {
+
+extern int verbose_level;
+
 namespace dwarf {
 
 int DivRoundUp(int n, int d) {
@@ -1603,10 +1605,12 @@ bool LineInfoReader::ReadLineInfo() {
             default:
               // We don't understand this opcode, skip it.
               SkipBytes(len, &data);
-              fprintf(stderr,
-                      "bloaty: warning: unknown DWARF line table extended "
-                      "opcode: %d\n",
-                      extended_op);
+              if (verbose_level > 0) {
+                fprintf(stderr,
+                        "bloaty: warning: unknown DWARF line table extended "
+                        "opcode: %d\n",
+                        extended_op);
+              }
               break;
           }
           break;
@@ -1657,8 +1661,11 @@ bool LineInfoReader::ReadLineInfo() {
         default:
           // Unknown opcode, but we know its length so can skip it.
           SkipBytes(standard_opcode_lengths_[op], &data);
-          fprintf(stderr,
-                  "bloaty: warning: unknown DWARF line table opcode: %d\n", op);
+          if (verbose_level > 0) {
+            fprintf(stderr,
+                    "bloaty: warning: unknown DWARF line table opcode: %d\n",
+                    op);
+          }
           break;
       }
     }
