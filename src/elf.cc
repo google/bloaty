@@ -575,8 +575,10 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
     char end[2];
   };
 
-  if (remaining_.size() < sizeof(Header)) {
+  if (remaining_.size() == 0) {
     return false;
+  } else if (remaining_.size() < sizeof(Header)) {
+    THROW("Premature EOF in AR data");
   }
 
   const Header* header = reinterpret_cast<const Header*>(remaining_.data());
@@ -600,20 +602,19 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
       size_t end = long_filenames_.find('/', offset);
 
       if (end == std::string::npos) {
-        return false;
+        THROW("Unterminated long filename");
       }
 
       file->filename = long_filenames_.substr(offset, end - offset);
     } else {
-      return false;  // Unexpected special filename.
+      THROW("Unexpected special filename in AR archive");
     }
   } else {
     // Normal filename, slash-terminated.
     size_t slash = file_id.find('/');
 
     if (slash == std::string::npos) {
-      fprintf(stderr, "BSD-style AR not yet implemented.\n");
-      return false;
+      THROW("BSD-style AR not yet implemented");
     }
 
     file->filename = file_id.substr(0, slash);
