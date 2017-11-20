@@ -1062,10 +1062,10 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 
   for (auto range_map : range_maps) {
     iters.push_back(range_map->mappings_.begin());
-    current = std::min(current, iters.back()->first);
+    if (!range_map->IterIsEnd(iters.back())) {
+      current = std::min(current, iters.back()->first);
+    }
   }
-
-  assert(current != UINTPTR_MAX);
 
   // Iterate over all ranges in parallel to perform this transformation:
   //
