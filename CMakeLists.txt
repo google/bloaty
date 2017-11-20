@@ -62,6 +62,10 @@ if(BLOATY_ENABLE_UBSAN)
   set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=undefined")
 endif()
 
+if(DEFINED ENV{CXXFLAGS})
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} $ENV{CXXFLAGS}")
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
