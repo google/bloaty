@@ -248,7 +248,7 @@ static void ParseMachOSymbols(string_view command_data, string_view file_data,
         continue;
       }
 
-      sink->AddVMRange(addr, size, name);
+      sink->AddVMRange(addr, size, ItaniumDemangle(name, sink->data_source()));
     }
   }
 }
