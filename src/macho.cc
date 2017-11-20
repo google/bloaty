@@ -19,8 +19,9 @@
 
 #include <cassert>
 
-#include "absl/strings/string_view.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
 #include "third_party/darwin_xnu_macho/mach-o/loader.h"
 #include "third_party/darwin_xnu_macho/mach-o/fat.h"
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
@@ -93,7 +94,8 @@ const T* GetStructPointerAndAdvance(string_view* data) {
 }
 
 template <class Segment, class Section>
-void ParseMachOSegment(string_view command_data, RangeSink* sink) {
+void ParseMachOSegment(string_view command_data, string_view file_data,
+                       RangeSink* sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&command_data);
 
   if (segment->maxprot == VM_PROT_NONE) {
@@ -103,8 +105,9 @@ void ParseMachOSegment(string_view command_data, RangeSink* sink) {
   string_view segname = ArrayToStr(segment->segname, 16);
 
   if (sink->data_source() == DataSource::kSegments) {
-    sink->AddRange(segname, segment->vmaddr, segment->vmsize, segment->fileoff,
-                   segment->filesize);
+    sink->AddRange(
+        segname, segment->vmaddr, segment->vmsize,
+        StrictSubstr(file_data, segment->fileoff, segment->filesize));
   } else if (sink->data_source() == DataSource::kSections) {
     uint32_t nsects = segment->nsects;
     for (uint32_t j = 0; j < nsects; j++) {
@@ -124,94 +127,118 @@ void ParseMachOSegment(string_view command_data, RangeSink* sink) {
 
       std::string label = absl::StrJoin(
           std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
-      sink->AddRange(label, section->addr, section->size, section->offset,
-                     filesize);
+      sink->AddRange(label, section->addr, section->size,
+                     StrictSubstr(file_data, section->offset, filesize));
     }
   } else {
     BLOATY_UNREACHABLE();
   }
 }
 
-static void ParseMachODyldInfo(string_view command_data, RangeSink* sink) {
+static void ParseMachODyldInfo(string_view command_data, string_view file_data,
+                               RangeSink* sink) {
   auto info = GetStructPointer<dyld_info_command>(command_data);
 
-  sink->AddFileRange("Rebase Info", info->rebase_off, info->rebase_size);
-  sink->AddFileRange("Binding Info", info->bind_off, info->bind_size);
-  sink->AddFileRange("Weak Binding Info", info->weak_bind_off,
-                     info->weak_bind_size);
-  sink->AddFileRange("Lazy Binding Info", info->lazy_bind_off,
-                     info->lazy_bind_size);
-  sink->AddFileRange("Export Info", info->export_off, info->export_size);
+  sink->AddFileRange("Rebase Info", StrictSubstr(file_data, info->rebase_off,
+                                                 info->rebase_size));
+  sink->AddFileRange("Binding Info",
+                     StrictSubstr(file_data, info->bind_off, info->bind_size));
+  sink->AddFileRange(
+      "Weak Binding Info",
+      StrictSubstr(file_data, info->weak_bind_off, info->weak_bind_size));
+  sink->AddFileRange(
+      "Lazy Binding Info",
+      StrictSubstr(file_data, info->lazy_bind_off, info->lazy_bind_size));
+  sink->AddFileRange("Export Info", StrictSubstr(file_data, info->export_off,
+                                                 info->export_size));
 }
 
-static void ParseSymbolTable(string_view command_data, RangeSink* sink) {
+static void ParseSymbolTable(string_view command_data, string_view file_data,
+                             RangeSink* sink) {
   auto symtab = GetStructPointer<symtab_command>(command_data);
 
   // TODO(haberman): use 32-bit symbol size where appropriate.
-  sink->AddFileRange("Symbol Table", symtab->symoff,
-                     symtab->nsyms * sizeof(nlist_64));
-  sink->AddFileRange("String Table", symtab->stroff, symtab->strsize);
+  sink->AddFileRange("Symbol Table",
+                     StrictSubstr(file_data, symtab->symoff,
+                                  symtab->nsyms * sizeof(nlist_64)));
+  sink->AddFileRange("String Table",
+                     StrictSubstr(file_data, symtab->stroff, symtab->strsize));
 }
 
-static void ParseDynamicSymbolTable(string_view command_data, RangeSink* sink) {
+static void ParseDynamicSymbolTable(string_view command_data,
+                                    string_view file_data, RangeSink* sink) {
   auto dysymtab = GetStructPointer<dysymtab_command>(command_data);
 
-  sink->AddFileRange("Table of Contents", dysymtab->tocoff,
-                     dysymtab->ntoc * sizeof(dylib_table_of_contents));
-  sink->AddFileRange("Module Table", dysymtab->modtaboff,
-                     dysymtab->nmodtab * sizeof(dylib_module_64));
-  sink->AddFileRange("Referenced Symbol Table", dysymtab->extrefsymoff,
-                     dysymtab->nextrefsyms * sizeof(dylib_reference));
-  sink->AddFileRange("Indirect Symbol Table", dysymtab->indirectsymoff,
-                     dysymtab->nindirectsyms * sizeof(uint32_t));
-  sink->AddFileRange("External Relocation Entries", dysymtab->extreloff,
-                     dysymtab->nextrel * sizeof(relocation_info));
-  sink->AddFileRange("Local Relocation Entries", dysymtab->locreloff,
-                     dysymtab->nlocrel * sizeof(struct relocation_info));
+  sink->AddFileRange(
+      "Table of Contents",
+      StrictSubstr(file_data, dysymtab->tocoff,
+                   dysymtab->ntoc * sizeof(dylib_table_of_contents)));
+  sink->AddFileRange("Module Table",
+                     StrictSubstr(file_data, dysymtab->modtaboff,
+                                  dysymtab->nmodtab * sizeof(dylib_module_64)));
+  sink->AddFileRange(
+      "Referenced Symbol Table",
+      StrictSubstr(file_data, dysymtab->extrefsymoff,
+                   dysymtab->nextrefsyms * sizeof(dylib_reference)));
+  sink->AddFileRange("Indirect Symbol Table",
+                     StrictSubstr(file_data, dysymtab->indirectsymoff,
+                                  dysymtab->nindirectsyms * sizeof(uint32_t)));
+  sink->AddFileRange("External Relocation Entries",
+                     StrictSubstr(file_data, dysymtab->extreloff,
+                                  dysymtab->nextrel * sizeof(relocation_info)));
+  sink->AddFileRange(
+      "Local Relocation Entries",
+      StrictSubstr(file_data, dysymtab->locreloff,
+                   dysymtab->nlocrel * sizeof(struct relocation_info)));
 }
 
 static void ParseLinkeditCommand(string_view label, string_view command_data,
-                                 RangeSink* sink) {
+                                 string_view file_data, RangeSink* sink) {
   auto linkedit = GetStructPointer<linkedit_data_command>(command_data);
-  sink->AddFileRange(label, linkedit->dataoff, linkedit->datasize);
+  sink->AddFileRange(
+      label, StrictSubstr(file_data, linkedit->dataoff, linkedit->datasize));
 }
 
 void ParseMachOLoadCommand(uint32_t cmd, string_view command_data,
-                           RangeSink* sink) {
+                           string_view file_data, RangeSink* sink) {
   switch (cmd) {
     case LC_SEGMENT_64:
-      ParseMachOSegment<segment_command_64, section_64>(command_data, sink);
+      ParseMachOSegment<segment_command_64, section_64>(command_data, file_data,
+                                                        sink);
       break;
     case LC_SEGMENT:
-      ParseMachOSegment<segment_command, section>(command_data, sink);
+      ParseMachOSegment<segment_command, section>(command_data, file_data,
+                                                  sink);
       break;
     case LC_DYLD_INFO:
     case LC_DYLD_INFO_ONLY:
-      ParseMachODyldInfo(command_data, sink);
+      ParseMachODyldInfo(command_data, file_data, sink);
       break;
     case LC_SYMTAB:
-      ParseSymbolTable(command_data, sink);
+      ParseSymbolTable(command_data, file_data, sink);
       break;
     case LC_DYSYMTAB:
-      ParseDynamicSymbolTable(command_data, sink);
+      ParseDynamicSymbolTable(command_data, file_data, sink);
       break;
     case LC_CODE_SIGNATURE:
-      ParseLinkeditCommand("Code Signature", command_data, sink);
+      ParseLinkeditCommand("Code Signature", command_data, file_data, sink);
       break;
     case LC_SEGMENT_SPLIT_INFO:
-      ParseLinkeditCommand("Segment Split Info", command_data, sink);
+      ParseLinkeditCommand("Segment Split Info", command_data, file_data, sink);
       break;
     case LC_FUNCTION_STARTS:
-      ParseLinkeditCommand("Function Start Addresses", command_data, sink);
+      ParseLinkeditCommand("Function Start Addresses", command_data, file_data,
+                           sink);
       break;
     case LC_DATA_IN_CODE:
-      ParseLinkeditCommand("Table of Non-instructions", command_data, sink);
+      ParseLinkeditCommand("Table of Non-instructions", command_data, file_data,
+                           sink);
       break;
     case LC_DYLIB_CODE_SIGN_DRS:
-      ParseLinkeditCommand("Code Signing DRs", command_data, sink);
+      ParseLinkeditCommand("Code Signing DRs", command_data, file_data, sink);
       break;
     case LC_LINKER_OPTIMIZATION_HINT:
-      ParseLinkeditCommand("Optimization Hints", command_data, sink);
+      ParseLinkeditCommand("Optimization Hints", command_data, file_data, sink);
       break;
   }
 }
@@ -266,7 +293,7 @@ void ParseMachOHeaderImpl(string_view file_data, RangeSink* sink) {
     switch (sink->data_source()) {
       case DataSource::kSegments:
       case DataSource::kSections:
-        ParseMachOLoadCommand(command->cmd, command_data, sink);
+        ParseMachOLoadCommand(command->cmd, command_data, file_data, sink);
         break;
       case DataSource::kSymbols:
       case DataSource::kRawSymbols:
@@ -343,9 +370,10 @@ static void ParseMachOFile(RangeSink* sink) {
       break;
     case FAT_CIGAM:
       ParseMachOFatHeader(file_data, sink);
+      break;
     default:
       // TODO: .a file (AR).
-      THROW("Unrecognized Mach-O file");
+      THROWF("Unrecognized Mach-O file, magic: $0", magic);
   }
 }
 
