@@ -1522,7 +1522,7 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     file_name.directory_index = ReadLEB128<uint32_t>(&data);
     file_name.modified_time = ReadLEB128<uint64_t>(&data);
     file_name.file_size = ReadLEB128<uint64_t>(&data);
-    if (file_name.directory_index > include_directories_.size()) {
+    if (file_name.directory_index >= include_directories_.size()) {
       THROW("directory index out of range");
     }
     filenames_.push_back(file_name);
@@ -1591,7 +1591,7 @@ bool LineInfoReader::ReadLineInfo() {
               file_name.directory_index = ReadLEB128<uint32_t>(&data);
               file_name.modified_time = ReadLEB128<uint64_t>(&data);
               file_name.file_size = ReadLEB128<uint64_t>(&data);
-              if (file_name.directory_index > include_directories_.size()) {
+              if (file_name.directory_index >= include_directories_.size()) {
                 THROW("directory index out of range");
               }
               filenames_.push_back(file_name);

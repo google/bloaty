@@ -41,11 +41,11 @@ namespace {
 
 uint64_t CheckedAdd(uint64_t a, uint64_t b) {
   absl::uint128 a_128(a), b_128(b);
-  absl::uint128 c = a + b;
-  if (c > UINT64_MAX) {
+  absl::uint128 c_128 = a_128 + b_128;
+  if (c_128 > UINT64_MAX) {
     THROW("integer overflow in addition");
   }
-  return static_cast<uint64_t>(c);
+  return static_cast<uint64_t>(c_128);
 }
 
 uint64_t CheckedMul(uint64_t a, uint64_t b) {
@@ -575,8 +575,10 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
     char end[2];
   };
 
-  if (remaining_.size() < sizeof(Header)) {
+  if (remaining_.size() == 0) {
     return false;
+  } else if (remaining_.size() < sizeof(Header)) {
+    THROW("Premature EOF in AR data");
   }
 
   const Header* header = reinterpret_cast<const Header*>(remaining_.data());
@@ -600,20 +602,19 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
       size_t end = long_filenames_.find('/', offset);
 
       if (end == std::string::npos) {
-        return false;
+        THROW("Unterminated long filename");
       }
 
       file->filename = long_filenames_.substr(offset, end - offset);
     } else {
-      return false;  // Unexpected special filename.
+      THROW("Unexpected special filename in AR archive");
     }
   } else {
     // Normal filename, slash-terminated.
     size_t slash = file_id.find('/');
 
     if (slash == std::string::npos) {
-      fprintf(stderr, "BSD-style AR not yet implemented.\n");
-      return false;
+      THROW("BSD-style AR not yet implemented");
     }
 
     file->filename = file_id.substr(0, slash);
