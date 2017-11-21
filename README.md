@@ -132,23 +132,30 @@ USAGE: bloaty [options] file... [-- base_file...]
 
 Options:
 
-  -d <sources>     Comma-separated list of sources to scan.
-  -n <num>         How many rows to show per level before collapsing
-                   other keys into '[Other]'.  Set to '0' for unlimited.
-                   Defaults to 20.
-  -r <regex>       Add regex to the list of regexes.
-                   Format for regex is:
-                     SOURCE:s/PATTERN/REPLACEMENT/
-  -s <sortby>      Whether to sort by VM or File size.  Possible values
-                   are:
-                     -s vm
-                     -s file
-                     -s both (the default: sorts by max(vm, file)).
-  -v               Verbose output.  Dumps warnings encountered during
-                   processing and full VM/file maps at the end.
-                   Add more v's (-vv, -vvv) for even more.
-  --help           Display this message and exit.
-  --list-sources   Show a list of available sources and exit.
+  --csv              Output in CSV format instead of human-readable.
+  -c <file>          Load configuration from <file>.
+  -d <sources>       Comma-separated list of sources to scan.
+  -C <mode>          How to demangle symbols.  Possible values are:
+  --demangle=<mode>    --demangle=none   no demangling, print raw symbols
+                       --demangle=short  demangle, but omit arg/return types
+                       --demangle=full   print full demangled type
+                     The default is --demangle=short.
+  --disassemble=<function>
+                     Disassemble this function (EXPERIMENTAL)
+  -n <num>           How many rows to show per level before collapsing
+                     other keys into '[Other]'.  Set to '0' for unlimited.
+                     Defaults to 20.
+  -s <sortby>        Whether to sort by VM or File size.  Possible values
+                     are:
+                       -s vm
+                       -s file
+                       -s both (the default: sorts by max(vm, file)).
+  -v                 Verbose output.  Dumps warnings encountered during
+                     processing and full VM/file maps at the end.
+                     Add more v's (-vv, -vvv) for even more.
+  -w                 Wide output; don't truncate long labels.
+  --help             Display this message and exit.
+  --list-sources     Show a list of available sources and exit.
 ```
 
 ## Size Diffs
