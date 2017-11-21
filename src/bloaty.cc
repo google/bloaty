@@ -741,31 +741,26 @@ void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
-                                 string_view parent_labels,
+                                 std::vector<std::string> parent_labels,
                                  std::ostream* out) const {
-  if (parent_labels.size() > 0) {
-    *out << parent_labels << ",";
+  while (parent_labels.size() < source_names_.size()) {
+    // If this label had no data at this level, append an empty string.
+    parent_labels.push_back("");
   }
 
-  *out << absl::StrJoin(std::make_tuple(CSVEscape(row.name),
-                                        row.vmsize,
-                                        row.filesize),
-                        ",") << "\n";
+  parent_labels.push_back(std::to_string(row.vmsize));
+  parent_labels.push_back(std::to_string(row.filesize));
+
+  *out << absl::StrJoin(parent_labels, ",") << "\n";
 }
 
 void RollupOutput::PrintTreeToCSV(const RollupRow& row,
-                                  string_view parent_labels,
+                                  std::vector<std::string> parent_labels,
                                   std::ostream* out) const {
+  parent_labels.push_back(row.name);
   if (row.sorted_children.size() > 0) {
-    std::string labels;
-    if (parent_labels.size() > 0) {
-      labels = absl::StrJoin(
-          std::make_tuple(parent_labels, CSVEscape(row.name)), ",");
-    } else {
-      labels = CSVEscape(row.name);
-    }
     for (const auto& child_row : row.sorted_children) {
-      PrintTreeToCSV(child_row, labels, out);
+      PrintTreeToCSV(child_row, parent_labels, out);
     }
   } else {
     PrintRowToCSV(row, parent_labels, out);
@@ -778,7 +773,7 @@ void RollupOutput::PrintToCSV(std::ostream* out) const {
   names.push_back("filesize");
   *out << absl::StrJoin(names, ",") << "\n";
   for (const auto& child_row : toplevel_row_.sorted_children) {
-    PrintTreeToCSV(child_row, "", out);
+    PrintTreeToCSV(child_row, std::vector<std::string>(), out);
   }
 }
 
@@ -1300,6 +1295,7 @@ class Bloaty {
   // Sources the user has actually selected, in the order selected.
   // Points to entries in all_known_sources_.
   std::vector<ConfiguredDataSource*> sources_;
+  std::vector<std::string> source_names_;
 
   std::vector<std::unique_ptr<ObjectFile>> input_files_;
   std::vector<std::unique_ptr<ObjectFile>> base_files_;
@@ -1357,6 +1353,8 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
 }
 
 void Bloaty::AddDataSource(const std::string& name) {
+  source_names_.emplace_back(name);
+
   if (name == "inputfiles") {
     filename_position_ = sources_.size() + 1;
     return;
@@ -1533,8 +1531,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
     THROW("no filename specified");
   }
 
-  for (auto source : sources_) {
-    output->AddDataSourceName(source->definition.name);
+  for (const auto& name : source_names_) {
+    output->AddDataSourceName(name);
   }
 
   Rollup rollup;

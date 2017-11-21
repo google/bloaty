@@ -21,8 +21,10 @@
 #include <unordered_set>
 #include <tuple>
 #include <vector>
-#include "gtest/gtest.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
 #include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 #include "strarr.h"
 #include "bloaty.h"
@@ -59,7 +61,7 @@ std::string GetTestDirectory() {
 class BloatyTest : public ::testing::Test {
  protected:
   void CheckConsistencyForRow(const bloaty::RollupRow& row, bool is_toplevel,
-                              bool diff_mode) {
+                             bool diff_mode, int* count) {
     // If any children exist, they should sum up to this row's values.
     // Also none of the children should have the same name.
     std::unordered_set<std::string> names;
@@ -70,7 +72,7 @@ class BloatyTest : public ::testing::Test {
       for (const auto& child : row.sorted_children) {
         vmtotal += child.vmsize;
         filetotal += child.filesize;
-        CheckConsistencyForRow(child, false, diff_mode);
+        CheckConsistencyForRow(child, false, diff_mode, count);
         ASSERT_TRUE(names.insert(child.name).second);
         ASSERT_FALSE(child.vmsize == 0 && child.filesize == 0);
       }
@@ -79,6 +81,9 @@ class BloatyTest : public ::testing::Test {
         ASSERT_EQ(vmtotal, row.vmsize);
         ASSERT_EQ(filetotal, row.filesize);
       }
+    } else {
+      // Count leaf rows.
+      *count += 1;
     }
 
     if (!is_toplevel && row.sorted_children.size() == 1) {
@@ -86,8 +91,48 @@ class BloatyTest : public ::testing::Test {
     }
   }
 
+  void CheckCSVConsistency(int row_count) {
+    std::ostringstream stream;
+    bloaty::OutputOptions options;
+    options.output_format = bloaty::OutputFormat::kPrettyPrint;
+    output_->Print(options, &std::cerr);
+    options.output_format = bloaty::OutputFormat::kCSV;
+    output_->Print(options, &stream);
+    std::string csv_output = stream.str();
+    std::cerr << "CSV OUTPUT:\n" << csv_output;
+
+    std::vector<std::string> rows = absl::StrSplit(csv_output, '\n');
+    // Output ends with a final '\n', trim this.
+    ASSERT_EQ("", rows[rows.size() - 1]);
+    rows.pop_back();
+
+    ASSERT_GT(rows.size(), 0);  // There should be a header row.
+
+    ASSERT_EQ(rows.size() - 1, row_count);
+    bool first = true;
+    for (const auto& row : rows) {
+      std::vector<std::string> cols = absl::StrSplit(row, ',');
+      if (first) {
+        // header row should be: header1,header2,...,vmsize,filesize
+        std::vector<std::string> expected_headers(output_->source_names());
+        expected_headers.push_back("vmsize");
+        expected_headers.push_back("filesize");
+        ASSERT_EQ(cols, expected_headers);
+        first = false;
+      } else {
+        // Final two columns should parse as string.
+        int out;
+        ASSERT_EQ(output_->source_names().size() + 2, cols.size());
+        ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 1], &out));
+        ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 2], &out));
+      }
+    }
+  }
+
   void CheckConsistency() {
-    CheckConsistencyForRow(*top_row_, true, output_->diff_mode());
+    int rows = 0;
+    CheckConsistencyForRow(*top_row_, true, output_->diff_mode(), &rows);
+    CheckCSVConsistency(rows);
     ASSERT_EQ("TOTAL", top_row_->name);
   }
 

@@ -491,6 +491,8 @@ struct RollupOutput {
     source_names_.emplace_back(std::string(name));
   }
 
+  const std::vector<std::string>& source_names() const { return source_names_; }
+
   void Print(const OutputOptions& options, std::ostream* out) {
     if (!source_names_.empty()) {
       switch (options.output_format) {
@@ -538,9 +540,11 @@ struct RollupOutput {
                       std::ostream* out) const;
   void PrettyPrintTree(const RollupRow& row, size_t indent, size_t longest_row,
                        std::ostream* out) const;
-  void PrintRowToCSV(const RollupRow& row, absl::string_view parent_labels,
+  void PrintRowToCSV(const RollupRow& row,
+                     std::vector<std::string> parent_labels,
                      std::ostream* out) const;
-  void PrintTreeToCSV(const RollupRow& row, absl::string_view parent_labels,
+  void PrintTreeToCSV(const RollupRow& row,
+                      std::vector<std::string> parent_labels,
                       std::ostream* out) const;
 };
 
