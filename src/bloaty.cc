@@ -328,8 +328,9 @@ class Rollup {
   }
 
   // Prints a graphical representation of the rollup.
-  void CreateRollupOutput(const Options& options, RollupOutput* row) const {
-    CreateDiffModeRollupOutput(nullptr, options, row);
+  void CreateRollupOutput(const Options& options, RollupOutput* output) const {
+    CreateDiffModeRollupOutput(nullptr, options, output);
+    output->diff_mode_ = false;
   }
 
   void CreateDiffModeRollupOutput(Rollup* base, const Options& options,

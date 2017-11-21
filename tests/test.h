@@ -129,7 +129,8 @@ class BloatyTest : public ::testing::Test {
     }
   }
 
-  void CheckConsistency() {
+  void CheckConsistency(const bloaty::Options& options) {
+    ASSERT_EQ(options.base_filename_size() > 0, output_->diff_mode());
     int rows = 0;
     CheckConsistencyForRow(*top_row_, true, output_->diff_mode(), &rows);
     CheckCSVConsistency(rows);
@@ -163,7 +164,7 @@ class BloatyTest : public ::testing::Test {
 
     bloaty::MmapInputFileFactory factory;
     if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
-      CheckConsistency();
+      CheckConsistency(options);
       output_->Print(output_options, &std::cerr);
       return true;
     } else {

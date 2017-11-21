@@ -53,28 +53,28 @@ On Linux you'll see output something like:
 ```
      VM SIZE                         FILE SIZE
  --------------                   --------------
-   0.0%       0 .debug_info        2.97Mi  38.3%
-   0.0%       0 .debug_loc         2.30Mi  29.7%
-   0.0%       0 .debug_str         1.03Mi  13.3%
-   0.0%       0 .debug_ranges       611Ki   7.7%
-  72.8%   332Ki .text               332Ki   4.2%
-   0.0%       0 .debug_line         218Ki   2.8%
-   0.0%       0 .debug_abbrev      85.4Ki   1.1%
-   0.0%       0 .strtab            62.8Ki   0.8%
-  13.2%  60.0Ki .rodata            60.0Ki   0.8%
-   7.0%  31.8Ki .eh_frame          31.8Ki   0.4%
-   0.0%       0 .symtab            27.8Ki   0.3%
-   0.0%       0 .debug_aranges     13.5Ki   0.2%
-   2.3%  10.5Ki .gcc_except_table  10.5Ki   0.1%
-   1.5%  6.77Ki [Other]            5.60Ki   0.1%
-   0.9%  4.18Ki .eh_frame_hdr      4.18Ki   0.1%
-   0.8%  3.54Ki .dynsym            3.54Ki   0.0%
-   0.8%  3.52Ki .dynstr            3.52Ki   0.0%
-   0.7%  2.98Ki .rela.plt          2.98Ki   0.0%
-   0.1%     568 [ELF Headers]      2.93Ki   0.0%
-   0.0%      34 [Unmapped]         2.85Ki   0.0%
-   0.0%       4 [None]                  0   0.0%
- 100.0%   456Ki TOTAL              7.75Mi 100.0%
+   0.0%       0 .debug_info        13.0Mi  37.6%
+   0.0%       0 .debug_loc         7.45Mi  21.5%
+   0.0%       0 .debug_str         5.14Mi  14.8%
+  40.1%  2.17Mi .text              2.17Mi   6.3%
+   0.0%       0 .debug_ranges      1.83Mi   5.3%
+  30.6%  1.66Mi .rodata            1.66Mi   4.8%
+   0.0%       0 .debug_line         878Ki   2.5%
+   0.0%       0 .strtab             458Ki   1.3%
+   7.1%   394Ki .rela.dyn           394Ki   1.1%
+   6.4%   357Ki .dynstr             357Ki   1.0%
+   5.5%   307Ki .data.rel.ro        307Ki   0.9%
+   0.0%       0 .debug_abbrev       283Ki   0.8%
+   4.2%   235Ki .eh_frame           235Ki   0.7%
+   0.0%       0 .symtab             187Ki   0.5%
+   2.2%   123Ki .dynsym             123Ki   0.3%
+   1.0%  54.1Ki .data              54.1Ki   0.2%
+   0.8%  44.6Ki .gcc_except_table  44.6Ki   0.1%
+   0.7%  39.6Ki .gnu.hash          39.6Ki   0.1%
+   0.7%  36.5Ki .eh_frame_hdr      36.5Ki   0.1%
+   0.5%  30.0Ki [24 Others]        29.7Ki   0.1%
+   0.0%       0 .debug_aranges     27.3Ki   0.1%
+ 100.0%  5.42Mi TOTAL              34.7Mi 100.0%
 ```
 
 The "VM SIZE" column tells you how much space the binary
@@ -95,30 +95,30 @@ can even break down by compile units and inlines!
 
 ```
 $ ./bloaty bloaty -d compileunits
-     VM SIZE                            FILE SIZE
- --------------                      --------------
-  27.9%   128Ki [None]                7.43Mi  95.9%
-  12.9%  59.2Ki src/bloaty.cc         59.0Ki   0.7%
-   7.3%  33.4Ki re2/re2.cc            32.3Ki   0.4%
-   6.9%  31.6Ki re2/dfa.cc            31.6Ki   0.4%
-   6.8%  31.4Ki re2/parse.cc          31.4Ki   0.4%
-   6.7%  30.9Ki src/dwarf.cc          30.9Ki   0.4%
-   6.7%  30.6Ki re2/regexp.cc         27.8Ki   0.4%
-   5.1%  23.7Ki re2/compile.cc        23.7Ki   0.3%
-   4.3%  19.7Ki re2/simplify.cc       19.7Ki   0.2%
-   3.2%  14.8Ki src/elf.cc            14.8Ki   0.2%
-   3.1%  14.2Ki re2/nfa.cc            14.2Ki   0.2%
-   1.8%  8.34Ki re2/bitstate.cc       8.34Ki   0.1%
-   1.7%  7.84Ki re2/prog.cc           7.84Ki   0.1%
-   1.6%  7.13Ki re2/tostring.cc       7.13Ki   0.1%
-   1.5%  6.67Ki re2/onepass.cc        6.67Ki   0.1%
-   1.4%  6.58Ki src/macho.cc          6.58Ki   0.1%
-   0.7%  3.27Ki src/main.cc           3.27Ki   0.0%
-   0.2%     797 [Other]                  797   0.0%
-   0.1%     666 util/stringprintf.cc     666   0.0%
-   0.1%     573 util/strutil.cc          573   0.0%
-   0.1%     476 util/rune.cc             476   0.0%
- 100.0%   460Ki TOTAL                 7.75Mi 100.0%
+     VM SIZE                                                                                FILE SIZE
+ --------------                                                                          --------------
+  62.3%  3.04Mi [None]                                                                    31.1Mi  94.4%
+  11.2%   557Ki [91 Others]                                                                556Ki   1.7%
+   3.7%   182Ki third_party/protobuf/src/google/protobuf/descriptor.cc                     179Ki   0.5%
+   3.2%   162Ki third_party/protobuf/src/google/protobuf/descriptor.pb.cc                  161Ki   0.5%
+   2.4%   117Ki third_party/capstone/arch/AArch64/AArch64InstPrinter.c                     117Ki   0.3%
+   2.1%   103Ki third_party/capstone/arch/ARM/ARMDisassembler.c                            103Ki   0.3%
+   1.9%  96.5Ki third_party/capstone/arch/Sparc/SparcInstPrinter.c                        96.5Ki   0.3%
+   1.6%  82.1Ki third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp               82.1Ki   0.2%
+   1.5%  74.7Ki third_party/capstone/arch/PowerPC/PPCInstPrinter.c                        74.7Ki   0.2%
+   1.2%  61.8Ki third_party/protobuf/src/google/protobuf/generated_message_reflection.cc  61.8Ki   0.2%
+   1.2%  59.8Ki src/bloaty.cc                                                             59.7Ki   0.2%
+   1.1%  55.1Ki third_party/protobuf/src/google/protobuf/text_format.cc                   55.1Ki   0.2%
+   0.9%  43.3Ki third_party/capstone/arch/ARM/ARMInstPrinter.c                            43.3Ki   0.1%
+   0.8%  41.9Ki third_party/re2/re2/parse.cc                                              41.9Ki   0.1%
+   0.8%  39.1Ki third_party/protobuf/src/google/protobuf/map_field.cc                     39.1Ki   0.1%
+   0.7%  36.1Ki third_party/protobuf/src/google/protobuf/wire_format.cc                   36.1Ki   0.1%
+   0.7%  36.0Ki src/dwarf.cc                                                              36.0Ki   0.1%
+   0.7%  35.3Ki third_party/re2/re2/re2.cc                                                35.3Ki   0.1%
+   0.7%  33.8Ki third_party/protobuf/src/google/protobuf/extension_set.cc                 33.8Ki   0.1%
+   0.6%  30.8Ki third_party/capstone/arch/AArch64/AArch64Disassembler.c                   30.8Ki   0.1%
+   0.6%  29.4Ki third_party/re2/re2/dfa.cc                                                29.4Ki   0.1%
+ 100.0%  4.87Mi TOTAL                                                                     32.9Mi 100.0%
 ```
 
 
@@ -169,38 +169,36 @@ of Bloaty, showing how it grew when I added some features.
 
 ```
 $ ./bloaty bloaty -- oldbloaty
-     VM SIZE                         FILE SIZE
- ++++++++++++++ GROWING           ++++++++++++++
-  [ = ]       0 .debug_str        +41.2Ki  +5.0%
-  [ = ]       0 .debug_info       +36.8Ki  +1.3%
-  [ = ]       0 .debug_loc        +12.4Ki  +0.6%
-  +1.8% +6.12Ki .text             +6.12Ki  +1.8%
-  [ = ]       0 .debug_ranges     +4.47Ki  +0.8%
-  [ = ]       0 .debug_line       +2.69Ki  +1.3%
-  [ = ]       0 .strtab           +1.52Ki  +3.1%
-  +3.9% +1.32Ki .eh_frame         +1.32Ki  +3.9%
-  +1.6% +1.12Ki .rodata           +1.12Ki  +1.6%
-  [ = ]       0 .symtab              +696  +2.3%
-  [ = ]       0 .debug_aranges       +288  +2.4%
-  +2.7%    +272 .gcc_except_table    +272  +2.7%
-  +2.7%    +136 .eh_frame_hdr        +136  +2.7%
-  +1.2%     +48 .dynsym               +48  +1.2%
-  +1.4%     +48 .rela.plt             +48  +1.4%
-  +1.4%     +32 .plt                  +32  +1.4%
-  +0.6%     +22 .dynstr               +22  +0.6%
-  +1.3%     +16 .got.plt              +16  +1.3%
-  +1.2%      +4 .gnu.version           +4  +1.2%
-
- -------------- SHRINKING         --------------
- -18.5%     -10 [Unmapped]        -1.14Ki -31.4%
-  [ = ]       0 .debug_abbrev         -72  -0.1%
-
-  +1.9% +9.12Ki TOTAL              +107Ki  +1.5%
+     VM SIZE                     FILE SIZE
+ --------------               --------------
+  [ = ]       0 .debug_loc     +688Ki  +9.9%
+   +19%  +349Ki .text          +349Ki   +19%
+  [ = ]       0 .debug_ranges  +180Ki   +11%
+  [ = ]       0 .debug_info    +120Ki  +0.9%
+   +23% +73.5Ki .rela.dyn     +73.5Ki   +23%
+  +3.5% +57.1Ki .rodata       +57.1Ki  +3.5%
+ +28e3% +53.9Ki .data         +53.9Ki +28e3%
+  [ = ]       0 .debug_line   +40.2Ki  +4.8%
+  +2.3% +5.35Ki .eh_frame     +5.35Ki  +2.3%
+  -6.0%      -5 [Unmapped]    +2.65Ki  +215%
+  +0.5% +1.70Ki .dynstr       +1.70Ki  +0.5%
+  [ = ]       0 .symtab       +1.59Ki  +0.9%
+  [ = ]       0 .debug_abbrev +1.29Ki  +0.5%
+  [ = ]       0 .strtab       +1.26Ki  +0.3%
+   +16%    +992 .bss                0  [ = ]
+  +0.2%    +642 [13 Others]      +849  +0.2%
+  +0.6%    +792 .dynsym          +792  +0.6%
+   +16%    +696 .rela.plt        +696   +16%
+   +16%    +464 .plt             +464   +16%
+  +0.8%    +312 .eh_frame_hdr    +312  +0.8%
+  [ = ]       0 .debug_str    -19.6Ki  -0.4%
+   +11%  +544Ki TOTAL         +1.52Mi  +4.6%
 ```
 
 Each line shows the how much each part changed compared to
-its previous size.  The "TOTAL" line shows how much the size
-changed overall.
+its previous size.  Most sections grew, but one section at
+the bottom (`.debug_str`) shrank.  The "TOTAL" line shows
+how much the size changed overall.
 
 ## Hierarchical Profiles
 
