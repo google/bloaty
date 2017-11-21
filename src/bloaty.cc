@@ -696,7 +696,7 @@ void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
   // Rows are printed before their sub-rows.
   PrettyPrintRow(row, indent, longest_label, out);
 
-  if (row.vmsize > 0 || row.filesize > 0) {
+  if (row.vmsize || row.filesize) {
     for (const auto& child : row.sorted_children) {
       PrettyPrintTree(child, indent + 4, longest_label, out);
     }
