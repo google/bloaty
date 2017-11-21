@@ -228,22 +228,27 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
                                 int* status);
 
-std::string ItaniumDemangle(absl::string_view symbol, DataSource source) {
+std::string ItaniumDemangle(string_view symbol, DataSource source) {
   if (source == DataSource::kRawSymbols) {
     // No demangling.
     return std::string(symbol);
   }
 
+  string_view demangle_from = symbol;
+  if (absl::StartsWith(demangle_from, "__Z")) {
+    demangle_from.remove_prefix(1);
+  }
+
   if (source == DataSource::kShortSymbols) {
     char demangled[1024];
-    if (::Demangle(symbol.data(), demangled, sizeof(demangled))) {
+    if (::Demangle(demangle_from.data(), demangled, sizeof(demangled))) {
       return std::string(demangled);
     } else {
       return std::string(symbol);
     }
   } else if (source == DataSource::kFullSymbols) {
     char* demangled =
-        __cxa_demangle(symbol.data(), NULL, NULL, NULL);
+        __cxa_demangle(demangle_from.data(), NULL, NULL, NULL);
     if (demangled) {
       std::string ret(demangled);
       free(demangled);
@@ -946,10 +951,10 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
 
   for (auto range_map : range_maps) {
     iters.push_back(range_map->mappings_.begin());
-    current = std::min(current, iters.back()->first);
+    if (!range_map->IterIsEnd(iters.back())) {
+      current = std::min(current, iters.back()->first);
+    }
   }
-
-  assert(current != UINTPTR_MAX);
 
   // Iterate over all ranges in parallel to perform this transformation:
   //

@@ -46,9 +46,11 @@ static void Throw(const char *str, int line) {
 
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
 namespace bloaty {
+
+extern int verbose_level;
+
 namespace dwarf {
 
 int DivRoundUp(int n, int d) {
@@ -1522,7 +1524,7 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     file_name.directory_index = ReadLEB128<uint32_t>(&data);
     file_name.modified_time = ReadLEB128<uint64_t>(&data);
     file_name.file_size = ReadLEB128<uint64_t>(&data);
-    if (file_name.directory_index > include_directories_.size()) {
+    if (file_name.directory_index >= include_directories_.size()) {
       THROW("directory index out of range");
     }
     filenames_.push_back(file_name);
@@ -1591,7 +1593,7 @@ bool LineInfoReader::ReadLineInfo() {
               file_name.directory_index = ReadLEB128<uint32_t>(&data);
               file_name.modified_time = ReadLEB128<uint64_t>(&data);
               file_name.file_size = ReadLEB128<uint64_t>(&data);
-              if (file_name.directory_index > include_directories_.size()) {
+              if (file_name.directory_index >= include_directories_.size()) {
                 THROW("directory index out of range");
               }
               filenames_.push_back(file_name);
@@ -1603,10 +1605,12 @@ bool LineInfoReader::ReadLineInfo() {
             default:
               // We don't understand this opcode, skip it.
               SkipBytes(len, &data);
-              fprintf(stderr,
-                      "bloaty: warning: unknown DWARF line table extended "
-                      "opcode: %d\n",
-                      extended_op);
+              if (verbose_level > 0) {
+                fprintf(stderr,
+                        "bloaty: warning: unknown DWARF line table extended "
+                        "opcode: %d\n",
+                        extended_op);
+              }
               break;
           }
           break;
@@ -1657,8 +1661,11 @@ bool LineInfoReader::ReadLineInfo() {
         default:
           // Unknown opcode, but we know its length so can skip it.
           SkipBytes(standard_opcode_lengths_[op], &data);
-          fprintf(stderr,
-                  "bloaty: warning: unknown DWARF line table opcode: %d\n", op);
+          if (verbose_level > 0) {
+            fprintf(stderr,
+                    "bloaty: warning: unknown DWARF line table opcode: %d\n",
+                    op);
+          }
           break;
       }
     }
@@ -1757,8 +1764,7 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
                                  DW_AT_high_pc});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
-    WARN("debug info is present, but empty");
-    return;
+    THROW("debug info is present, but empty");
   }
 
   do {
@@ -1838,7 +1844,7 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
   dwarf::FixedAttrReader<uint64_t> attr_reader(&die_reader, {DW_AT_stmt_list});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
-    WARN("debug info is present, but empty");
+    THROW("debug info is present, but empty");
   }
 
   while (true) {
