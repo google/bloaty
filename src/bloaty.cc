@@ -425,7 +425,17 @@ class Rollup {
   }
 
   static double Percent(ssize_t part, size_t whole) {
-    return static_cast<double>(part) / static_cast<double>(whole) * 100;
+    if (whole == 0) {
+      if (part == 0) {
+        return NAN;
+      } else if (part > 0) {
+        return INFINITY;
+      } else {
+        return -INFINITY;
+      }
+    } else {
+      return static_cast<double>(part) / static_cast<double>(whole) * 100;
+    }
   }
 
   void CreateRows(RollupRow* row, const Rollup* base, const Options& options,
