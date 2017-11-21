@@ -166,23 +166,6 @@ std::string CSVEscape(string_view str) {
   }
 }
 
-template <class Func>
-class RankComparator {
- public:
-  RankComparator(Func func) : func_(func) {}
-
-  template <class T>
-  bool operator()(const T& a, const T& b) { return func_(a) < func_(b); }
-
- private:
-  Func func_;
-};
-
-template <class Func>
-RankComparator<Func> MakeRankComparator(Func func) {
-  return RankComparator<Func>(func);
-}
-
 
 // LineReader / LineIterator ///////////////////////////////////////////////////
 
@@ -345,8 +328,9 @@ class Rollup {
   }
 
   // Prints a graphical representation of the rollup.
-  void CreateRollupOutput(const Options& options, RollupOutput* row) const {
-    CreateDiffModeRollupOutput(nullptr, options, row);
+  void CreateRollupOutput(const Options& options, RollupOutput* output) const {
+    CreateDiffModeRollupOutput(nullptr, options, output);
+    output->diff_mode_ = false;
   }
 
   void CreateDiffModeRollupOutput(Rollup* base, const Options& options,
@@ -356,6 +340,7 @@ class Rollup {
     row->filesize = file_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
+    output->diff_mode_ = true;
     CreateRows(row, base, options, true);
   }
 
@@ -440,51 +425,37 @@ class Rollup {
 
   void CreateRows(RollupRow* row, const Rollup* base, const Options& options,
                   bool is_toplevel) const;
-  void ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
-                   const Rollup* base, const Options& options,
-                   bool is_toplevel) const;
+  void SortAndAggregateRows(RollupRow* row, const Rollup* base,
+                            const Options& options, bool is_toplevel) const;
 };
 
 void Rollup::CreateRows(RollupRow* row, const Rollup* base,
                         const Options& options, bool is_toplevel) const {
   if (base) {
+    // For a diff, the percentage is a comparison against the previous size of
+    // the same label at the same level.
     row->vmpercent = Percent(vm_total_, base->vm_total_);
     row->filepercent = Percent(file_total_, base->file_total_);
-    row->diff_mode = true;
   }
 
   for (const auto& value : children_) {
-    std::vector<RollupRow>* row_to_append = &row->sorted_children;
-    int vm_sign = SignOf(value.second->vm_total_);
-    int file_sign = SignOf(value.second->file_total_);
-    if (vm_sign < 0 || file_sign < 0) {
-      assert(base);
-    }
-
-    if (vm_sign + file_sign < 0) {
-      row_to_append = &row->shrinking;
-    } else if (vm_sign != file_sign && vm_sign + file_sign == 0) {
-      row_to_append = &row->mixed;
-    }
-
     if (value.second->vm_total_ != 0 || value.second->file_total_ != 0) {
-      row_to_append->push_back(RollupRow(value.first));
-      row_to_append->back().vmsize = value.second->vm_total_;
-      row_to_append->back().filesize = value.second->file_total_;
+      row->sorted_children.emplace_back(value.first);
+      RollupRow& child_row = row->sorted_children.back();
+      child_row.vmsize = value.second->vm_total_;
+      child_row.filesize = value.second->file_total_;
     }
   }
 
-  ComputeRows(row, &row->sorted_children, base, options, is_toplevel);
-  ComputeRows(row, &row->shrinking, base, options, is_toplevel);
-  ComputeRows(row, &row->mixed, base, options, is_toplevel);
+  SortAndAggregateRows(row, base, options, is_toplevel);
 }
 
 Rollup* Rollup::empty_;
 
-void Rollup::ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
-                         const Rollup* base, const Options& options,
-                         bool is_toplevel) const {
-  std::vector<RollupRow>& child_rows = *children;
+void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
+                                  const Options& options,
+                                  bool is_toplevel) const {
+  std::vector<RollupRow>& child_rows = row->sorted_children;
 
   // We don't want to output a solitary "[None]" or "[Unmapped]" row except at
   // the top level.
@@ -503,45 +474,29 @@ void Rollup::ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
     return;
   }
 
-  // Our overall sorting rank.
-  auto rank = [options](const RollupRow& row) {
-    int64_t val_to_rank;
+  // First sort by magnitude.
+  for (auto& child : child_rows) {
     switch (options.sort_by()) {
       case Options::SORTBY_VMSIZE:
-        val_to_rank = std::abs(row.vmsize);
+        child.sortkey = std::abs(child.vmsize);
         break;
       case Options::SORTBY_FILESIZE:
-        val_to_rank = std::abs(row.filesize);
+        child.sortkey = std::abs(child.filesize);
         break;
       case Options::SORTBY_BOTH:
-        val_to_rank = std::max(std::abs(row.vmsize), std::abs(row.filesize));
+        child.sortkey =
+            std::max(std::abs(child.vmsize), std::abs(child.filesize));
         break;
       default:
-        assert(false);
-        val_to_rank = -1;
-        break;
+        BLOATY_UNREACHABLE();
     }
+  }
 
-    // Reverse so that numerically we always sort high-to-low.
-    int64_t numeric_rank = INT64_MAX - val_to_rank;
-
-    // Use name to break ties in numeric rank (names sort low-to-high).
-    return std::make_tuple(numeric_rank, row.name);
-  };
-
-  // Our sorting rank for the first pass, when we are deciding what to put in
-  // [Other].  Certain things we don't want to put in [Other], so we rank them
-  // highest.
-  auto collapse_rank =
-      [rank](const RollupRow& row) {
-        bool top_name = (row.name != "[None]");
-        return std::make_tuple(top_name, rank(row));
-      };
-
-  std::sort(child_rows.begin(), child_rows.end(),
-            MakeRankComparator(collapse_rank));
+  std::sort(child_rows.begin(), child_rows.end(), &RollupRow::Compare);
 
   RollupRow others_row(others_label);
+  others_row.other_count = child_rows.size() - options.max_rows_per_level();
+  others_row.name = absl::Substitute("[$0 Others]", others_row.other_count);
   Rollup others_rollup;
   Rollup others_base;
 
@@ -569,10 +524,30 @@ void Rollup::ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
     CheckedAdd(&others_rollup.file_total_, others_row.filesize);
   }
 
-  // Sort all rows (including "other") and include sort by name.
-  std::sort(child_rows.begin(), child_rows.end(), MakeRankComparator(rank));
+  // Now sort by actual value (positive or negative).
+  for (auto& child : child_rows) {
+    switch (options.sort_by()) {
+      case Options::SORTBY_VMSIZE:
+        child.sortkey = child.vmsize;
+        break;
+      case Options::SORTBY_FILESIZE:
+        child.sortkey = child.filesize;
+        break;
+      case Options::SORTBY_BOTH:
+        if (std::abs(child.vmsize) > std::abs(child.filesize)) {
+          child.sortkey = child.vmsize;
+        } else {
+          child.sortkey = child.filesize;
+        }
+        break;
+      default:
+        BLOATY_UNREACHABLE();
+    }
+  }
 
-  // Compute percents for all rows (including "Other")
+  std::sort(child_rows.begin(), child_rows.end(), &RollupRow::Compare);
+
+  // For a non-diff, the percentage is compared to the total size of the parent.
   if (!base) {
     for (auto& child_row : child_rows) {
       child_row.vmpercent = Percent(child_row.vmsize, row->vmsize);
@@ -585,7 +560,7 @@ void Rollup::ComputeRows(RollupRow* row, std::vector<RollupRow>* children,
     const Rollup* child_rollup;
     const Rollup* child_base = nullptr;
 
-    if (child_row.name == others_label) {
+    if (child_row.other_count > 0) {
       child_rollup = &others_rollup;
       if (base) {
         child_base = &others_base;
@@ -719,11 +694,11 @@ void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
                                   size_t longest_label,
                                   std::ostream* out) const {
   *out << FixedWidthString("", indent) << " "
-       << PercentString(row.vmpercent, row.diff_mode) << " "
-       << SiPrint(row.vmsize, row.diff_mode) << " "
+       << PercentString(row.vmpercent, diff_mode_) << " "
+       << SiPrint(row.vmsize, diff_mode_) << " "
        << FixedWidthString(row.name, longest_label) << " "
-       << SiPrint(row.filesize, row.diff_mode) << " "
-       << PercentString(row.filepercent, row.diff_mode) << "\n";
+       << SiPrint(row.filesize, diff_mode_) << " "
+       << PercentString(row.filepercent, diff_mode_) << "\n";
 }
 
 void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
@@ -732,27 +707,8 @@ void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
   // Rows are printed before their sub-rows.
   PrettyPrintRow(row, indent, longest_label, out);
 
-  // For now we don't print "confounding" sub-entries.  For example, if we're
-  // doing a two-level analysis "-d section,symbol", and a section is growing
-  // but a symbol *inside* the section is shrinking, we don't print the
-  // shrinking symbol.  Mainly we do this to prevent the output from being too
-  // confusing.  If we can find a clear, non-confusing way to present the
-  // information we can add it back.
-
-  if (row.vmsize > 0 || row.filesize > 0) {
+  if (row.vmsize || row.filesize) {
     for (const auto& child : row.sorted_children) {
-      PrettyPrintTree(child, indent + 4, longest_label, out);
-    }
-  }
-
-  if (row.vmsize < 0 || row.filesize < 0) {
-    for (const auto& child : row.shrinking) {
-      PrettyPrintTree(child, indent + 4, longest_label, out);
-    }
-  }
-
-  if ((row.vmsize < 0) != (row.filesize < 0)) {
-    for (const auto& child : row.mixed) {
       PrettyPrintTree(child, indent + 4, longest_label, out);
     }
   }
@@ -766,28 +722,12 @@ size_t RollupOutput::CalculateLongestLabel(const RollupRow& row,
     ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
   }
 
-  for (const auto& child : row.shrinking) {
-    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
-  }
-
-  for (const auto& child : row.mixed) {
-    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
-  }
-
   return ret;
 }
 
 void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
   size_t longest_label = toplevel_row_.name.size();
   for (const auto& child : toplevel_row_.sorted_children) {
-    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
-  }
-
-  for (const auto& child : toplevel_row_.shrinking) {
-    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
-  }
-
-  for (const auto& child : toplevel_row_.mixed) {
     longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
   }
 
@@ -798,47 +738,13 @@ void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
   *out << "    FILE SIZE";
   *out << "\n";
 
-  if (toplevel_row_.diff_mode) {
-    *out << " ++++++++++++++ ";
-    *out << FixedWidthString("GROWING", longest_label);
-    *out << " ++++++++++++++";
-    *out << "\n";
-  } else {
-    *out << " -------------- ";
-    PrintSpaces(longest_label, out);
-    *out << " --------------";
-    *out << "\n";
-  }
+  *out << " -------------- ";
+  PrintSpaces(longest_label, out);
+  *out << " --------------";
+  *out << "\n";
 
   for (const auto& child : toplevel_row_.sorted_children) {
     PrettyPrintTree(child, 0, longest_label, out);
-  }
-
-  if (toplevel_row_.diff_mode) {
-    if (toplevel_row_.shrinking.size() > 0) {
-      *out << "\n";
-      *out << " -------------- ";
-      *out << FixedWidthString("SHRINKING", longest_label);
-      *out << " --------------";
-      *out << "\n";
-      for (const auto& child : toplevel_row_.shrinking) {
-        PrettyPrintTree(child, 0, longest_label, out);
-      }
-    }
-
-    if (toplevel_row_.mixed.size() > 0) {
-      *out << "\n";
-      *out << " -+-+-+-+-+-+-+ ";
-      *out << FixedWidthString("MIXED", longest_label);
-      *out << " +-+-+-+-+-+-+-";
-      *out << "\n";
-      for (const auto& child : toplevel_row_.mixed) {
-        PrettyPrintTree(child, 0, longest_label, out);
-      }
-    }
-
-    // Always output an extra row before "TOTAL".
-    *out << "\n";
   }
 
   // The "TOTAL" row comes after all other rows.
@@ -846,39 +752,26 @@ void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
-                                 string_view parent_labels,
+                                 std::vector<std::string> parent_labels,
                                  std::ostream* out) const {
-  if (parent_labels.size() > 0) {
-    *out << parent_labels << ",";
+  while (parent_labels.size() < source_names_.size()) {
+    // If this label had no data at this level, append an empty string.
+    parent_labels.push_back("");
   }
 
-  *out << absl::StrJoin(std::make_tuple(CSVEscape(row.name),
-                                        row.vmsize,
-                                        row.filesize),
-                        ",") << "\n";
+  parent_labels.push_back(std::to_string(row.vmsize));
+  parent_labels.push_back(std::to_string(row.filesize));
+
+  *out << absl::StrJoin(parent_labels, ",") << "\n";
 }
 
 void RollupOutput::PrintTreeToCSV(const RollupRow& row,
-                                  string_view parent_labels,
+                                  std::vector<std::string> parent_labels,
                                   std::ostream* out) const {
-  if (row.sorted_children.size() > 0 ||
-      row.shrinking.size() > 0 ||
-      row.mixed.size() > 0) {
-    std::string labels;
-    if (parent_labels.size() > 0) {
-      labels = absl::StrJoin(
-          std::make_tuple(parent_labels, CSVEscape(row.name)), ",");
-    } else {
-      labels = CSVEscape(row.name);
-    }
+  parent_labels.push_back(row.name);
+  if (row.sorted_children.size() > 0) {
     for (const auto& child_row : row.sorted_children) {
-      PrintTreeToCSV(child_row, labels, out);
-    }
-    for (const auto& child_row : row.shrinking) {
-      PrintTreeToCSV(child_row, labels, out);
-    }
-    for (const auto& child_row : row.mixed) {
-      PrintTreeToCSV(child_row, labels, out);
+      PrintTreeToCSV(child_row, parent_labels, out);
     }
   } else {
     PrintRowToCSV(row, parent_labels, out);
@@ -891,13 +784,7 @@ void RollupOutput::PrintToCSV(std::ostream* out) const {
   names.push_back("filesize");
   *out << absl::StrJoin(names, ",") << "\n";
   for (const auto& child_row : toplevel_row_.sorted_children) {
-    PrintTreeToCSV(child_row, "", out);
-  }
-  for (const auto& child_row : toplevel_row_.shrinking) {
-    PrintTreeToCSV(child_row, "", out);
-  }
-  for (const auto& child_row : toplevel_row_.mixed) {
-    PrintTreeToCSV(child_row, "", out);
+    PrintTreeToCSV(child_row, std::vector<std::string>(), out);
   }
 }
 
@@ -1419,6 +1306,7 @@ class Bloaty {
   // Sources the user has actually selected, in the order selected.
   // Points to entries in all_known_sources_.
   std::vector<ConfiguredDataSource*> sources_;
+  std::vector<std::string> source_names_;
 
   std::vector<std::unique_ptr<ObjectFile>> input_files_;
   std::vector<std::unique_ptr<ObjectFile>> base_files_;
@@ -1476,6 +1364,8 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
 }
 
 void Bloaty::AddDataSource(const std::string& name) {
+  source_names_.emplace_back(name);
+
   if (name == "inputfiles") {
     filename_position_ = sources_.size() + 1;
     return;
@@ -1652,8 +1542,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
     THROW("no filename specified");
   }
 
-  for (auto source : sources_) {
-    output->AddDataSourceName(source->definition.name);
+  for (const auto& name : source_names_) {
+    output->AddDataSourceName(name);
   }
 
   Rollup rollup;
