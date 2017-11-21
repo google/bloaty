@@ -484,6 +484,8 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
   std::sort(child_rows.begin(), child_rows.end(), &RollupRow::Compare);
 
   RollupRow others_row(others_label);
+  others_row.other_count = child_rows.size() - options.max_rows_per_level();
+  others_row.name = absl::Substitute("[$0 Others]", others_row.other_count);
   Rollup others_rollup;
   Rollup others_base;
 
@@ -547,7 +549,7 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
     const Rollup* child_rollup;
     const Rollup* child_base = nullptr;
 
-    if (child_row.name == others_label) {
+    if (child_row.other_count > 0) {
       child_rollup = &others_rollup;
       if (base) {
         child_base = &others_base;
