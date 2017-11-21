@@ -94,12 +94,9 @@ class BloatyTest : public ::testing::Test {
   void CheckCSVConsistency(int row_count) {
     std::ostringstream stream;
     bloaty::OutputOptions options;
-    options.output_format = bloaty::OutputFormat::kPrettyPrint;
-    output_->Print(options, &std::cerr);
     options.output_format = bloaty::OutputFormat::kCSV;
     output_->Print(options, &stream);
     std::string csv_output = stream.str();
-    std::cerr << "CSV OUTPUT:\n" << csv_output;
 
     std::vector<std::string> rows = absl::StrSplit(csv_output, '\n');
     // Output ends with a final '\n', trim this.
@@ -120,7 +117,7 @@ class BloatyTest : public ::testing::Test {
         ASSERT_EQ(cols, expected_headers);
         first = false;
       } else {
-        // Final two columns should parse as string.
+        // Final two columns should parse as integer.
         int out;
         ASSERT_EQ(output_->source_names().size() + 2, cols.size());
         ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 1], &out));
