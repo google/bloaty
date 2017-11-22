@@ -1392,11 +1392,11 @@ class LineInfoReader {
     }
 
     // Generate these lazily.
-    if (expanded_filenames_.empty()) {
+    if (expanded_filenames_.size() <= index) {
       expanded_filenames_.resize(filenames_.size());
     }
 
-    auto& ret = expanded_filenames_[index];
+    std::string& ret = expanded_filenames_[index];
     if (ret.empty()) {
       const FileName& filename = filenames_[index];
       string_view directory = include_directories_[filename.directory_index];
