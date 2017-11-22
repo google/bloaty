@@ -223,7 +223,6 @@ class ObjectFile {
   ObjectFile(std::unique_ptr<InputFile> file_data)
       : file_data_(std::move(file_data)) {}
   virtual ~ObjectFile() {}
-  virtual void ProcessBaseMap(RangeSink* sink) = 0;
 
   // Process this file, pushing data to |sinks| as appropriate for each data
   // source.

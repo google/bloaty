@@ -382,10 +382,6 @@ class MachOObjectFile : public ObjectFile {
   MachOObjectFile(std::unique_ptr<InputFile> file_data)
       : ObjectFile(std::move(file_data)) {}
 
-  void ProcessBaseMap(RangeSink* sink) override {
-    ParseMachOFile(sink);
-  }
-
   void ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {

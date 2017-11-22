@@ -987,16 +987,6 @@ class ElfObjectFile : public ObjectFile {
   ElfObjectFile(std::unique_ptr<InputFile> file)
       : ObjectFile(std::move(file)) {}
 
-  void ProcessBaseMap(RangeSink* sink) override {
-    if (IsObjectFile(sink->input_file().data())) {
-      DoReadELFSections(sink, kReportBySectionName);
-    } else {
-      // Slightly more complete for executables, but not present in object
-      // files.
-      ReadELFSegments(sink);
-    }
-  }
-
   void ProcessFile(const std::vector<RangeSink*>& sinks) override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
@@ -1046,7 +1036,8 @@ class ElfObjectFile : public ObjectFile {
     NameMunger empty_munger;
     RangeSink base_sink(&file_data(), DataSource::kSegments, nullptr);
     base_sink.AddOutput(&base_map, &empty_munger);
-    ProcessBaseMap(&base_sink);
+    std::vector<RangeSink*> sink_ptrs{&base_sink};
+    ProcessFile(sink_ptrs);
 
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;

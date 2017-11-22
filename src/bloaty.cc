@@ -1472,15 +1472,15 @@ struct DualMaps {
 void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const {
   const std::string& filename = file->file_data().filename();
   DualMaps maps;
-  RangeSink sink(&file->file_data(), DataSource::kSegments, nullptr);
-  NameMunger empty_munger;
-  sink.AddOutput(maps.base_map(), &empty_munger);
-  file->ProcessBaseMap(&sink);
-  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
-                                     "[None]");
-
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
+
+  // Base map always goes first.
+  sinks.push_back(absl::make_unique<RangeSink>(
+      &file->file_data(), DataSource::kSegments, nullptr));
+  NameMunger empty_munger;
+  sinks.back()->AddOutput(maps.base_map(), &empty_munger);
+  sink_ptrs.push_back(sinks.back().get());
 
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(
@@ -1489,6 +1489,10 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const {
     sink_ptrs.push_back(sinks.back().get());
   }
 
+  // Ensure all parts of the VM/file-space are covered.  If all data sources had
+  // 100% coverage, this wouldn't be necessary.
+  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
+                                     "[None]");
   file->ProcessFile(sink_ptrs);
 
   maps.ComputeRollup(filename, filename_position_, rollup);
