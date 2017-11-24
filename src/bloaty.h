@@ -221,21 +221,33 @@ typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
 class ObjectFile {
  public:
   ObjectFile(std::unique_ptr<InputFile> file_data)
-      : file_data_(std::move(file_data)) {}
+      : file_data_(std::move(file_data)), debug_file_(this) {}
   virtual ~ObjectFile() {}
 
+  virtual std::string GetBuildId() const = 0;
+
   // Process this file, pushing data to |sinks| as appropriate for each data
-  // source.
-  virtual void ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+  // source.  If any debug files match the build id for this file, it will be
+  // given here, otherwise it is |this|.
+  virtual void ProcessFile(const std::vector<RangeSink*>& sinks) const = 0;
 
   virtual bool GetDisassemblyInfo(absl::string_view symbol,
                                   DataSource symbol_source,
-                                  DisassemblyInfo* info) = 0;
+                                  DisassemblyInfo* info) const = 0;
 
   const InputFile& file_data() const { return *file_data_; }
 
+  // Sets the debug file for |this|.  |file| must outlive this instance.
+  void set_debug_file(const ObjectFile* file) {
+    assert(debug_file_->GetBuildId() == GetBuildId());
+    debug_file_ = file;
+  }
+
+  const ObjectFile& debug_file() const { return *debug_file_; }
+
  private:
   std::unique_ptr<InputFile> file_data_;
+  const ObjectFile* debug_file_;
 };
 
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);

@@ -382,7 +382,12 @@ class MachOObjectFile : public ObjectFile {
   MachOObjectFile(std::unique_ptr<InputFile> file_data)
       : ObjectFile(std::move(file_data)) {}
 
-  void ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  std::string GetBuildId() const override {
+    // TODO(haberman): implement.
+    return std::string();
+  }
+
+  void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
@@ -404,7 +409,7 @@ class MachOObjectFile : public ObjectFile {
 
   bool GetDisassemblyInfo(absl::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
-                          DisassemblyInfo* /*info*/) override {
+                          DisassemblyInfo* /*info*/) const override {
     WARN("Mach-O files do not support disassembly yet");
     return false;
   }
