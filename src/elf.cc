@@ -63,18 +63,6 @@ namespace bloaty {
 
 namespace {
 
-struct ByteSwapFunc {
-  template <class T>
-  T operator()(T val) {
-    return ByteSwap(val);
-  }
-};
-
-struct NullFunc {
-  template <class T>
-  T operator()(T val) { return val; }
-};
-
 size_t StringViewToSize(string_view str) {
   size_t ret;
   if (!absl::SimpleAtoi(str, &ret)) {
@@ -82,6 +70,105 @@ size_t StringViewToSize(string_view str) {
   }
   return ret;
 }
+
+// Helper classes for StructPtr for ELF structures.
+struct ElfHeader {
+  typedef Elf32_Ehdr Struct32;
+  typedef Elf64_Ehdr Struct64;
+
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Ehdr* to, Func func) {
+    // memcpy(&to->e_ident[0], &from.e_ident[0], EI_NIDENT);
+    to->e_type       = func(from.e_type);
+    to->e_machine    = func(from.e_machine);
+    to->e_version    = func(from.e_version);
+    to->e_entry      = func(from.e_entry);
+    to->e_phoff      = func(from.e_phoff);
+    to->e_shoff      = func(from.e_shoff);
+    to->e_flags      = func(from.e_flags);
+    to->e_ehsize     = func(from.e_ehsize);
+    to->e_phentsize  = func(from.e_phentsize);
+    to->e_phnum      = func(from.e_phnum);
+    to->e_shentsize  = func(from.e_shentsize);
+    to->e_shnum      = func(from.e_shnum);
+    to->e_shstrndx   = func(from.e_shstrndx);
+  }
+};
+
+struct ElfSectionHeader {
+  typedef Elf32_Shdr Struct32;
+  typedef Elf64_Shdr Struct64;
+
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Shdr* to, Func func) {
+    to->sh_name       = func(from.sh_name);
+    to->sh_type       = func(from.sh_type);
+    to->sh_flags      = func(from.sh_flags);
+    to->sh_addr       = func(from.sh_addr);
+    to->sh_offset     = func(from.sh_offset);
+    to->sh_size       = func(from.sh_size);
+    to->sh_link       = func(from.sh_link);
+    to->sh_info       = func(from.sh_info);
+    to->sh_addralign  = func(from.sh_addralign);
+    to->sh_entsize    = func(from.sh_entsize);
+  }
+};
+
+struct ElfSegmentHeader {
+  typedef Elf32_Phdr Struct32;
+  typedef Elf64_Phdr Struct64;
+
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Phdr* to, Func func) {
+    to->p_type   = func(from.p_type);
+    to->p_flags  = func(from.p_flags);
+    to->p_offset = func(from.p_offset);
+    to->p_vaddr  = func(from.p_vaddr);
+    to->p_paddr  = func(from.p_paddr);
+    to->p_filesz = func(from.p_filesz);
+    to->p_memsz  = func(from.p_memsz);
+    to->p_align  = func(from.p_align);
+  }
+};
+
+struct ElfSymbol {
+  typedef Elf32_Sym Struct32;
+  typedef Elf64_Sym Struct64;
+
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Sym* to, Func func) {
+    to->st_name   = func(from.st_name);
+    to->st_info   = func(from.st_info);
+    to->st_other  = func(from.st_other);
+    to->st_shndx  = func(from.st_shndx);
+    to->st_value  = func(from.st_value);
+    to->st_size   = func(from.st_size);
+  }
+};
+
+struct ElfRelocation {
+  typedef Elf32_Rel Struct32;
+  typedef Elf64_Rel Struct64;
+
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Rel* to, Func func) {
+    to->r_offset = func(from.r_offset);
+    to->r_info   = func(from.r_info);
+  }
+};
+
+struct ElfRelocationWithAddend {
+  typedef Elf32_Rela Struct32;
+  typedef Elf64_Rela Struct64;
+
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Rela* to, Func func) {
+    to->r_offset = func(from.r_offset);
+    to->r_info   = func(from.r_info);
+    to->r_addend = func(from.r_addend);
+  }
+};
+
 
 // ElfFile /////////////////////////////////////////////////////////////////////
 
@@ -154,9 +241,6 @@ class ElfFile {
 
   bool FindSectionByName(absl::string_view name, Section* section) const;
 
-  bool is_64bit() const { return is_64bit_; }
-  bool is_native_endian() const { return is_native_endian_; }
-
  private:
   friend class Section;
 
@@ -170,47 +254,17 @@ class ElfFile {
     return data_.substr(start, n);
   }
 
-  // Shared code for reading various ELF structures.  Handles endianness
-  // conversion and 32->64 bit conversion, when necessary.
-  class StructReader {
-   public:
-    StructReader(const ElfFile& elf, string_view data)
-        : elf_(elf), data_(data) {}
-
-    template <class T32, class T64, class Munger>
-    void Read(uint64_t offset, Munger /*munger*/, T64* out) const {
-      if (elf_.is_64bit() && elf_.is_native_endian()) {
-        return Memcpy(offset, out);
-      } else {
-        return ReadFallback<T32, T64, Munger>(offset, out);
-      }
+  template <class Struct>
+  void ReadStruct(string_view data, uint64_t offset,
+                  typename Struct::Struct64* out) const {
+    if (offset > data.size()) {
+      THROW("ELF region out-of-bounds");
     }
-
-   private:
-    const ElfFile& elf_;
-    string_view data_;
-
-    template <class T32, class T64, class Munger>
-    void ReadFallback(uint64_t offset, T64* out) const;
-
-    template <class T>
-    void Memcpy(uint64_t offset, T* out) const {
-      uint64_t end = CheckedAdd(offset, sizeof(T));
-      if (end > data_.size()) {
-        THROW("out-of-bounds read to ELF file");
-      }
-      memcpy(out, data_.data() + offset, sizeof(*out));
-    }
-  };
-
-  template <class T32, class T64, class Munger>
-  void ReadStruct(uint64_t offset, Munger munger, T64* out) const {
-    StructReader(*this, data_).Read<T32>(offset, munger, out);
+    StructPtr<Struct>(header_ptr_, data.substr(offset)).ReadStruct(out);
   }
 
   bool ok_;
-  bool is_64bit_;
-  bool is_native_endian_;
+  StructPtr<ElfHeader> header_ptr_;
   string_view data_;
   Elf64_Ehdr header_;
   Elf64_Xword section_count_;
@@ -220,113 +274,6 @@ class ElfFile {
   string_view segment_headers_;
   Section section_name_table_;
 };
-
-// ELF uses different structure definitions for 32/64 bit files.  The sizes of
-// members are different, and members are even in a different order!
-//
-// These mungers can convert 32 bit structures to 64-bit ones.  They can also
-// handle converting endianness.  We use templates so a single template function
-// can handle all three patterns:
-//
-//   32 native  -> 64 native
-//   32 swapped -> 64 native
-//   64 swapped -> 64 native
-
-struct EhdrMunger {
-  template <class From, class Func>
-  void operator()(const From& from, Elf64_Ehdr* to, Func func) {
-    memcpy(&to->e_ident[0], &from.e_ident[0], EI_NIDENT);
-    to->e_type       = func(from.e_type);
-    to->e_machine    = func(from.e_machine);
-    to->e_version    = func(from.e_version);
-    to->e_entry      = func(from.e_entry);
-    to->e_phoff      = func(from.e_phoff);
-    to->e_shoff      = func(from.e_shoff);
-    to->e_flags      = func(from.e_flags);
-    to->e_ehsize     = func(from.e_ehsize);
-    to->e_phentsize  = func(from.e_phentsize);
-    to->e_phnum      = func(from.e_phnum);
-    to->e_shentsize  = func(from.e_shentsize);
-    to->e_shnum      = func(from.e_shnum);
-    to->e_shstrndx   = func(from.e_shstrndx);
-  }
-};
-
-struct ShdrMunger {
-  template <class From, class Func>
-  void operator()(const From& from, Elf64_Shdr* to, Func func) {
-    to->sh_name       = func(from.sh_name);
-    to->sh_type       = func(from.sh_type);
-    to->sh_flags      = func(from.sh_flags);
-    to->sh_addr       = func(from.sh_addr);
-    to->sh_offset     = func(from.sh_offset);
-    to->sh_size       = func(from.sh_size);
-    to->sh_link       = func(from.sh_link);
-    to->sh_info       = func(from.sh_info);
-    to->sh_addralign  = func(from.sh_addralign);
-    to->sh_entsize    = func(from.sh_entsize);
-  }
-};
-
-struct PhdrMunger {
-  template <class From, class Func>
-  void operator()(const From& from, Elf64_Phdr* to, Func func) {
-    to->p_type   = func(from.p_type);
-    to->p_flags  = func(from.p_flags);
-    to->p_offset = func(from.p_offset);
-    to->p_vaddr  = func(from.p_vaddr);
-    to->p_paddr  = func(from.p_paddr);
-    to->p_filesz = func(from.p_filesz);
-    to->p_memsz  = func(from.p_memsz);
-    to->p_align  = func(from.p_align);
-  }
-};
-
-struct SymMunger {
-  template <class From, class Func>
-  void operator()(const From& from, Elf64_Sym* to, Func func) {
-    to->st_name   = func(from.st_name);
-    to->st_info   = func(from.st_info);
-    to->st_other  = func(from.st_other);
-    to->st_shndx  = func(from.st_shndx);
-    to->st_value  = func(from.st_value);
-    to->st_size   = func(from.st_size);
-  }
-};
-
-struct RelMunger {
-  template <class From, class Func>
-  void operator()(const From& from, Elf64_Rel* to, Func func) {
-    to->r_offset = func(from.r_offset);
-    to->r_info   = func(from.r_info);
-  }
-};
-
-struct RelaMunger {
-  template <class From, class Func>
-  void operator()(const From& from, Elf64_Rela* to, Func func) {
-    to->r_offset = func(from.r_offset);
-    to->r_info   = func(from.r_info);
-    to->r_addend = func(from.r_addend);
-  }
-};
-
-template <class T32, class T64, class Munger>
-void ElfFile::StructReader::ReadFallback(uint64_t offset, T64* out) const {
-  if (elf_.is_64bit()) {
-    assert(!elf_.is_native_endian());
-    Memcpy(offset, out);
-    Munger()(*out, out, ByteSwapFunc());
-  } else {
-    T32 data32;
-    Memcpy(offset, &data32);
-    if (elf_.is_native_endian()) {
-      Munger()(data32, out, NullFunc());
-    } else {
-      Munger()(data32, out, ByteSwapFunc());
-    }
-  }
-}
 
 string_view ElfFile::Section::GetName() const {
   if (header_.sh_name == SHN_UNDEF) {
@@ -366,21 +313,20 @@ Elf64_Word ElfFile::Section::GetEntryCount() const {
 
 void ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const {
   assert(header().sh_type == SHT_SYMTAB);
-  ElfFile::StructReader reader(*elf_, contents());
-  reader.Read<Elf32_Sym>(header_.sh_entsize * index, SymMunger(), sym);
+  elf_->ReadStruct<ElfSymbol>(contents(), CheckedMul(header_.sh_entsize, index),
+                              sym);
 }
 
 void ElfFile::Section::ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const {
   assert(header().sh_type == SHT_REL);
-  ElfFile::StructReader reader(*elf_, contents());
-  reader.Read<Elf32_Rel>(header_.sh_entsize * index, RelMunger(), rel);
+  elf_->ReadStruct<ElfRelocation>(contents(), CheckedMul(header_.sh_entsize, index), rel);
 }
 
 void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
                                                 Elf64_Rela* rela) const {
   assert(header().sh_type == SHT_RELA);
-  ElfFile::StructReader reader(*elf_, contents());
-  reader.Read<Elf32_Rela>(header_.sh_entsize * index, RelaMunger(), rela);
+  elf_->ReadStruct<ElfRelocationWithAddend>(
+      contents(), CheckedMul(header_.sh_entsize, index), rela);
 }
 
 bool ElfFile::Initialize() {
@@ -396,12 +342,15 @@ bool ElfFile::Initialize() {
     return false;
   }
 
+  bool is_32bit;
+  bool is_cross_endian;
+
   switch (ident[EI_CLASS]) {
     case ELFCLASS32:
-      is_64bit_ = false;
+      is_32bit = true;
       break;
     case ELFCLASS64:
-      is_64bit_ = true;
+      is_32bit = false;
       break;
     default:
       THROWF("unexpected ELF class: $0", ident[EI_CLASS]);
@@ -409,16 +358,17 @@ bool ElfFile::Initialize() {
 
   switch (ident[EI_DATA]) {
     case ELFDATA2LSB:
-      is_native_endian_ = IsLittleEndian();
+      is_cross_endian = !IsLittleEndian();
       break;
     case ELFDATA2MSB:
-      is_native_endian_ = !IsLittleEndian();
+      is_cross_endian = IsLittleEndian();
       break;
     default:
       THROWF("unexpected ELF data: $0", ident[EI_DATA]);
   }
 
-  ReadStruct<Elf32_Ehdr>(0, EhdrMunger(), &header_);
+  header_ptr_.Reset(is_cross_endian, is_32bit, data_);
+  header_ptr_.ReadStruct(&header_);
 
   Section section0;
   bool has_section0 = 0;
@@ -467,9 +417,10 @@ void ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
   }
 
   Elf64_Phdr* header = &segment->header_;
-  ReadStruct<Elf32_Phdr>(
+  ReadStruct<ElfSegmentHeader>(
+      data_,
       CheckedAdd(header_.e_phoff, CheckedMul(header_.e_phentsize, index)),
-      PhdrMunger(), header);
+      header);
   segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
 }
 
@@ -480,9 +431,10 @@ void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   }
 
   Elf64_Shdr* header = &section->header_;
-  ReadStruct<Elf32_Shdr>(
+  ReadStruct<ElfSectionHeader>(
+      data_,
       CheckedAdd(header_.e_shoff, CheckedMul(header_.e_shentsize, index)),
-      ShdrMunger(), header);
+      header);
 
   if (header->sh_type == SHT_NOBITS) {
     section->contents_ = string_view();
