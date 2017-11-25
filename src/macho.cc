@@ -13,36 +13,249 @@
 // limitations under the License.
 
 #include <iostream>
+#include "string.h"
 #include "bloaty.h"
 #include "re2/re2.h"
+
+#include <cassert>
+
+#include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
+#include "third_party/darwin_xnu_macho/mach-o/loader.h"
+#include "third_party/darwin_xnu_macho/mach-o/fat.h"
+#include "third_party/darwin_xnu_macho/mach-o/nlist.h"
+#include "third_party/darwin_xnu_macho/mach-o/reloc.h"
 
 ABSL_ATTRIBUTE_NORETURN
 static void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }
 
+using absl::string_view;
+
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 #define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
-// There are several programs that offer useful information about
-// binaries:
-//
-// - otool: display object file headers and contents (including disassembly)
-// - nm: display symbols
-// - size: display binary size
-// - symbols: display symbols, drawing on more sources
-// - pagestuff: display page-oriented information
-// - dsymutil: create .dSYM bundle with DWARF information inside
-// - dwarfdump: dump DWARF debugging information from .o or .dSYM
+// segname (& sectname) may NOT be NULL-terminated,
+//   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
+//   hence specifying size when constructing std::string
+static string_view ArrayToStr(const char* s, size_t maxlen) {
+  return string_view(s, strnlen(s, maxlen));
+}
+
+static uint64_t CheckedAdd(uint64_t a, uint64_t b) {
+  absl::uint128 a_128(a), b_128(b);
+  absl::uint128 c = a + b;
+  if (c > UINT64_MAX) {
+    THROW("integer overflow in addition");
+  }
+  return static_cast<uint64_t>(c);
+}
+
+static string_view StrictSubstr(string_view data, size_t off, size_t n) {
+  uint64_t end = CheckedAdd(off, n);
+  if (end > data.size()) {
+    THROW("Mach-O region out-of-bounds");
+  }
+  return data.substr(off, n);
+}
 
 namespace bloaty {
 
-bool StartsWith(const std::string& haystack, const std::string& needle) {
-  return !haystack.compare(0, needle.length(), needle);
+uint32_t ReadMagic(string_view data) {
+  if (data.size() < sizeof(uint32_t)) {
+    THROW("Malformed Mach-O file");
+  }
+  uint32_t magic;
+  memcpy(&magic, data.data(), sizeof(magic));
+  return magic;
 }
 
-static void ParseMachOSymbols(RangeSink* sink) {
+template <class T>
+const T* GetStructPointer(string_view data) {
+  if (sizeof(T) > data.size()) {
+    THROW("Premature EOF reading Mach-O data.");
+  }
+  return reinterpret_cast<const T*>(data.data());
+}
+
+template <class T>
+void AdvancePastStruct(string_view* data) {
+  *data = data->substr(sizeof(T));
+}
+
+template <class T>
+const T* GetStructPointerAndAdvance(string_view* data) {
+  const T* ret = GetStructPointer<T>(*data);
+  AdvancePastStruct<T>(data);
+  return ret;
+}
+
+template <class Segment, class Section>
+void ParseMachOSegment(string_view command_data, string_view file_data,
+                       RangeSink* sink) {
+  auto segment = GetStructPointerAndAdvance<Segment>(&command_data);
+
+  if (segment->maxprot == VM_PROT_NONE) {
+    return;
+  }
+
+  string_view segname = ArrayToStr(segment->segname, 16);
+
+  if (sink->data_source() == DataSource::kSegments) {
+    sink->AddRange(
+        segname, segment->vmaddr, segment->vmsize,
+        StrictSubstr(file_data, segment->fileoff, segment->filesize));
+  } else if (sink->data_source() == DataSource::kSections) {
+    uint32_t nsects = segment->nsects;
+    for (uint32_t j = 0; j < nsects; j++) {
+      auto section = GetStructPointerAndAdvance<Section>(&command_data);
+
+      // filesize equals vmsize unless the section is zerofill
+      uint64_t filesize = section->size;
+      switch (section->flags & SECTION_TYPE) {
+        case S_ZEROFILL:
+        case S_GB_ZEROFILL:
+        case S_THREAD_LOCAL_ZEROFILL:
+          filesize = 0;
+          break;
+        default:
+          break;
+      }
+
+      std::string label = absl::StrJoin(
+          std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
+      sink->AddRange(label, section->addr, section->size,
+                     StrictSubstr(file_data, section->offset, filesize));
+    }
+  } else {
+    BLOATY_UNREACHABLE();
+  }
+}
+
+static void ParseMachODyldInfo(string_view command_data, string_view file_data,
+                               RangeSink* sink) {
+  auto info = GetStructPointer<dyld_info_command>(command_data);
+
+  sink->AddFileRange("Rebase Info", StrictSubstr(file_data, info->rebase_off,
+                                                 info->rebase_size));
+  sink->AddFileRange("Binding Info",
+                     StrictSubstr(file_data, info->bind_off, info->bind_size));
+  sink->AddFileRange(
+      "Weak Binding Info",
+      StrictSubstr(file_data, info->weak_bind_off, info->weak_bind_size));
+  sink->AddFileRange(
+      "Lazy Binding Info",
+      StrictSubstr(file_data, info->lazy_bind_off, info->lazy_bind_size));
+  sink->AddFileRange("Export Info", StrictSubstr(file_data, info->export_off,
+                                                 info->export_size));
+}
+
+static void ParseSymbolTable(string_view command_data, string_view file_data,
+                             RangeSink* sink) {
+  auto symtab = GetStructPointer<symtab_command>(command_data);
+
+  // TODO(haberman): use 32-bit symbol size where appropriate.
+  sink->AddFileRange("Symbol Table",
+                     StrictSubstr(file_data, symtab->symoff,
+                                  symtab->nsyms * sizeof(nlist_64)));
+  sink->AddFileRange("String Table",
+                     StrictSubstr(file_data, symtab->stroff, symtab->strsize));
+}
+
+static void ParseDynamicSymbolTable(string_view command_data,
+                                    string_view file_data, RangeSink* sink) {
+  auto dysymtab = GetStructPointer<dysymtab_command>(command_data);
+
+  sink->AddFileRange(
+      "Table of Contents",
+      StrictSubstr(file_data, dysymtab->tocoff,
+                   dysymtab->ntoc * sizeof(dylib_table_of_contents)));
+  sink->AddFileRange("Module Table",
+                     StrictSubstr(file_data, dysymtab->modtaboff,
+                                  dysymtab->nmodtab * sizeof(dylib_module_64)));
+  sink->AddFileRange(
+      "Referenced Symbol Table",
+      StrictSubstr(file_data, dysymtab->extrefsymoff,
+                   dysymtab->nextrefsyms * sizeof(dylib_reference)));
+  sink->AddFileRange("Indirect Symbol Table",
+                     StrictSubstr(file_data, dysymtab->indirectsymoff,
+                                  dysymtab->nindirectsyms * sizeof(uint32_t)));
+  sink->AddFileRange("External Relocation Entries",
+                     StrictSubstr(file_data, dysymtab->extreloff,
+                                  dysymtab->nextrel * sizeof(relocation_info)));
+  sink->AddFileRange(
+      "Local Relocation Entries",
+      StrictSubstr(file_data, dysymtab->locreloff,
+                   dysymtab->nlocrel * sizeof(struct relocation_info)));
+}
+
+static void ParseLinkeditCommand(string_view label, string_view command_data,
+                                 string_view file_data, RangeSink* sink) {
+  auto linkedit = GetStructPointer<linkedit_data_command>(command_data);
+  sink->AddFileRange(
+      label, StrictSubstr(file_data, linkedit->dataoff, linkedit->datasize));
+}
+
+void ParseMachOLoadCommand(uint32_t cmd, string_view command_data,
+                           string_view file_data, RangeSink* sink) {
+  switch (cmd) {
+    case LC_SEGMENT_64:
+      ParseMachOSegment<segment_command_64, section_64>(command_data, file_data,
+                                                        sink);
+      break;
+    case LC_SEGMENT:
+      ParseMachOSegment<segment_command, section>(command_data, file_data,
+                                                  sink);
+      break;
+    case LC_DYLD_INFO:
+    case LC_DYLD_INFO_ONLY:
+      ParseMachODyldInfo(command_data, file_data, sink);
+      break;
+    case LC_SYMTAB:
+      ParseSymbolTable(command_data, file_data, sink);
+      break;
+    case LC_DYSYMTAB:
+      ParseDynamicSymbolTable(command_data, file_data, sink);
+      break;
+    case LC_CODE_SIGNATURE:
+      ParseLinkeditCommand("Code Signature", command_data, file_data, sink);
+      break;
+    case LC_SEGMENT_SPLIT_INFO:
+      ParseLinkeditCommand("Segment Split Info", command_data, file_data, sink);
+      break;
+    case LC_FUNCTION_STARTS:
+      ParseLinkeditCommand("Function Start Addresses", command_data, file_data,
+                           sink);
+      break;
+    case LC_DATA_IN_CODE:
+      ParseLinkeditCommand("Table of Non-instructions", command_data, file_data,
+                           sink);
+      break;
+    case LC_DYLIB_CODE_SIGN_DRS:
+      ParseLinkeditCommand("Code Signing DRs", command_data, file_data, sink);
+      break;
+    case LC_LINKER_OPTIMIZATION_HINT:
+      ParseLinkeditCommand("Optimization Hints", command_data, file_data, sink);
+      break;
+  }
+}
+
+static void ParseMachOSymbols(string_view command_data, string_view file_data,
+                              RangeSink* sink) {
+  (void)command_data;
+  (void)file_data;
+#if 0
+  auto symtab = GetStructPointer<symtab_command>(command_data);
+
+  // TODO(haberman): use 32-bit symbol size where appropriate.
+  sink->AddFileRange("Symbol Table", symtab->symoff,
+                     symtab->nsyms * sizeof(nlist_64));
+  sink->AddFileRange("String Table", symtab->stroff, symtab->strsize);
+#endif
+
   std::string cmd = std::string("symbols -noSources -noDemangling ") +
                     sink->input_file().filename();
 
@@ -58,14 +271,8 @@ static void ParseMachOSymbols(RangeSink* sink) {
 
     if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size),
                           &name, &maybe_func)) {
-      if (StartsWith(name, "DYLD-STUB")) {
+      if (absl::StartsWith(name, "DYLD-STUB")) {
         continue;
-      }
-
-      // macOS symbols have a leading underscore.  Strip it.
-      // TODO(haberman): are there cases where we shouldn't do this?
-      if (name[0] == '_') {
-        name = name.substr(1);
       }
 
       sink->AddVMRange(addr, size, ItaniumDemangle(name, sink->data_source()));
@@ -73,142 +280,100 @@ static void ParseMachOSymbols(RangeSink* sink) {
   }
 }
 
-static void ParseMachOSegments(RangeSink* sink) {
-  // Load command 2
-  //       cmd LC_SEGMENT_64
-  //   cmdsize 632
-  //   segname __DATA
-  //    vmaddr 0x000000010003a000
-  //    vmsize 0x0000000000004000
-  //   fileoff 237568
-  //  filesize 16384
-  //   maxprot 0x00000007
-  //  initprot 0x00000003
-  //    nsects 7
-  //     flags 0x0
-  //
-  std::string cmd = std::string("otool -l ") + sink->input_file().filename();
 
-  RE2 key_decimal_pattern(R"((\w+) ([1-9][0-9]*))");
-  RE2 key_hex_pattern(R"((\w+) 0x([0-9a-f]+))");
-  RE2 key_text_pattern(R"( (\w+) (\w+))");
-  std::string key;
-  std::string text_val;
-  std::string segname;
-  uintptr_t val;
-  uintptr_t vmaddr = 0;
-  uintptr_t vmsize = 0;
-  uintptr_t fileoff = 0;
-  uintptr_t filesize = 0;
+template <class Struct>
+void ParseMachOHeaderImpl(string_view file_data, RangeSink* sink) {
+  string_view header_data = file_data;
+  auto header = GetStructPointerAndAdvance<Struct>(&header_data);
+  uint32_t ncmds = header->ncmds;
 
-  // The entry point appears to be relative to the vmaddr of the first __TEXT
-  // segment.  Should verify that this is the precise rule.
-  uintptr_t first_text_vmaddr = 0;
-  bool in_text_section = false;
-
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-
-    if (RE2::PartialMatch(line, key_decimal_pattern, &key, &val) ||
-        RE2::PartialMatch(line, key_hex_pattern, &key, RE2::Hex(&val))) {
-      if (key == "vmaddr") {
-        vmaddr = val;
-        if (first_text_vmaddr == 0 && in_text_section) {
-          first_text_vmaddr = vmaddr;
+  for (uint32_t i = 0; i < ncmds; i++) {
+    auto command = GetStructPointer<load_command>(header_data);
+    string_view command_data = StrictSubstr(header_data, 0, command->cmdsize);
+    switch (sink->data_source()) {
+      case DataSource::kSegments:
+      case DataSource::kSections:
+        ParseMachOLoadCommand(command->cmd, command_data, file_data, sink);
+        break;
+      case DataSource::kSymbols:
+      case DataSource::kRawSymbols:
+      case DataSource::kShortSymbols:
+      case DataSource::kFullSymbols:
+        if (command->cmd == LC_SYMTAB) {
+          ParseMachOSymbols(command_data, file_data, sink);
         }
-      } else if (key == "vmsize") {
-        vmsize = val;
-      } else if (key == "fileoff") {
-        fileoff = val;
-      } else if (key == "filesize") {
-        filesize = val;
-        sink->AddRange(segname, vmaddr, vmsize, fileoff, filesize);
-      } else if (key == "entryoff") {
-        /*
-        Object* entry = sink->FindObjectByAddr(first_text_vmaddr + val);
-        if (entry) {
-          sink->SetEntryPoint(entry);
-        }
-        */
-      }
-    } else if (RE2::PartialMatch(line, key_text_pattern, &key, &text_val)) {
-      if (key == "segname") {
-        in_text_section = (text_val == "__TEXT");
-        segname = text_val;
-        vmaddr = 0;
-        vmsize = 0;
-        fileoff = 0;
-        filesize = 0;
-      }
+        break;
+      default:
+        THROW("Unexpected data source");
     }
+    header_data = header_data.substr(command->cmdsize);
   }
 }
 
-static void ParseMachOSections(RangeSink* sink) {
-  // Section
-  //   sectname __text
-  //    segname __TEXT
-  //       addr 0x0000000100000ac0
-  //       size 0x0000000000030b10
-  //     offset 2752
-  //      align 2^4 (16)
-  //     reloff 0
-  //     nreloc 0
-  //      flags 0x80000400
-  //  reserved1 0
-  //  reserved2 0
+static void ParseMachOHeader(string_view file_data, RangeSink* sink) {
+  uint32_t magic = ReadMagic(file_data);
+  switch (magic) {
+    case MH_MAGIC:
+      // We don't expect to see many 32-bit binaries out in the wild.  Apple is
+      // aggressively phasing out support for 32-bit binaries:
+      //   https://www.macrumors.com/2017/06/06/apple-to-phase-out-32-bit-mac-apps/
+      //
+      // Still, you can build 32-bit binaries as of this writing, and there are
+      // existing 32-bit binaries floating around, so we might as well support
+      // them.
+      ParseMachOHeaderImpl<mach_header>(file_data, sink);
+      break;
+    case MH_MAGIC_64:
+      ParseMachOHeaderImpl<mach_header_64>(file_data, sink);
+      break;
+    case MH_CIGAM:
+    case MH_CIGAM_64:
+      // OS X and Darwin currently only run on x86/x86-64 (little-endian
+      // platforms), so we expect basically all Mach-O files to be
+      // little-endian.  Additionally, pretty much all CPU architectures are
+      // little-endian these days.  ARM has the option to be big-endian, but I
+      // can't find any OS that is actually compiled to use big-endian mode.
+      // debian-mips is the only big-endian OS I can find (and maybe SPARC).
+      //
+      // All of this is to say, this case should only happen if you are running
+      // Bloaty on debian-mips.  I consider that uncommon enough (and hard
+      // enough to test) that we don't support this until there is a
+      // demonstrated need.
+      THROW("We don't support cross-endian Mach-O files.");
+    default:
+      THROW("Corrupt Mach-O file");
+  }
+}
 
-  std::string cmd = std::string("otool -l ") + sink->input_file().filename();
+static void ParseMachOFatHeader(string_view file_data, RangeSink* sink) {
+  string_view header_data = file_data;
+  auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+  assert(ByteSwap(header->magic) == FAT_MAGIC);
+  uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+  for (uint32_t i = 0; i < nfat_arch; i++) {
+    auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+    string_view arch_data =
+        StrictSubstr(file_data, ByteSwap(arch->offset), ByteSwap(arch->size));
+    ParseMachOHeader(arch_data, sink);
+  }
+}
 
-  RE2 key_decimal_pattern(R"((\w+) ([1-9][0-9]*))");
-  RE2 key_hex_pattern(R"((\w+) 0x([0-9a-f]+))");
-  RE2 key_text_pattern(R"( (\w+) (\w+))");
-  std::string key;
-  std::string text_val;
-  std::string sectname;
-  std::string segname;
-  uintptr_t val;
-  uintptr_t addr = 0;
-  uintptr_t size = 0;
-  uintptr_t offset = 0;
-
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-
-    if (RE2::PartialMatch(line, key_decimal_pattern, &key, &val) ||
-        RE2::PartialMatch(line, key_hex_pattern, &key, RE2::Hex(&val))) {
-      if (key == "addr") {
-        addr = val;
-      } else if (key == "size") {
-        size = val;
-      } else if (key == "offset") {
-        offset = val;
-      } else if (key == "size") {
-        size = val;
-      } else if (key == "flags") {
-        size_t filesize = size;
-        if (val & 0x1) {
-          filesize = 0;
-        }
-
-        if (segname.empty() || sectname.empty()) {
-          continue;
-        }
-
-        std::string label = segname + "," + sectname;
-        sink->AddRange(label, addr, size, offset, filesize);
-
-        sectname.clear();
-        segname.clear();
-        addr = 0;
-        size = 0;
-        offset = 0;
-      }
-    } else if (RE2::PartialMatch(line, key_text_pattern, &key, &text_val)) {
-      if (key == "sectname") {
-        sectname = text_val;
-      } else if (key == "segname") {
-        segname = text_val;
-      }
-    }
+static void ParseMachOFile(RangeSink* sink) {
+  string_view file_data = sink->input_file().data();
+  uint32_t magic = ReadMagic(file_data);
+  switch (magic) {
+    case MH_MAGIC:
+    case MH_MAGIC_64:
+    case MH_CIGAM:
+    case MH_CIGAM_64:
+      ParseMachOHeader(file_data, sink);
+      break;
+    case FAT_CIGAM:
+      ParseMachOFatHeader(file_data, sink);
+      break;
+    default:
+      // TODO: .a file (AR).
+      THROWF("Unrecognized Mach-O file, magic: $0", magic);
   }
 }
 
@@ -217,23 +382,21 @@ class MachOObjectFile : public ObjectFile {
   MachOObjectFile(std::unique_ptr<InputFile> file_data)
       : ObjectFile(std::move(file_data)) {}
 
-  void ProcessBaseMap(RangeSink* sink) override {
-    return ParseMachOSegments(sink);
+  std::string GetBuildId() const override {
+    // TODO(haberman): implement.
+    return std::string();
   }
 
-  void ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
-          ParseMachOSegments(sink);
-          break;
         case DataSource::kSections:
-          ParseMachOSections(sink);
-          break;
+        case DataSource::kSymbols:
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ParseMachOSymbols(sink);
+          ParseMachOFile(sink);
           break;
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
@@ -246,23 +409,20 @@ class MachOObjectFile : public ObjectFile {
 
   bool GetDisassemblyInfo(absl::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
-                          DisassemblyInfo* /*info*/) override {
+                          DisassemblyInfo* /*info*/) const override {
     WARN("Mach-O files do not support disassembly yet");
     return false;
   }
 };
 
-std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file) {
-  std::string cmd = "file " + file->filename();
-  std::string cmd_tonull = cmd + " > /dev/null 2> /dev/null";
-  if (system(cmd_tonull.c_str()) < 0) {
-    return nullptr;
-  }
+std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
+  uint32_t magic = ReadMagic(file->data());
 
-  for (auto& line : ReadLinesFromPipe(cmd)) {
-    if (line.find("Mach-O") != std::string::npos) {
-      return std::unique_ptr<ObjectFile>(new MachOObjectFile(std::move(file)));
-    }
+  // We only support little-endian host and little endian binaries (see
+  // ParseMachOHeader() for more rationale).  Fat headers are always on disk as
+  // big-endian.
+  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {
+    return std::unique_ptr<ObjectFile>(new MachOObjectFile(std::move(file)));
   }
 
   return nullptr;

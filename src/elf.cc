@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <string>
 #include <iostream>
+#include "absl/numeric/int128.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "re2/re2.h"
@@ -24,6 +26,9 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
+
+// Not present in the FreeBSD ELF headers.
+#define NT_GNU_BUILD_ID 3
 
 using absl::string_view;
 
@@ -38,11 +43,22 @@ static void Throw(const char *str, int line) {
 
 namespace {
 
-size_t CheckedAdd(size_t a, size_t b) {
-  if (SIZE_MAX - b < a) {
-    THROW("integer overflow");
+uint64_t CheckedAdd(uint64_t a, uint64_t b) {
+  absl::uint128 a_128(a), b_128(b);
+  absl::uint128 c_128 = a_128 + b_128;
+  if (c_128 > UINT64_MAX) {
+    THROW("integer overflow in addition");
   }
-  return a + b;
+  return static_cast<uint64_t>(c_128);
+}
+
+uint64_t CheckedMul(uint64_t a, uint64_t b) {
+  absl::uint128 a_128(a), b_128(b);
+  absl::uint128 c = a * b;
+  if (c > UINT64_MAX) {
+    THROW("integer overflow in multiply");
+  }
+  return static_cast<uint64_t>(c);
 }
 
 }
@@ -69,6 +85,39 @@ size_t StringViewToSize(string_view str) {
     THROWF("couldn't convert string '$0' to integer.", str);
   }
   return ret;
+}
+
+template <class T>
+const T* GetStructPointer(string_view data) {
+  if (sizeof(T) > data.size()) {
+    THROW("Premature EOF reading ELF data.");
+  }
+  return reinterpret_cast<const T*>(data.data());
+}
+
+template <class T>
+void AdvancePastStruct(string_view* data) {
+  *data = data->substr(sizeof(T));
+}
+
+template <class T>
+const T* GetStructPointerAndAdvance(string_view* data) {
+  const T* ret = GetStructPointer<T>(*data);
+  AdvancePastStruct<T>(data);
+  return ret;
+}
+
+static string_view StrictSubstr(string_view data, size_t off, size_t n) {
+  uint64_t end = CheckedAdd(off, n);
+  if (end > data.size()) {
+    THROW("ELF region out-of-bounds");
+  }
+  return data.substr(off, n);
+}
+
+static size_t AlignUp(size_t offset, size_t granularity) {
+  // Granularity must be a power of two.
+  return (offset + granularity - 1) & ~(granularity - 1);
 }
 
 // ElfFile /////////////////////////////////////////////////////////////////////
@@ -130,11 +179,52 @@ class ElfFile {
     // Requires: header().sh_type == SHT_RELA
     void ReadRelocationWithAddend(Elf64_Word index, Elf64_Rela* rel) const;
 
+    const ElfFile& elf() const { return *elf_; }
+
    private:
     friend class ElfFile;
     const ElfFile* elf_;
     Elf64_Shdr header_;
     string_view contents_;
+  };
+
+  class NoteIter {
+   public:
+    NoteIter(const Section& section) : remaining_(section.contents()) {
+      Next();
+    }
+
+    bool IsDone() const { return done_; }
+    uint32_t type() const { return type_; }
+    string_view name() const { return name_; }
+    string_view descriptor() const { return descriptor_; }
+
+    void Next() {
+      if (remaining_.empty()) {
+        done_ = true;
+        return;
+      }
+
+      auto ptr = GetStructPointerAndAdvance<Elf_Note>(&remaining_);
+      type_ = ptr->n_type;
+      name_ = StrictSubstr(remaining_, 0, ptr->n_namesz);
+
+      // Size might include NULL terminator.
+      if (name_[name_.size() - 1] == 0) {
+        name_ = name_.substr(0, name_.size() - 1);
+      }
+
+      remaining_ = remaining_.substr(AlignUp(ptr->n_namesz, 4));
+      descriptor_ = StrictSubstr(remaining_, 0, ptr->n_descsz);
+      remaining_ = remaining_.substr(AlignUp(ptr->n_descsz, 4));
+    }
+
+   public:
+    string_view name_;
+    string_view descriptor_;
+    string_view remaining_;
+    uint32_t type_;
+    bool done_ = false;
   };
 
   void ReadSegment(Elf64_Word index, Segment* segment) const;
@@ -150,8 +240,9 @@ class ElfFile {
 
   bool Initialize();
 
-  string_view GetRegion(size_t start, size_t n) const {
-    if (SIZE_MAX - n <= start || start + n > data_.size()) {
+  string_view GetRegion(uint64_t start, uint64_t n) const {
+    uint64_t end = CheckedAdd(start, n);
+    if (end > data_.size()) {
       THROW("ELF region out-of-bounds");
     }
     return data_.substr(start, n);
@@ -165,7 +256,7 @@ class ElfFile {
         : elf_(elf), data_(data) {}
 
     template <class T32, class T64, class Munger>
-    void Read(size_t offset, Munger /*munger*/, T64* out) const {
+    void Read(uint64_t offset, Munger /*munger*/, T64* out) const {
       if (elf_.is_64bit() && elf_.is_native_endian()) {
         return Memcpy(offset, out);
       } else {
@@ -178,20 +269,20 @@ class ElfFile {
     string_view data_;
 
     template <class T32, class T64, class Munger>
-    void ReadFallback(size_t offset, T64* out) const;
+    void ReadFallback(uint64_t offset, T64* out) const;
 
     template <class T>
-    void Memcpy(size_t offset, T* out) const {
-      size_t end = CheckedAdd(offset, sizeof(T));
+    void Memcpy(uint64_t offset, T* out) const {
+      uint64_t end = CheckedAdd(offset, sizeof(T));
       if (end > data_.size()) {
-        THROW("can't memcpy that data from ELF file");
+        THROW("out-of-bounds read to ELF file");
       }
       memcpy(out, data_.data() + offset, sizeof(*out));
     }
   };
 
   template <class T32, class T64, class Munger>
-  void ReadStruct(size_t offset, Munger munger, T64* out) const {
+  void ReadStruct(uint64_t offset, Munger munger, T64* out) const {
     StructReader(*this, data_).Read<T32>(offset, munger, out);
   }
 
@@ -299,7 +390,7 @@ struct RelaMunger {
 };
 
 template <class T32, class T64, class Munger>
-void ElfFile::StructReader::ReadFallback(size_t offset, T64* out) const {
+void ElfFile::StructReader::ReadFallback(uint64_t offset, T64* out) const {
   if (elf_.is_64bit()) {
     assert(!elf_.is_native_endian());
     Memcpy(offset, out);
@@ -432,10 +523,10 @@ bool ElfFile::Initialize() {
   }
 
   header_region_ = GetRegion(0, header_.e_ehsize);
-  section_headers_ =
-      GetRegion(header_.e_shoff, header_.e_shentsize * section_count_);
-  segment_headers_ =
-      GetRegion(header_.e_phoff, header_.e_phentsize * header_.e_phnum);
+  section_headers_ = GetRegion(header_.e_shoff,
+                               CheckedMul(header_.e_shentsize, section_count_));
+  segment_headers_ = GetRegion(
+      header_.e_phoff, CheckedMul(header_.e_phentsize, header_.e_phnum));
 
   if (section_count_ > 0) {
     ReadSection(section_string_index_, &section_name_table_);
@@ -454,8 +545,9 @@ void ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
   }
 
   Elf64_Phdr* header = &segment->header_;
-  ReadStruct<Elf32_Phdr>(header_.e_phoff + header_.e_phentsize * index,
-                         PhdrMunger(), header);
+  ReadStruct<Elf32_Phdr>(
+      CheckedAdd(header_.e_phoff, CheckedMul(header_.e_phentsize, index)),
+      PhdrMunger(), header);
   segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
 }
 
@@ -466,8 +558,9 @@ void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   }
 
   Elf64_Shdr* header = &section->header_;
-  ReadStruct<Elf32_Shdr>(header_.e_shoff + header_.e_shentsize * index,
-                         ShdrMunger(), header);
+  ReadStruct<Elf32_Shdr>(
+      CheckedAdd(header_.e_shoff, CheckedMul(header_.e_shentsize, index)),
+      ShdrMunger(), header);
 
   if (header->sh_type == SHT_NOBITS) {
     section->contents_ = string_view();
@@ -560,8 +653,10 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
     char end[2];
   };
 
-  if (remaining_.size() < sizeof(Header)) {
+  if (remaining_.size() == 0) {
     return false;
+  } else if (remaining_.size() < sizeof(Header)) {
+    THROW("Premature EOF in AR data");
   }
 
   const Header* header = reinterpret_cast<const Header*>(remaining_.data());
@@ -585,20 +680,19 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
       size_t end = long_filenames_.find('/', offset);
 
       if (end == std::string::npos) {
-        return false;
+        THROW("Unterminated long filename");
       }
 
       file->filename = long_filenames_.substr(offset, end - offset);
     } else {
-      return false;  // Unexpected special filename.
+      THROW("Unexpected special filename in AR archive");
     }
   } else {
     // Normal filename, slash-terminated.
     size_t slash = file_id.find('/');
 
     if (slash == std::string::npos) {
-      fprintf(stderr, "BSD-style AR not yet implemented.\n");
-      return false;
+      THROW("BSD-style AR not yet implemented");
     }
 
     file->filename = file_id.substr(0, slash);
@@ -668,7 +762,10 @@ static void AddCatchAll(RangeSink* sink) {
 
                // Any sections of the file not covered by any
                // segments/sections/symbols/etc.
-               MaybeAddFileRange(sink, "[Unmapped]", elf.entire_file());
+               if (sink && (sink->data_source() == DataSource::kSegments ||
+                            sink->data_source() == DataSource::kSections)) {
+                 sink->AddFileRange("[Unmapped]", elf.entire_file());
+               }
              });
 }
 
@@ -776,12 +873,7 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
   ForEachElf(
       sink->input_file(), sink,
       [=](const ElfFile& elf, string_view filename, uint32_t index_base) {
-        if (elf.section_count() == 0) {
-          return;
-        }
-
         std::string name_from_flags;
-
         for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
           ElfFile::Section section;
           elf.ReadSection(i, &section);
@@ -887,7 +979,9 @@ static void ReadELFSegments(RangeSink* sink) {
 // reader directly on them.  At the moment we don't attempt to make these
 // work with object files.
 
-static void ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
+static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
+  ElfFile elf(file.data());
+  assert(elf.IsOpen());
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
@@ -966,17 +1060,33 @@ class ElfObjectFile : public ObjectFile {
   ElfObjectFile(std::unique_ptr<InputFile> file)
       : ObjectFile(std::move(file)) {}
 
-  void ProcessBaseMap(RangeSink* sink) override {
-    if (IsObjectFile(sink->input_file().data())) {
-      DoReadELFSections(sink, kReportBySectionName);
-    } else {
-      // Slightly more complete for executables, but not present in object
-      // files.
-      ReadELFSegments(sink);
+  std::string GetBuildId() const override {
+    if (IsObjectFile(file_data().data())) {
+      // Object files don't have a build ID.
+      return std::string();
     }
+
+    ElfFile elf(file_data().data());
+    assert(elf.IsOpen());
+    for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
+      ElfFile::Section section;
+      elf.ReadSection(i, &section);
+      if (section.header().sh_type != SHT_NOTE) {
+        continue;
+      }
+
+      for (ElfFile::NoteIter notes(section); !notes.IsDone(); notes.Next()) {
+        if (notes.name() == "GNU" && notes.type() == NT_GNU_BUILD_ID) {
+          return std::string(notes.descriptor());
+        }
+      }
+    }
+
+    // No build id section found.
+    return std::string();
   }
 
-  void ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
@@ -988,7 +1098,7 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ReadELFSymbols(sink->input_file(), sink, nullptr);
+          ReadELFSymbols(debug_file().file_data(), sink, nullptr);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         case DataSource::kArchiveMembers:
@@ -997,19 +1107,17 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kCompileUnits: {
           CheckNotObject("compileunits", sink);
           SymbolTable symtab;
-          ElfFile elf(sink->input_file().data());
-          ReadELFSymbols(sink->input_file(), nullptr, &symtab);
+          ReadELFSymbols(debug_file().file_data(), nullptr, &symtab);
           dwarf::File dwarf;
-          ReadDWARFSections(elf, &dwarf);
+          ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, sink);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }
         case DataSource::kInlines: {
           CheckNotObject("lineinfo", sink);
-          ElfFile elf(sink->input_file().data());
           dwarf::File dwarf;
-          ReadDWARFSections(elf, &dwarf);
+          ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFInlines(dwarf, sink, true);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
@@ -1024,20 +1132,21 @@ class ElfObjectFile : public ObjectFile {
   }
 
   bool GetDisassemblyInfo(absl::string_view symbol, DataSource symbol_source,
-                          DisassemblyInfo* info) override {
+                          DisassemblyInfo* info) const override {
     // Find the corresponding file range.  This also could be optimized not to
     // build the entire map.
     DualMap base_map;
     NameMunger empty_munger;
     RangeSink base_sink(&file_data(), DataSource::kSegments, nullptr);
     base_sink.AddOutput(&base_map, &empty_munger);
-    ProcessBaseMap(&base_sink);
+    std::vector<RangeSink*> sink_ptrs{&base_sink};
+    ProcessFile(sink_ptrs);
 
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;
     RangeSink symbol_sink(&file_data(), symbol_source, &base_map);
     symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
-    ReadELFSymbols(file_data(), &symbol_sink, &symbol_table);
+    ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symbol_table);
     auto entry = symbol_table.find(symbol);
     if (entry == symbol_table.end()) {
       entry = symbol_table.find(ItaniumDemangle(symbol, symbol_source));

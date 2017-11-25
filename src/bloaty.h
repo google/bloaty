@@ -221,22 +221,33 @@ typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
 class ObjectFile {
  public:
   ObjectFile(std::unique_ptr<InputFile> file_data)
-      : file_data_(std::move(file_data)) {}
+      : file_data_(std::move(file_data)), debug_file_(this) {}
   virtual ~ObjectFile() {}
-  virtual void ProcessBaseMap(RangeSink* sink) = 0;
+
+  virtual std::string GetBuildId() const = 0;
 
   // Process this file, pushing data to |sinks| as appropriate for each data
-  // source.
-  virtual void ProcessFile(const std::vector<RangeSink*>& sinks) = 0;
+  // source.  If any debug files match the build id for this file, it will be
+  // given here, otherwise it is |this|.
+  virtual void ProcessFile(const std::vector<RangeSink*>& sinks) const = 0;
 
   virtual bool GetDisassemblyInfo(absl::string_view symbol,
                                   DataSource symbol_source,
-                                  DisassemblyInfo* info) = 0;
+                                  DisassemblyInfo* info) const = 0;
 
   const InputFile& file_data() const { return *file_data_; }
 
+  // Sets the debug file for |this|.  |file| must outlive this instance.
+  void set_debug_file(const ObjectFile* file) {
+    assert(debug_file_->GetBuildId() == GetBuildId());
+    debug_file_ = file;
+  }
+
+  const ObjectFile& debug_file() const { return *debug_file_; }
+
  private:
   std::unique_ptr<InputFile> file_data_;
+  const ObjectFile* debug_file_;
 };
 
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
@@ -457,19 +468,20 @@ struct RollupRow {
   std::string name;
   int64_t vmsize = 0;
   int64_t filesize = 0;
+  int64_t other_count = 0;
+  int64_t sortkey;
   double vmpercent;
   double filepercent;
   std::vector<RollupRow> sorted_children;
-  std::vector<RollupRow> shrinking;
-  std::vector<RollupRow> mixed;
 
-  // When this is false, sorted_children contains actual sizes, and
-  // shrinking/mixed are unused.
-  //
-  // When this is true, sorted_children contains entites that grew, and
-  // shrinking/mixed indicate entries that shrank or that had one dimension grow
-  // and one shrink.
-  bool diff_mode = false;
+  static bool Compare(const RollupRow& a, const RollupRow& b) {
+    // Sort value high-to-low.
+    if (a.sortkey != b.sortkey) {
+      return a.sortkey > b.sortkey;
+    }
+    // Sort name low to high.
+    return a.name < b.name;
+  }
 };
 
 enum class OutputFormat {
@@ -485,11 +497,12 @@ struct OutputOptions {
 struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
-  const RollupRow& toplevel_row() { return toplevel_row_; }
 
   void AddDataSourceName(absl::string_view name) {
     source_names_.emplace_back(std::string(name));
   }
+
+  const std::vector<std::string>& source_names() const { return source_names_; }
 
   void Print(const OutputOptions& options, std::ostream* out) {
     if (!source_names_.empty()) {
@@ -516,6 +529,10 @@ struct RollupOutput {
 
   absl::string_view GetDisassembly() { return disassembly_; }
 
+  // For debugging.
+  const RollupRow& toplevel_row() const { return toplevel_row_; }
+  bool diff_mode() const { return diff_mode_; }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
@@ -524,6 +541,9 @@ struct RollupOutput {
   RollupRow toplevel_row_;
   std::string disassembly_;
 
+  // When we are in diff mode, rollup sizes are relative to the baseline.
+  bool diff_mode_ = false;
+
   void PrettyPrint(size_t max_label_len, std::ostream* out) const;
   void PrintToCSV(std::ostream* out) const;
   size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
@@ -531,9 +551,11 @@ struct RollupOutput {
                       std::ostream* out) const;
   void PrettyPrintTree(const RollupRow& row, size_t indent, size_t longest_row,
                        std::ostream* out) const;
-  void PrintRowToCSV(const RollupRow& row, absl::string_view parent_labels,
+  void PrintRowToCSV(const RollupRow& row,
+                     std::vector<std::string> parent_labels,
                      std::ostream* out) const;
-  void PrintTreeToCSV(const RollupRow& row, absl::string_view parent_labels,
+  void PrintTreeToCSV(const RollupRow& row,
+                      std::vector<std::string> parent_labels,
                       std::ostream* out) const;
 };
 

@@ -24,6 +24,11 @@ message Options {
   // baseline.
   repeated string base_filename = 2;
 
+  // Files to use for debug information.  We will match these to files from
+  // filename or base_filename by build id.  Files that are only in
+  // debug_filename will *not* have their file size counted.
+  repeated string debug_filename = 10;
+
   // The data sources to scan in each file.  At least one data source must be
   // specified.  If more than one source is specified, the output is
   // hierarchical.

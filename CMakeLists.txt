@@ -62,6 +62,10 @@ if(BLOATY_ENABLE_UBSAN)
   set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=undefined")
 endif()
 
+if(DEFINED ENV{CXXFLAGS})
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} $ENV{CXXFLAGS}")
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
@@ -97,49 +101,52 @@ add_library(libbloaty
 
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
 
-add_executable(bloaty src/main.cc)
-target_link_libraries(bloaty "${LIBBLOATY_LIBS}")
 
-# All of this is to add -pthread, which is required by re2 (not us).
-find_package(Threads REQUIRED)
-if(THREADS_HAVE_PTHREAD_ARG)
-  set_property(TARGET bloaty PROPERTY COMPILE_OPTIONS "-pthread")
-  set_property(TARGET bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
-endif()
-if(CMAKE_THREAD_LIBS_INIT)
-  target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
-endif()
+if(DEFINED ENV{LIB_FUZZING_ENGINE})
+  message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
+  add_executable(fuzz_target tests/fuzz_target.cc)
+  target_link_libraries(fuzz_target "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}" $ENV{LIB_FUZZING_ENGINE})
+else()
+  add_executable(bloaty src/main.cc)
+  target_link_libraries(bloaty "${LIBBLOATY_LIBS}")
 
-enable_testing()
-
-if(BUILD_TESTING)
-  add_subdirectory(third_party/googletest)
-  include_directories(third_party/googletest/googletest/include)
-  include_directories(third_party/googletest/googlemock/include)
-
-  set(TEST_TARGETS
-      bloaty_test
-      bloaty_misc_test
-      range_map_test
-      )
-
-  foreach(target ${TEST_TARGETS})
-    add_executable(${target} tests/${target}.cc)
-    target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
-  endforeach(target)
-
-  if($ENV{LIB_FUZZING_ENGINE})
-    add_executable(fuzz_test tests/fuzz_target.cc)
-  else()
-    add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
+  # All of this is to add -pthread, which is required by re2 (not us).
+  find_package(Threads REQUIRED)
+  if(THREADS_HAVE_PTHREAD_ARG)
+    set_property(TARGET bloaty PROPERTY COMPILE_OPTIONS "-pthread")
+    set_property(TARGET bloaty PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
   endif()
-  target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
+  if(CMAKE_THREAD_LIBS_INIT)
+    target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
+  endif()
 
-  file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
+  enable_testing()
 
-  add_test(NAME range_map_test COMMAND range_map_test)
-  add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
-  add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
-  add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
-  add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
+  if(BUILD_TESTING)
+    add_subdirectory(third_party/googletest)
+    include_directories(third_party/googletest/googletest/include)
+    include_directories(third_party/googletest/googlemock/include)
+
+    set(TEST_TARGETS
+        bloaty_test
+        bloaty_misc_test
+        range_map_test
+        )
+
+    foreach(target ${TEST_TARGETS})
+      add_executable(${target} tests/${target}.cc)
+      target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
+    endforeach(target)
+
+    add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
+    target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
+
+    file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
+
+    add_test(NAME range_map_test COMMAND range_map_test)
+    add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
+    add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
+    add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
+    add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
+  endif()
 endif()
