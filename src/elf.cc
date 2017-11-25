@@ -1107,10 +1107,16 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kCompileUnits: {
           CheckNotObject("compileunits", sink);
           SymbolTable symtab;
-          ReadELFSymbols(debug_file().file_data(), nullptr, &symtab);
+          DualMap symbol_map;
+          NameMunger empty_munger;
+          RangeSink symbol_sink(&debug_file().file_data(),
+                                DataSource::kRawSymbols,
+                                &sinks[0]->MapAtIndex(0));
+          symbol_sink.AddOutput(&symbol_map, &empty_munger);
+          ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symtab);
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf);
-          ReadDWARFCompileUnits(dwarf, symtab, sink);
+          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }

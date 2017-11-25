@@ -183,6 +183,10 @@ class RangeSink {
   void AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t size,
                                  const std::string& name);
 
+  const DualMap& MapAtIndex(size_t index) const {
+    return *outputs_[index].first;
+  }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeSink);
 
@@ -269,7 +273,7 @@ struct File {
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
 void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
-                           RangeSink* sink);
+                           const DualMap& map, RangeSink* sink);
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 
@@ -384,6 +388,10 @@ class RangeMap {
   // true and sets |label| to the corresponding label, and |offset| to the
   // offset from the beginning of this range.
   bool TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const;
+
+  // Looks for a range that starts exactly on |addr|.  If it exists, returns
+  // true and sets |size| to its size.
+  bool TryGetSize(uint64_t addr, uint64_t* size) const;
 
   template <class Func>
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,

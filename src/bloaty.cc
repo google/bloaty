@@ -856,6 +856,16 @@ bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) 
   }
 }
 
+bool RangeMap::TryGetSize(uint64_t addr, uint64_t* size) const {
+  auto iter = mappings_.find(addr);
+  if (iter == mappings_.end()) {
+    return false;
+  } else {
+    *size = iter->second.end - addr;
+    return true;
+  }
+}
+
 void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
   AddDualRange(addr, size, UINT64_MAX, val);
 }
@@ -1524,9 +1534,9 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
 
   maps.ComputeRollup(filename, filename_position_, rollup);
   if (verbose_level > 0) {
-    fprintf(stderr, "FILE MAP:\n");
+    fprintf(stdout, "FILE MAP:\n");
     maps.PrintFileMaps(filename, filename_position_);
-    fprintf(stderr, "VM MAP:\n");
+    fprintf(stdout, "VM MAP:\n");
     maps.PrintVMMaps(filename, filename_position_);
   }
 }

@@ -733,6 +733,118 @@ class FormReaderBase {
   }
 };
 
+// FormReader for void.  For skipping the data instead of reading it somewhere.
+template <>
+class FormReader<void> : public FormReaderBase<FormReader<void>> {
+ public:
+  typedef FormReader ME;
+  typedef FormReaderBase<ME> Base;
+  typedef void type;
+  using Base::data_;
+
+  FormReader(const DIEReader& reader, string_view data, void* /*val*/)
+      : Base(reader, data) {}
+
+  template <class Func>
+  static void GetFunctionForForm(CompilationUnitSizes sizes, uint8_t form,
+                                 Func func) {
+    switch (form) {
+      case DW_FORM_flag_present:
+        func(&Base::template ReadAttr<&ME::DoNothing>);
+        return;
+      case DW_FORM_data1:
+      case DW_FORM_ref1:
+      case DW_FORM_flag:
+        func(&Base::template ReadAttr<&ME::SkipFixed<1>>);
+        return;
+      case DW_FORM_data2:
+      case DW_FORM_ref2:
+        func(&Base::template ReadAttr<&ME::SkipFixed<2>>);
+        return;
+      case DW_FORM_data4:
+      case DW_FORM_ref4:
+        func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        return;
+      case DW_FORM_data8:
+      case DW_FORM_ref8:
+      case DW_FORM_ref_sig8:
+        func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
+        return;
+      case DW_FORM_addr:
+      case DW_FORM_ref_addr:
+        if (sizes.address_size == 8) {
+          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
+        } else if (sizes.address_size == 4) {
+          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        } else {
+          THROWF("don't know how to skip address size $0", sizes.address_size);
+        }
+        return;
+      case DW_FORM_sec_offset:
+      case DW_FORM_strp:
+        if (sizes.dwarf64) {
+          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
+        } else {
+          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        }
+        return;
+      case DW_FORM_sdata:
+      case DW_FORM_udata:
+      case DW_FORM_ref_udata:
+        func(&Base::template ReadAttr<&ME::SkipVariable>);
+        return;
+      case DW_FORM_block1:
+        func(&Base::template ReadAttr<&ME::SkipBlock<uint8_t>>);
+        return;
+      case DW_FORM_block2:
+        func(&Base::template ReadAttr<&ME::SkipBlock<uint16_t>>);
+        return;
+      case DW_FORM_block4:
+        func(&Base::template ReadAttr<&ME::SkipBlock<uint32_t>>);
+        return;
+      case DW_FORM_block:
+      case DW_FORM_exprloc:
+        func(&Base::template ReadAttr<&ME::SkipVariableBlock>);
+        return;
+      case DW_FORM_string:
+        func(&Base::template ReadAttr<&ME::SkipString>);
+        return;
+      case DW_FORM_indirect:
+        func(&ME::ReadIndirect);
+        return;
+      default:
+        THROWF("don't know how to skip DWARF form $0", form);
+    }
+  }
+
+ private:
+  void DoNothing() {}
+
+  template <size_t N>
+  void SkipFixed() {
+    SkipBytes(N, &data_);
+  }
+
+  void SkipVariable() {
+    SkipLEB128(&data_);
+  }
+
+  template <class D>
+  void SkipBlock() {
+    D len = ReadMemcpy<D>(&data_);
+    SkipBytes(len, &data_);
+  }
+
+  void SkipVariableBlock() {
+    uint64_t len = ReadLEB128<uint64_t>(&data_);
+    SkipBytes(len, &data_);
+  }
+
+  void SkipString() {
+    SkipNullTerminated(&data_);
+  }
+};
+
 // FormReader for string_view.  We accept the true string forms (DW_FORM_string
 // and DW_FORM_strp) as well as a number of other forms that contain delimited
 // string data.  We also accept the generic/opaque DW_FORM_data* types; the
@@ -792,7 +904,9 @@ class FormReader<string_view> : public FormReaderBase<FormReader<string_view>> {
         func(&FormReader::ReadIndirect);
         return;
       default:
-        THROWF("don't know how to translate form $0 to string_view", form);
+        // Skip it.
+        FormReader<void>::GetFunctionForForm(sizes, form, func);
+        return;
     }
   }
 
@@ -979,118 +1093,6 @@ class FormReader<bool> : public FormReaderBase<FormReader<bool>> {
 
   void ReadFlagPresent() {
     *val_ = true;
-  }
-};
-
-// FormReader for void.  For skipping the data instead of reading it somewhere.
-template <>
-class FormReader<void> : public FormReaderBase<FormReader<void>> {
- public:
-  typedef FormReader ME;
-  typedef FormReaderBase<ME> Base;
-  typedef void type;
-  using Base::data_;
-
-  FormReader(const DIEReader& reader, string_view data, void* /*val*/)
-      : Base(reader, data) {}
-
-  template <class Func>
-  static void GetFunctionForForm(CompilationUnitSizes sizes, uint8_t form,
-                                 Func func) {
-    switch (form) {
-      case DW_FORM_flag_present:
-        func(&Base::template ReadAttr<&ME::DoNothing>);
-        return;
-      case DW_FORM_data1:
-      case DW_FORM_ref1:
-      case DW_FORM_flag:
-        func(&Base::template ReadAttr<&ME::SkipFixed<1>>);
-        return;
-      case DW_FORM_data2:
-      case DW_FORM_ref2:
-        func(&Base::template ReadAttr<&ME::SkipFixed<2>>);
-        return;
-      case DW_FORM_data4:
-      case DW_FORM_ref4:
-        func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
-        return;
-      case DW_FORM_data8:
-      case DW_FORM_ref8:
-      case DW_FORM_ref_sig8:
-        func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
-        return;
-      case DW_FORM_addr:
-      case DW_FORM_ref_addr:
-        if (sizes.address_size == 8) {
-          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
-        } else if (sizes.address_size == 4) {
-          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
-        } else {
-          THROWF("don't know how to skip address size $0", sizes.address_size);
-        }
-        return;
-      case DW_FORM_sec_offset:
-      case DW_FORM_strp:
-        if (sizes.dwarf64) {
-          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
-        } else {
-          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
-        }
-        return;
-      case DW_FORM_sdata:
-      case DW_FORM_udata:
-      case DW_FORM_ref_udata:
-        func(&Base::template ReadAttr<&ME::SkipVariable>);
-        return;
-      case DW_FORM_block1:
-        func(&Base::template ReadAttr<&ME::SkipBlock<uint8_t>>);
-        return;
-      case DW_FORM_block2:
-        func(&Base::template ReadAttr<&ME::SkipBlock<uint16_t>>);
-        return;
-      case DW_FORM_block4:
-        func(&Base::template ReadAttr<&ME::SkipBlock<uint32_t>>);
-        return;
-      case DW_FORM_block:
-      case DW_FORM_exprloc:
-        func(&Base::template ReadAttr<&ME::SkipVariableBlock>);
-        return;
-      case DW_FORM_string:
-        func(&Base::template ReadAttr<&ME::SkipString>);
-        return;
-      case DW_FORM_indirect:
-        func(&ME::ReadIndirect);
-        return;
-      default:
-        THROWF("don't know how to skip DWARF form $0", form);
-    }
-  }
-
- private:
-  void DoNothing() {}
-
-  template <size_t N>
-  void SkipFixed() {
-    SkipBytes(N, &data_);
-  }
-
-  void SkipVariable() {
-    SkipLEB128(&data_);
-  }
-
-  template <class D>
-  void SkipBlock() {
-    D len = ReadMemcpy<D>(&data_);
-    SkipBytes(len, &data_);
-  }
-
-  void SkipVariableBlock() {
-    uint64_t len = ReadLEB128<uint64_t>(&data_);
-    SkipBytes(len, &data_);
-  }
-
-  void SkipString() {
-    SkipNullTerminated(&data_);
   }
 };
 
@@ -1735,20 +1737,63 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 
 void AddDIE(const std::string& name,
             const dwarf::FixedAttrReader<string_view, string_view, uint64_t,
-                                         uint64_t>& attr,
-            const SymbolTable& symtab, RangeSink* sink) {
+                                         uint64_t, string_view>& attr,
+            const SymbolTable& symtab, const DualMap& symbol_map,
+            const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
   uint64_t low_pc = attr.GetAttribute<2>();
   uint64_t high_pc = attr.GetAttribute<3>();
 
+  // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
+  // functions).
   if (attr.HasAttribute<2>() && attr.HasAttribute<3>()) {
-    sink->AddVMRangeIgnoreDuplicate(low_pc, high_pc - low_pc, name);
+    // It appears that some compilers make high_pc a size, and others make it an
+    // address.
+    if (high_pc > low_pc) {
+      high_pc -= low_pc;
+    }
+    sink->AddVMRangeIgnoreDuplicate(low_pc, high_pc, name);
   }
 
+  // Sometimes a DIE has a linkage_name, which we can look up in the symbol
+  // table.
   if (attr.HasAttribute<1>()) {
     auto it = symtab.find(attr.GetAttribute<1>());
     if (it != symtab.end()) {
       sink->AddVMRangeIgnoreDuplicate(it->second.first, it->second.second,
                                       name);
+    }
+  }
+
+  // Sometimes the DIE has a "location", which gives the location as an address.
+  // This parses a very small subset of the overall DWARF expression grammar.
+  if (attr.HasAttribute<4>()) {
+    string_view location = attr.GetAttribute<4>();
+    if (location.size() == sizes.address_size + 1 &&
+        location[0] == DW_OP_addr) {
+      location.remove_prefix(1);
+      uint64_t addr;
+      // TODO(haberman): endian?
+      if (sizes.address_size == 4) {
+        addr = dwarf::ReadMemcpy<uint32_t>(&location);
+      } else if (sizes.address_size == 8) {
+        addr = dwarf::ReadMemcpy<uint64_t>(&location);
+      } else {
+        THROW("Unexpected address size");
+      }
+
+      // Unfortunately the location doesn't include a size, so we look that part
+      // up in the symbol map.
+      uint64_t size;
+      if (symbol_map.vm_map.TryGetSize(addr, &size)) {
+        sink->AddVMRangeIgnoreDuplicate(addr, size, name);
+      } else {
+        if (verbose_level > 0) {
+          fprintf(stderr,
+                  "bloaty: warning: couldn't find DWARF location in symbol "
+                  "table, address: %" PRIx64 "\n",
+                  addr);
+        }
+      }
     }
   }
 }
@@ -1757,11 +1802,13 @@ void AddDIE(const std::string& name,
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
 static void ReadDWARFDebugInfo(const dwarf::File& file,
-                               const SymbolTable& symtab, RangeSink* sink) {
+                               const SymbolTable& symtab,
+                               const DualMap& symbol_map, RangeSink* sink) {
   dwarf::DIEReader die_reader(file);
-  dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t>
+  dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
+                         string_view>
       attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
-                                 DW_AT_high_pc});
+                                DW_AT_high_pc, DW_AT_location});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
     THROW("debug info is present, but empty");
@@ -1771,18 +1818,20 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
     attr_reader.ReadAttributes(&die_reader);
     std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
     if (!compileunit_name.empty()) {
-      AddDIE(compileunit_name, attr_reader, symtab, sink);
+      AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
+             die_reader.unit_sizes(), sink);
 
       while (die_reader.NextDIE()) {
         attr_reader.ReadAttributes(&die_reader);
-        AddDIE(compileunit_name, attr_reader, symtab, sink);
+        AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
+               die_reader.unit_sizes(), sink);
       }
     }
   } while (die_reader.NextCompilationUnit());
 }
 
 void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
-                           RangeSink* sink) {
+                           const DualMap& symbol_map, RangeSink* sink) {
   if (!file.debug_info.size()) {
     THROW("missing debug info");
   }
@@ -1791,7 +1840,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
     ReadDWARFAddressRanges(file, sink);
   }
 
-  ReadDWARFDebugInfo(file, symtab, sink);
+  ReadDWARFDebugInfo(file, symtab, symbol_map, sink);
 }
 
 static std::string LineInfoKey(const std::string& file, uint32_t line,
