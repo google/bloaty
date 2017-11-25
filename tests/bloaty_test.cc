@@ -31,14 +31,11 @@ TEST_F(BloatyTest, EmptyObjectFile) {
   EXPECT_EQ(top_row_->filesize, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
-  // For symbols we should get a row for headers and a row for [Unmapped].
-  std::string unmapped = "[Unmapped]";
+  // Same with symbols.
   RunBloaty({"bloaty", "-d", "symbols", file});
   EXPECT_EQ(top_row_->vmsize, 0);
   EXPECT_EQ(top_row_->filesize, size);
-  ASSERT_EQ(top_row_->sorted_children.size(), 2);
-  EXPECT_TRUE(top_row_->sorted_children[0].name == unmapped ||
-              top_row_->sorted_children[1].name == unmapped);
+  EXPECT_GT(top_row_->sorted_children.size(), 1);
 
   // We can't run any of these targets against object files.
   std::string errmsg = "can't use data source";

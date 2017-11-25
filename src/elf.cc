@@ -16,6 +16,7 @@
 #include <string>
 #include <iostream>
 #include "absl/numeric/int128.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "re2/re2.h"
@@ -25,6 +26,9 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
+
+// Not present in the FreeBSD ELF headers.
+#define NT_GNU_BUILD_ID 3
 
 using absl::string_view;
 
@@ -81,6 +85,39 @@ size_t StringViewToSize(string_view str) {
     THROWF("couldn't convert string '$0' to integer.", str);
   }
   return ret;
+}
+
+template <class T>
+const T* GetStructPointer(string_view data) {
+  if (sizeof(T) > data.size()) {
+    THROW("Premature EOF reading ELF data.");
+  }
+  return reinterpret_cast<const T*>(data.data());
+}
+
+template <class T>
+void AdvancePastStruct(string_view* data) {
+  *data = data->substr(sizeof(T));
+}
+
+template <class T>
+const T* GetStructPointerAndAdvance(string_view* data) {
+  const T* ret = GetStructPointer<T>(*data);
+  AdvancePastStruct<T>(data);
+  return ret;
+}
+
+static string_view StrictSubstr(string_view data, size_t off, size_t n) {
+  uint64_t end = CheckedAdd(off, n);
+  if (end > data.size()) {
+    THROW("ELF region out-of-bounds");
+  }
+  return data.substr(off, n);
+}
+
+static size_t AlignUp(size_t offset, size_t granularity) {
+  // Granularity must be a power of two.
+  return (offset + granularity - 1) & ~(granularity - 1);
 }
 
 // ElfFile /////////////////////////////////////////////////////////////////////
@@ -142,11 +179,52 @@ class ElfFile {
     // Requires: header().sh_type == SHT_RELA
     void ReadRelocationWithAddend(Elf64_Word index, Elf64_Rela* rel) const;
 
+    const ElfFile& elf() const { return *elf_; }
+
    private:
     friend class ElfFile;
     const ElfFile* elf_;
     Elf64_Shdr header_;
     string_view contents_;
+  };
+
+  class NoteIter {
+   public:
+    NoteIter(const Section& section) : remaining_(section.contents()) {
+      Next();
+    }
+
+    bool IsDone() const { return done_; }
+    uint32_t type() const { return type_; }
+    string_view name() const { return name_; }
+    string_view descriptor() const { return descriptor_; }
+
+    void Next() {
+      if (remaining_.empty()) {
+        done_ = true;
+        return;
+      }
+
+      auto ptr = GetStructPointerAndAdvance<Elf_Note>(&remaining_);
+      type_ = ptr->n_type;
+      name_ = StrictSubstr(remaining_, 0, ptr->n_namesz);
+
+      // Size might include NULL terminator.
+      if (name_[name_.size() - 1] == 0) {
+        name_ = name_.substr(0, name_.size() - 1);
+      }
+
+      remaining_ = remaining_.substr(AlignUp(ptr->n_namesz, 4));
+      descriptor_ = StrictSubstr(remaining_, 0, ptr->n_descsz);
+      remaining_ = remaining_.substr(AlignUp(ptr->n_descsz, 4));
+    }
+
+   public:
+    string_view name_;
+    string_view descriptor_;
+    string_view remaining_;
+    uint32_t type_;
+    bool done_ = false;
   };
 
   void ReadSegment(Elf64_Word index, Segment* segment) const;
@@ -641,7 +719,10 @@ void OnElfFile(const ElfFile& elf, string_view filename,
   MaybeAddFileRange(sink, "[ELF Headers]", elf.segment_headers());
 
   // Any sections of the file not covered by any segments/sections/symbols/etc.
-  MaybeAddFileRange(sink, "[Unmapped]", elf.entire_file());
+  if (sink && (sink->data_source() == DataSource::kSegments ||
+               sink->data_source() == DataSource::kSections)) {
+    sink->AddFileRange("[Unmapped]", elf.entire_file());
+  }
 }
 
 template <class Func>
@@ -800,12 +881,7 @@ static bool DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
   return ForEachElf(
       sink->input_file(), sink,
       [=](const ElfFile& elf, string_view filename, uint32_t index_base) {
-        if (elf.section_count() == 0) {
-          return;
-        }
-
         std::string name_from_flags;
-
         for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
           ElfFile::Section section;
           elf.ReadSection(i, &section);
@@ -908,7 +984,9 @@ static void ReadELFSegments(RangeSink* sink) {
 // reader directly on them.  At the moment we don't attempt to make these
 // work with object files.
 
-static void ReadDWARFSections(const ElfFile& elf, dwarf::File* dwarf) {
+static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
+  ElfFile elf(file.data());
+  assert(elf.IsOpen());
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
@@ -987,17 +1065,33 @@ class ElfObjectFile : public ObjectFile {
   ElfObjectFile(std::unique_ptr<InputFile> file)
       : ObjectFile(std::move(file)) {}
 
-  void ProcessBaseMap(RangeSink* sink) override {
-    if (IsObjectFile(sink->input_file().data())) {
-      DoReadELFSections(sink, kReportBySectionName);
-    } else {
-      // Slightly more complete for executables, but not present in object
-      // files.
-      ReadELFSegments(sink);
+  std::string GetBuildId() const override {
+    if (IsObjectFile(file_data().data())) {
+      // Object files don't have a build ID.
+      return std::string();
     }
+
+    ElfFile elf(file_data().data());
+    assert(elf.IsOpen());
+    for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
+      ElfFile::Section section;
+      elf.ReadSection(i, &section);
+      if (section.header().sh_type != SHT_NOTE) {
+        continue;
+      }
+
+      for (ElfFile::NoteIter notes(section); !notes.IsDone(); notes.Next()) {
+        if (notes.name() == "GNU" && notes.type() == NT_GNU_BUILD_ID) {
+          return std::string(notes.descriptor());
+        }
+      }
+    }
+
+    // No build id section found.
+    return std::string();
   }
 
-  void ProcessFile(const std::vector<RangeSink*>& sinks) override {
+  void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
     for (auto sink : sinks) {
       switch (sink->data_source()) {
         case DataSource::kSegments:
@@ -1009,7 +1103,7 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ReadELFSymbols(sink->input_file(), sink, nullptr);
+          ReadELFSymbols(debug_file().file_data(), sink, nullptr);
           break;
         case DataSource::kArchiveMembers:
           DoReadELFSections(sink, kReportByFilename);
@@ -1017,18 +1111,16 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kCompileUnits: {
           CheckNotObject("compileunits", sink);
           SymbolTable symtab;
-          ElfFile elf(sink->input_file().data());
-          ReadELFSymbols(sink->input_file(), nullptr, &symtab);
+          ReadELFSymbols(debug_file().file_data(), nullptr, &symtab);
           dwarf::File dwarf;
-          ReadDWARFSections(elf, &dwarf);
+          ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, sink);
           break;
         }
         case DataSource::kInlines: {
           CheckNotObject("lineinfo", sink);
-          ElfFile elf(sink->input_file().data());
           dwarf::File dwarf;
-          ReadDWARFSections(elf, &dwarf);
+          ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFInlines(dwarf, sink, true);
           break;
         }
@@ -1039,20 +1131,21 @@ class ElfObjectFile : public ObjectFile {
   }
 
   bool GetDisassemblyInfo(absl::string_view symbol, DataSource symbol_source,
-                          DisassemblyInfo* info) override {
+                          DisassemblyInfo* info) const override {
     // Find the corresponding file range.  This also could be optimized not to
     // build the entire map.
     DualMap base_map;
     NameMunger empty_munger;
     RangeSink base_sink(&file_data(), DataSource::kSegments, nullptr);
     base_sink.AddOutput(&base_map, &empty_munger);
-    ProcessBaseMap(&base_sink);
+    std::vector<RangeSink*> sink_ptrs{&base_sink};
+    ProcessFile(sink_ptrs);
 
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;
     RangeSink symbol_sink(&file_data(), symbol_source, &base_map);
     symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
-    ReadELFSymbols(file_data(), &symbol_sink, &symbol_table);
+    ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symbol_table);
     auto entry = symbol_table.find(symbol);
     if (entry == symbol_table.end()) {
       entry = symbol_table.find(ItaniumDemangle(symbol, symbol_source));

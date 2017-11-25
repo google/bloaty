@@ -1249,6 +1249,7 @@ class Bloaty {
   Bloaty(const InputFileFactory& factory, const Options& options);
 
   void AddFilename(const std::string& filename, bool base_file);
+  void AddDebugFilename(const std::string& filename);
 
   size_t GetSourceCount() const {
     return sources_.size() + (filename_position_ >= 0 ? 1 : 0);
@@ -1294,7 +1295,8 @@ class Bloaty {
 
   void ScanAndRollupFiles(const std::vector<std::unique_ptr<ObjectFile>>& files,
                           Rollup* rollup) const;
-  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const;
+  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
+                         std::string* out_build_id) const;
 
   const InputFileFactory& file_factory_;
 
@@ -1310,6 +1312,7 @@ class Bloaty {
 
   std::vector<std::unique_ptr<ObjectFile>> input_files_;
   std::vector<std::unique_ptr<ObjectFile>> base_files_;
+  std::map<std::string, std::unique_ptr<ObjectFile>> debug_files_;
   int filename_position_;
 };
 
@@ -1335,6 +1338,26 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
   } else {
     input_files_.push_back(std::move(object_file));
   }
+}
+
+void Bloaty::AddDebugFilename(const std::string& filename) {
+  std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
+  auto object_file = TryOpenELFFile(file);
+
+  if (!object_file.get()) {
+    object_file = TryOpenMachOFile(file);
+  }
+
+  if (!object_file.get()) {
+    THROWF("unknown file type for file '$0'", filename);
+  }
+
+  std::string build_id = object_file->GetBuildId();
+  if (build_id.size() == 0) {
+    THROWF("File '$0' has no build ID, cannot be used as a debug file",
+           filename);
+  }
+  debug_files_[build_id] = std::move(object_file);
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
@@ -1469,18 +1492,19 @@ struct DualMaps {
   std::vector<std::unique_ptr<DualMap>> maps_;
 };
 
-void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const {
+void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
+                               std::string* out_build_id) const {
   const std::string& filename = file->file_data().filename();
   DualMaps maps;
-  RangeSink sink(&file->file_data(), DataSource::kSegments, nullptr);
-  NameMunger empty_munger;
-  sink.AddOutput(maps.base_map(), &empty_munger);
-  file->ProcessBaseMap(&sink);
-  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
-                                     "[None]");
-
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
+
+  // Base map always goes first.
+  sinks.push_back(absl::make_unique<RangeSink>(
+      &file->file_data(), DataSource::kSegments, nullptr));
+  NameMunger empty_munger;
+  sinks.back()->AddOutput(maps.base_map(), &empty_munger);
+  sink_ptrs.push_back(sinks.back().get());
 
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(
@@ -1489,6 +1513,18 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup) const {
     sink_ptrs.push_back(sinks.back().get());
   }
 
+  // Ensure all parts of the VM/file-space are covered.  If all data sources had
+  // 100% coverage, this wouldn't be necessary.
+  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
+                                     "[None]");
+  std::string build_id = file->GetBuildId();
+  if (!build_id.empty()) {
+    auto iter = debug_files_.find(build_id);
+    if (iter != debug_files_.end()) {
+      file->set_debug_file(iter->second.get());
+      *out_build_id = build_id;
+    }
+  }
   file->ProcessFile(sink_ptrs);
 
   maps.ComputeRollup(filename, filename_position_, rollup);
@@ -1505,35 +1541,74 @@ void Bloaty::ScanAndRollupFiles(
     Rollup* rollup) const {
   int num_cpus = std::thread::hardware_concurrency();
   int num_threads = std::min(num_cpus, static_cast<int>(files.size()));
-  std::vector<Rollup> rollups(num_threads);
+
+  struct PerThreadData {
+    Rollup rollup;
+    std::string build_id;
+  };
+
+  std::vector<PerThreadData> thread_data(num_threads);
   std::vector<std::thread> threads(num_threads);
   ThreadSafeIterIndex index(files.size());
 
   for (int i = 0; i < num_threads; i++) {
-    threads[i] = std::thread([this, &index, &files](Rollup* r) {
+    threads[i] = std::thread([this, &index, &files](PerThreadData* data) {
       try {
         int j;
         while (index.TryGetNext(&j)) {
-          ScanAndRollupFile(files[j].get(), r);
+          ScanAndRollupFile(files[j].get(), &data->rollup, &data->build_id);
         }
       } catch (const bloaty::Error& e) {
         index.Abort(e.what());
       }
-    }, &rollups[i]);
+    }, &thread_data[i]);
+  }
+
+  // Create a copy of the debug_files_ member, so we can determine which (if
+  // any) debug files weren't used.  We copy it because we are in a const method
+  // so can't mutate debug_files_ directly.
+  std::map<std::string, const ObjectFile*> debug_files;
+  for (const auto& pair : debug_files_) {
+    debug_files[pair.first] = pair.second.get();
   }
 
   for (int i = 0; i < num_threads; i++) {
     threads[i].join();
+    PerThreadData* data = &thread_data[i];
     if (i == 0) {
-      *rollup = std::move(rollups[i]);
+      *rollup = std::move(data->rollup);
     } else {
-      rollup->Add(rollups[i]);
+      rollup->Add(data->rollup);
+    }
+
+    if (!data->build_id.empty()) {
+      debug_files.erase(data->build_id);
     }
   }
 
   std::string error;
   if (index.TryGetError(&error)) {
     THROW(error.c_str());
+  }
+
+  if (!debug_files.empty()) {
+    std::string unused_debug;
+    for (const auto& pair : debug_files) {
+      unused_debug += absl::Substitute(
+          "$0   $1\n",
+          absl::BytesToHexString(pair.second->GetBuildId()).c_str(),
+          pair.second->file_data().filename().c_str());
+    }
+
+    std::string input_files;
+    for (const auto& file : files) {
+      input_files += absl::Substitute(
+          "$0   $1\n", absl::BytesToHexString(file->GetBuildId()).c_str(),
+          file->file_data().filename().c_str());
+    }
+    THROWF(
+        "Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
+        unused_debug.c_str(), input_files.c_str());
   }
 }
 
@@ -1575,24 +1650,25 @@ void Bloaty::DisassembleFunction(string_view function, const Options& options,
 
 const char usage[] = R"(Bloaty McBloatface: a size profiler for binaries.
 
-USAGE: bloaty [options] file... [-- base_file...]
+USAGE: bloaty [OPTION]... FILE... [-- BASE_FILE...]
 
 Options:
 
   --csv              Output in CSV format instead of human-readable.
-  -c <file>          Load configuration from <file>.
-  -d <sources>       Comma-separated list of sources to scan.
-  -C <mode>          How to demangle symbols.  Possible values are:
-  --demangle=<mode>    --demangle=none   no demangling, print raw symbols
+  -c FILE            Load configuration from <file>.
+  -d SOURCE,SOURCE   Comma-separated list of sources to scan.
+  --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  -C MODE            How to demangle symbols.  Possible values are:
+  --demangle=MODE      --demangle=none   no demangling, print raw symbols
                        --demangle=short  demangle, but omit arg/return types
                        --demangle=full   print full demangled type
                      The default is --demangle=short.
-  --disassemble=<function>
+  --disassemble=FUNCTION
                      Disassemble this function (EXPERIMENTAL)
-  -n <num>           How many rows to show per level before collapsing
+  -n NUM             How many rows to show per level before collapsing
                      other keys into '[Other]'.  Set to '0' for unlimited.
                      Defaults to 20.
-  -s <sortby>        Whether to sort by VM or File size.  Possible values
+  -s SORTBY          Whether to sort by VM or File size.  Possible values
                      are:
                        -s vm
                        -s file
@@ -1722,6 +1798,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       } else {
         THROWF("unknown value for --demangle: $0", option);
       }
+    } else if (args.TryParseOption("--debug-file", &option)) {
+      options->add_debug_filename(std::string(option));
     } else if (args.TryParseOption("--disassemble", &option)) {
       options->mutable_disassemble_function()->assign(std::string(option));
     } else if (args.TryParseIntegerOption("-n", &int_option)) {
@@ -1805,6 +1883,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   for (auto& base_filename : options.base_filename()) {
     bloaty.AddFilename(base_filename, true);
+  }
+
+  for (auto& debug_filename : options.debug_filename()) {
+    bloaty.AddDebugFilename(debug_filename);
   }
 
   for (const auto& custom_data_source : options.custom_data_source()) {
