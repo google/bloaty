@@ -153,6 +153,12 @@ class RangeSink {
   void AddFileRange(absl::string_view name,
                     uint64_t fileoff, uint64_t filesize);
 
+  // Like AddFileRange(), but the label is whatever label was previously
+  // assigned to VM address |label_from_vmaddr|.  If no existing label is
+  // assigned to |label_from_vmaddr|, this function does nothing.
+  void AddFileRangeFor(uint64_t label_from_vmaddr,
+                       absl::string_view file_range);
+
   void AddFileRange(absl::string_view name, absl::string_view file_range) {
     AddFileRange(name, file_range.data() - file_->data().data(),
                  file_range.size());
@@ -392,6 +398,8 @@ class RangeMap {
   // Looks for a range that starts exactly on |addr|.  If it exists, returns
   // true and sets |size| to its size.
   bool TryGetSize(uint64_t addr, uint64_t* size) const;
+
+  std::string DebugString() const;
 
   template <class Func>
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,

@@ -170,8 +170,10 @@ class ElfFile {
     // Requires: header().sh_type == SHT_STRTAB.
     string_view ReadString(Elf64_Word index) const;
 
-    // Requires: header().sh_type == SHT_SYMTAB
-    void ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const;
+    // Requires: header().sh_type == SHT_SYMTAB || header().sh_type ==
+    // SHT_DYNSYM
+    void ReadSymbol(Elf64_Word index, Elf64_Sym* sym,
+                    string_view* file_range) const;
 
     // Requires: header().sh_type == SHT_REL
     void ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const;
@@ -442,10 +444,16 @@ Elf64_Word ElfFile::Section::GetEntryCount() const {
   return contents_.size() / header_.sh_entsize;
 }
 
-void ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym) const {
-  assert(header().sh_type == SHT_SYMTAB);
+void ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym,
+                                  string_view* file_range) const {
+  assert(header().sh_type == SHT_SYMTAB || header().sh_type == SHT_DYNSYM);
   ElfFile::StructReader reader(*elf_, contents());
-  reader.Read<Elf32_Sym>(header_.sh_entsize * index, SymMunger(), sym);
+  size_t offset = header_.sh_entsize * index;
+  reader.Read<Elf32_Sym>(offset, SymMunger(), sym);
+  if (file_range) {
+    size_t size = elf_->is_64bit() ? sizeof(Elf64_Sym) : sizeof(Elf32_Sym);
+    *file_range = contents().substr(offset, size);
+  }
 }
 
 void ElfFile::Section::ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const {
@@ -829,7 +837,7 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
           for (Elf64_Word i = 1; i < symbol_count; i++) {
             Elf64_Sym sym;
 
-            section.ReadSymbol(i, &sym);
+            section.ReadSymbol(i, &sym, nullptr);
 
             if (ELF64_ST_TYPE(sym.st_info) == STT_SECTION) {
               continue;
@@ -856,6 +864,58 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               table->insert(
                   std::make_pair(name, std::make_pair(full_addr, sym.st_size)));
             }
+          }
+        }
+      });
+}
+
+// Adds file ranges for the symbol tables and string tables *themselves* (ie.
+// the space that the symtab/strtab take up in the file).  This will cover
+//   .symtab
+//   .strtab
+//   .dynsym
+//   .dynstr
+static void ReadELFSymbolTables(const InputFile& file, RangeSink* sink) {
+  bool is_object = IsObjectFile(file.data());
+
+  ForEachElf(
+      file, sink,
+      [=](const ElfFile& elf, string_view /*filename*/, uint32_t index_base) {
+        for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
+          ElfFile::Section section;
+          elf.ReadSection(i, &section);
+
+          if (section.header().sh_type != SHT_SYMTAB &&
+              section.header().sh_type != SHT_DYNSYM) {
+            continue;
+          }
+
+          Elf64_Word symbol_count = section.GetEntryCount();
+
+          // Find the corresponding section where the strings for the symbol
+          // table can be found.
+          ElfFile::Section strtab_section;
+          elf.ReadSection(section.header().sh_link, &strtab_section);
+          if (strtab_section.header().sh_type != SHT_STRTAB) {
+            THROW("symtab section pointed to non-strtab section");
+          }
+
+          for (Elf64_Word i = 1; i < symbol_count; i++) {
+            Elf64_Sym sym;
+            string_view sym_range;
+            section.ReadSymbol(i, &sym, &sym_range);
+
+            if (ELF64_ST_TYPE(sym.st_info) == STT_SECTION ||
+                sym.st_shndx == STN_UNDEF ||
+                sym.st_name == SHN_UNDEF) {
+              continue;
+            }
+
+            string_view name = strtab_section.ReadString(sym.st_name);
+            uint64_t full_addr =
+                ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
+            sink->AddFileRangeFor(full_addr, name);
+            sink->AddFileRangeFor(full_addr, sym_range);
           }
         }
       });
@@ -1099,6 +1159,7 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
           ReadELFSymbols(debug_file().file_data(), sink, nullptr);
+          ReadELFSymbolTables(sink->input_file(), sink);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         case DataSource::kArchiveMembers:
@@ -1117,6 +1178,7 @@ class ElfObjectFile : public ObjectFile {
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ReadELFSymbolTables(sink->input_file(), sink);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }

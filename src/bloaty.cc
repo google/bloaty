@@ -866,6 +866,20 @@ bool RangeMap::TryGetSize(uint64_t addr, uint64_t* size) const {
   }
 }
 
+std::string RangeMap::DebugString() const {
+  std::string ret;
+  for (const auto& pair : mappings_) {
+    absl::StrAppend(&ret, "[", absl::Hex(pair.first), ", ",
+                    absl::Hex(pair.second.end), "]: ", pair.second.label);
+    if (pair.second.other_start != UINT64_MAX) {
+      absl::StrAppend(&ret,
+                      ", other_start=", absl::Hex(pair.second.other_start));
+    }
+    absl::StrAppend(&ret, "\n");
+  }
+  return ret;
+}
+
 void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
   AddDualRange(addr, size, UINT64_MAX, val);
 }
@@ -1139,6 +1153,29 @@ void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
       pair.first->file_map.AddRangeWithTranslation(fileoff, filesize, label,
                                                     translator_->file_map,
                                                     &pair.first->vm_map);
+    }
+  }
+}
+
+void RangeSink::AddFileRangeFor(uint64_t label_from_vmaddr,
+                                string_view file_range) {
+  uint64_t file_offset = file_range.data() - file_->data().data();
+  if (verbose_level > 2) {
+    fprintf(stdout,
+            "[%s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
+            GetDataSourceLabel(data_source_), label_from_vmaddr, file_offset,
+            file_range.size());
+    fprintf(stdout, "Translation map:\n%s",
+            translator_->file_map.DebugString().c_str());
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label;
+    uint64_t offset;
+    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
+      pair.first->file_map.AddRangeWithTranslation(
+          file_offset, file_range.size(), label, translator_->file_map,
+          &pair.first->vm_map);
     }
   }
 }
@@ -1518,10 +1555,6 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  // Ensure all parts of the VM/file-space are covered.  If all data sources had
-  // 100% coverage, this wouldn't be necessary.
-  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
-                                     "[None]");
   std::string build_id = file->GetBuildId();
   if (!build_id.empty()) {
     auto iter = debug_files_.find(build_id);
@@ -1531,6 +1564,11 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     }
   }
   file->ProcessFile(sink_ptrs);
+
+  // Ensure all parts of the VM/file-space are covered.  If all data sources had
+  // 100% coverage, this wouldn't be necessary.
+  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
+                                     "[None]");
 
   maps.ComputeRollup(filename, filename_position_, rollup);
   if (verbose_level > 0) {
