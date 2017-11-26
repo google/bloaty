@@ -495,6 +495,7 @@ class DIEReader {
 
   const File& dwarf() const { return dwarf_; }
 
+  string_view unit_range() const { return unit_range_; }
   CompilationUnitSizes unit_sizes() const { return unit_sizes_; }
   uint32_t abbrev_version() const { return abbrev_version_; }
 
@@ -562,6 +563,7 @@ class DIEReader {
   Section section_;
 
   // Information about the current compilation unit.
+  string_view unit_range_;
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
 
@@ -625,7 +627,10 @@ bool DIEReader::ReadCompilationUnitHeader() {
     return false;
   }
 
+  unit_range_ = next_unit_;
   remaining_ = unit_sizes_.ReadInitialLength(&next_unit_);
+  unit_range_ = unit_range_.substr(
+      0, remaining_.size() + (remaining_.data() - unit_range_.data()));
 
   uint16_t version = ReadMemcpy<uint16_t>(&remaining_);
 
@@ -1818,6 +1823,7 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
     attr_reader.ReadAttributes(&die_reader);
     std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
     if (!compileunit_name.empty()) {
+      sink->AddFileRange(compileunit_name, die_reader.unit_range());
       AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
              die_reader.unit_sizes(), sink);
 
