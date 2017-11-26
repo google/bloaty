@@ -436,6 +436,50 @@ bool AddressRanges::NextUnit() {
 }
 
 
+// LocationList ////////////////////////////////////////////////////////////////
+
+// Code for reading entries out of a location list.
+// For the moment we only care about finding the bounds of a list given its
+// offset, so we don't actually vend any of the data.
+
+class LocationList {
+ public:
+  LocationList(CompilationUnitSizes sizes, string_view data)
+      : sizes_(sizes), remaining_(data) {}
+
+  const char* read_offset() const { return remaining_.data(); }
+  bool NextEntry();
+
+ private:
+  CompilationUnitSizes sizes_;
+  string_view remaining_;
+};
+
+bool LocationList::NextEntry() {
+  uint64_t start, end;
+  start = sizes_.ReadAddress(&remaining_);
+  end = sizes_.ReadAddress(&remaining_);
+  if (start == 0 && end == 0) {
+    return false;
+  } else if (start == UINT64_MAX ||
+             (start == UINT32_MAX && sizes_.address_size == 4)) {
+    // Base address selection, nothing more to do.
+  } else {
+    // Need to skip the location description.
+    uint16_t length = ReadMemcpy<uint16_t>(&remaining_);
+    SkipBytes(length, &remaining_);
+  }
+  return true;
+}
+
+string_view GetLocationListRange(CompilationUnitSizes sizes,
+                                 string_view available) {
+  LocationList list(sizes, available);
+  while (list.NextEntry()) {}
+  return available.substr(0, list.read_offset() - available.data());
+}
+
+
 // DIEReader ///////////////////////////////////////////////////////////////////
 
 // Reads a sequence of DWARF DIE's (Debugging Information Entries) from the
@@ -1034,7 +1078,9 @@ class FormReader<T, typename std::enable_if<std::is_integral<T>::value>::type>
         func(&Base::ReadIndirect);
         return;
       default:
-        THROWF("don't know how to translate form $0 to integer", form);
+        // Skip it.
+        FormReader<void>::GetFunctionForForm(sizes, form, func);
+        return;
     }
   }
 
@@ -1164,7 +1210,9 @@ ActionBuf::ActionBuf(const AbbrevTable::Abbrev& abbrev,
 
   // Overwrite any entries for attributes we actually want to store somewhere.
   for (const auto& action : indexed_actions) {
-    if (action.action.func) {
+    const auto& attr = abbrev.attr[action.index];
+    if (action.action.func &&
+        action.action.func != GetFormDecodeFunc<void>(attr.form, sizes)) {
       assert(action.index < action_list_.size());
       if (action_list_[action.index].data) {
         THROW(
@@ -1742,7 +1790,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 
 void AddDIE(const std::string& name,
             const dwarf::FixedAttrReader<string_view, string_view, uint64_t,
-                                         uint64_t, string_view>& attr,
+                                         uint64_t, string_view, uint64_t>& attr,
             const SymbolTable& symtab, const DualMap& symbol_map,
             const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
   uint64_t low_pc = attr.GetAttribute<2>();
@@ -1811,9 +1859,9 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
                                const DualMap& symbol_map, RangeSink* sink) {
   dwarf::DIEReader die_reader(file);
   dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
-                         string_view>
+                         string_view, uint64_t>
       attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
-                                DW_AT_high_pc, DW_AT_location});
+                                DW_AT_high_pc, DW_AT_location, DW_AT_location});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
     THROW("debug info is present, but empty");
@@ -1831,6 +1879,13 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
         attr_reader.ReadAttributes(&die_reader);
         AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
                die_reader.unit_sizes(), sink);
+
+        if (attr_reader.HasAttribute<5>()) {
+          absl::string_view loc_range =
+              file.debug_loc.substr(attr_reader.GetAttribute<5>());
+          loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
+          sink->AddFileRange(compileunit_name, loc_range);
+        }
       }
     }
   } while (die_reader.NextCompilationUnit());
