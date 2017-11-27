@@ -1820,11 +1820,12 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
   return true;
 }
 
-void AddDIE(const std::string& name,
-            const dwarf::FixedAttrReader<string_view, string_view, uint64_t,
-                                         uint64_t, string_view, uint64_t>& attr,
-            const SymbolTable& symtab, const DualMap& symbol_map,
-            const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
+void AddDIE(
+    const std::string& name,
+    const dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
+                                 string_view, uint64_t, uint64_t>& attr,
+    const SymbolTable& symtab, const DualMap& symbol_map,
+    const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
   uint64_t low_pc = attr.GetAttribute<2>();
   uint64_t high_pc = attr.GetAttribute<3>();
 
@@ -1910,6 +1911,18 @@ static void ReadDWARFPubNames(const dwarf::File& file,
   }
 }
 
+static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
+                                   string_view unit_name, RangeSink* sink) {
+  string_view data = file.debug_line;
+  dwarf::SkipBytes(offset, &data);
+  string_view data_with_length = data;
+  dwarf::CompilationUnitSizes sizes;
+  data = sizes.ReadInitialLength(&data);
+  data = data_with_length.substr(
+      0, data.size() + (data.data() - data_with_length.data()));
+  sink->AddFileRange(unit_name, data);
+}
+
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
@@ -1919,9 +1932,9 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
   dwarf::DIEReader die_reader(file);
   die_reader.set_strp_sink(sink);
   dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
-                         string_view, uint64_t>
+                         string_view, uint64_t, uint64_t>
       attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
-                                DW_AT_high_pc, DW_AT_location, DW_AT_location});
+                                DW_AT_high_pc, DW_AT_location, DW_AT_location, DW_AT_stmt_list});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
     THROW("debug info is present, but empty");
@@ -1935,6 +1948,11 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
       sink->AddFileRange(compileunit_name, die_reader.unit_range());
       AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
              die_reader.unit_sizes(), sink);
+
+      if (attr_reader.HasAttribute<6>()) {
+        uint64_t offset = attr_reader.GetAttribute<6>();
+        ReadDWARFStmtListRange(file, offset, compileunit_name, sink);
+      }
 
       while (die_reader.NextDIE()) {
         attr_reader.ReadAttributes(&die_reader);
