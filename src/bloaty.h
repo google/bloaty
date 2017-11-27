@@ -273,6 +273,7 @@ struct File {
   absl::string_view debug_aranges;
   absl::string_view debug_line;
   absl::string_view debug_loc;
+  absl::string_view debug_pubnames;
 };
 
 }  // namespace dwarf

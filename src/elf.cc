@@ -1059,6 +1059,8 @@ static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
       dwarf->debug_line = section.contents();
     } else if (name == ".debug_loc") {
       dwarf->debug_loc = section.contents();
+    } else if (name == ".debug_pubnames") {
+      dwarf->debug_pubnames = section.contents();
     }
   }
 }

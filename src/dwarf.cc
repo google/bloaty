@@ -543,6 +543,21 @@ class DIEReader {
   CompilationUnitSizes unit_sizes() const { return unit_sizes_; }
   uint32_t abbrev_version() const { return abbrev_version_; }
 
+  // If both compileunit_name and strp_sink are set, this will automatically
+  // call strp_sink->AddFileRange(compileunit_name, <string range>) for every
+  // DW_FORM_strp attribute encountered.  These strings occur in the .debug_str
+  // section.
+  void set_compileunit_name(absl::string_view name) {
+    unit_name_ = std::string(name);
+  }
+  void set_strp_sink(RangeSink* sink) { strp_sink_ = sink; }
+
+  void AddIndirectString(string_view range) const {
+    if (strp_sink_) {
+      strp_sink_->AddFileRange(unit_name_, range);
+    }
+  }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(DIEReader);
 
@@ -585,6 +600,7 @@ class DIEReader {
   std::string error_;
 
   const File& dwarf_;
+  RangeSink* strp_sink_ = nullptr;
 
   // Abbreviation for the current entry.
   const AbbrevTable::Abbrev* current_abbrev_;
@@ -607,6 +623,7 @@ class DIEReader {
   Section section_;
 
   // Information about the current compilation unit.
+  std::string unit_name_;
   string_view unit_range_;
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
@@ -830,11 +847,17 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
         }
         return;
       case DW_FORM_sec_offset:
-      case DW_FORM_strp:
         if (sizes.dwarf64) {
           func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
         } else {
           func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        }
+        return;
+      case DW_FORM_strp:
+        if (sizes.dwarf64) {
+          func(&Base::template ReadAttr<&ME::SkipIndirectString<uint64_t>>);
+        } else {
+          func(&Base::template ReadAttr<&ME::SkipIndirectString<uint32_t>>);
         }
         return;
       case DW_FORM_sdata:
@@ -891,6 +914,14 @@ class FormReader<void> : public FormReaderBase<FormReader<void>> {
 
   void SkipString() {
     SkipNullTerminated(&data_);
+  }
+
+  template <class D>
+  void SkipIndirectString() {
+    D ofs = ReadMemcpy<D>(&data_);
+    StringTable table(reader_.dwarf().debug_str);
+    string_view str = table.ReadEntry(ofs);
+    reader_.AddIndirectString(str);
   }
 };
 
@@ -987,6 +1018,7 @@ class FormReader<string_view> : public FormReaderBase<FormReader<string_view>> {
     D ofs = ReadMemcpy<D>(&data_);
     StringTable table(reader_.dwarf().debug_str);
     *val_ = table.ReadEntry(ofs);
+    reader_.AddIndirectString(*val_);
   }
 };
 
@@ -1851,6 +1883,33 @@ void AddDIE(const std::string& name,
   }
 }
 
+static void ReadDWARFPubNames(const dwarf::File& file,
+                              RangeSink* sink) {
+  dwarf::DIEReader die_reader(file);
+  dwarf::FixedAttrReader<string_view> attr_reader(&die_reader, {DW_AT_name});
+  string_view remaining = file.debug_pubnames;
+
+  while (remaining.size() > 0) {
+    dwarf::CompilationUnitSizes sizes;
+    string_view full_unit = remaining;
+    string_view unit = sizes.ReadInitialLength(&remaining);
+    full_unit =
+        full_unit.substr(0, unit.size() + (unit.data() - full_unit.data()));
+    dwarf::SkipBytes(2, &unit);
+    uint64_t debug_info_offset = sizes.ReadDWARFOffset(&unit);
+    bool ok = die_reader.SeekToCompilationUnit(
+        dwarf::DIEReader::Section::kDebugInfo, debug_info_offset);
+    if (!ok) {
+      THROW("Couldn't seek to debug_info section");
+    }
+    attr_reader.ReadAttributes(&die_reader);
+    std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
+    if (!compileunit_name.empty()) {
+      sink->AddFileRange(compileunit_name, full_unit);
+    }
+  }
+}
+
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
@@ -1858,6 +1917,7 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
                                const SymbolTable& symtab,
                                const DualMap& symbol_map, RangeSink* sink) {
   dwarf::DIEReader die_reader(file);
+  die_reader.set_strp_sink(sink);
   dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
                          string_view, uint64_t>
       attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
@@ -1870,6 +1930,7 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
   do {
     attr_reader.ReadAttributes(&die_reader);
     std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
+    die_reader.set_compileunit_name(compileunit_name);
     if (!compileunit_name.empty()) {
       sink->AddFileRange(compileunit_name, die_reader.unit_range());
       AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
@@ -1902,6 +1963,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
   }
 
   ReadDWARFDebugInfo(file, symtab, symbol_map, sink);
+  ReadDWARFPubNames(file, sink);
 }
 
 static std::string LineInfoKey(const std::string& file, uint32_t line,
