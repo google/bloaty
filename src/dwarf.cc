@@ -254,7 +254,7 @@ struct CompilationUnitSizes {
 class AbbrevTable {
  public:
   // Reads abbreviations until a terminating abbreviation is seen.
-  void ReadAbbrevs(string_view data);
+  string_view ReadAbbrevs(string_view data);
 
   // In a DWARF abbreviation, each attribute has a name and a form.
   struct Attribute {
@@ -291,12 +291,12 @@ class AbbrevTable {
   std::unordered_map<uint32_t, Abbrev> abbrev_;
 };
 
-void AbbrevTable::ReadAbbrevs(string_view data) {
+string_view AbbrevTable::ReadAbbrevs(string_view data) {
   while (true) {
     uint32_t code = ReadLEB128<uint32_t>(&data);
 
     if (code == 0) {
-      return;  // Terminator entry.
+      return data;  // Terminator entry.
     }
 
     Abbrev& abbrev = abbrev_[code];
@@ -480,6 +480,43 @@ string_view GetLocationListRange(CompilationUnitSizes sizes,
 }
 
 
+// RangeList ///////////////////////////////////////////////////////////////////
+
+// Code for reading entries out of a range list.
+// For the moment we only care about finding the bounds of a list given its
+// offset, so we don't actually vend any of the data.
+
+class RangeList {
+ public:
+  RangeList(CompilationUnitSizes sizes, string_view data)
+      : sizes_(sizes), remaining_(data) {}
+
+  const char* read_offset() const { return remaining_.data(); }
+  bool NextEntry();
+
+ private:
+  CompilationUnitSizes sizes_;
+  string_view remaining_;
+};
+
+bool RangeList::NextEntry() {
+  uint64_t start, end;
+  start = sizes_.ReadAddress(&remaining_);
+  end = sizes_.ReadAddress(&remaining_);
+  if (start == 0 && end == 0) {
+    return false;
+  }
+  return true;
+}
+
+string_view GetRangeListRange(CompilationUnitSizes sizes,
+                              string_view available) {
+  RangeList list(sizes, available);
+  while (list.NextEntry()) {
+  }
+  return available.substr(0, list.read_offset() - available.data());
+}
+
 // DIEReader ///////////////////////////////////////////////////////////////////
 
 // Reads a sequence of DWARF DIE's (Debugging Information Entries) from the
@@ -542,6 +579,7 @@ class DIEReader {
   string_view unit_range() const { return unit_range_; }
   CompilationUnitSizes unit_sizes() const { return unit_sizes_; }
   uint32_t abbrev_version() const { return abbrev_version_; }
+  uint64_t debug_abbrev_offset() const { return debug_abbrev_offset_; }
 
   // If both compileunit_name and strp_sink are set, this will automatically
   // call strp_sink->AddFileRange(compileunit_name, <string range>) for every
@@ -623,6 +661,7 @@ class DIEReader {
   Section section_;
 
   // Information about the current compilation unit.
+  uint64_t debug_abbrev_offset_;
   std::string unit_name_;
   string_view unit_range_;
   CompilationUnitSizes unit_sizes_;
@@ -699,14 +738,14 @@ bool DIEReader::ReadCompilationUnitHeader() {
     THROW("Data is in new DWARF format we don't understand");
   }
 
-  uint64_t debug_abbrev_offset = unit_sizes_.ReadDWARFOffset(&remaining_);
-  unit_abbrev_ = &abbrev_tables_[debug_abbrev_offset];
+  debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+  unit_abbrev_ = &abbrev_tables_[debug_abbrev_offset_];
 
-  // If we haven't already read abbreviations for this debug_abbrev_offset, we
+  // If we haven't already read abbreviations for this debug_abbrev_offset_, we
   // need to do so now.
   if (unit_abbrev_->IsEmpty()) {
     string_view abbrev_data = dwarf_.debug_abbrev;
-    SkipBytes(debug_abbrev_offset, &abbrev_data);
+    SkipBytes(debug_abbrev_offset_, &abbrev_data);
     unit_abbrev_->ReadAbbrevs(abbrev_data);
   }
 
@@ -1820,12 +1859,12 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
   return true;
 }
 
-void AddDIE(
-    const std::string& name,
-    const dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
-                                 string_view, uint64_t, uint64_t>& attr,
-    const SymbolTable& symtab, const DualMap& symbol_map,
-    const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
+void AddDIE(const dwarf::File& file, const std::string& name,
+            const dwarf::FixedAttrReader<string_view, string_view, uint64_t,
+                                         uint64_t, string_view, uint64_t,
+                                         uint64_t, uint64_t, uint64_t>& attr,
+            const SymbolTable& symtab, const DualMap& symbol_map,
+            const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
   uint64_t low_pc = attr.GetAttribute<2>();
   uint64_t high_pc = attr.GetAttribute<3>();
 
@@ -1882,13 +1921,33 @@ void AddDIE(
       }
     }
   }
+
+  if (attr.HasAttribute<5>()) {
+    absl::string_view loc_range = file.debug_loc.substr(attr.GetAttribute<5>());
+    loc_range = GetLocationListRange(sizes, loc_range);
+    sink->AddFileRange(name, loc_range);
+  }
+
+  uint64_t ranges_offset = UINT64_MAX;
+
+  if (attr.HasAttribute<7>()) {
+    ranges_offset = attr.GetAttribute<7>();
+  } else if (attr.HasAttribute<8>()) {
+    ranges_offset = attr.GetAttribute<8>();
+  }
+
+  if (ranges_offset != UINT64_MAX) {
+    absl::string_view ranges_range = file.debug_ranges.substr(ranges_offset);
+    ranges_range = GetRangeListRange(sizes, ranges_range);
+    sink->AddFileRange(name, ranges_range);
+  }
 }
 
-static void ReadDWARFPubNames(const dwarf::File& file,
+static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
                               RangeSink* sink) {
   dwarf::DIEReader die_reader(file);
   dwarf::FixedAttrReader<string_view> attr_reader(&die_reader, {DW_AT_name});
-  string_view remaining = file.debug_pubnames;
+  string_view remaining = section;
 
   while (remaining.size() > 0) {
     dwarf::CompilationUnitSizes sizes;
@@ -1932,9 +1991,11 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
   dwarf::DIEReader die_reader(file);
   die_reader.set_strp_sink(sink);
   dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
-                         string_view, uint64_t, uint64_t>
-      attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
-                                DW_AT_high_pc, DW_AT_location, DW_AT_location, DW_AT_stmt_list});
+                         string_view, uint64_t, uint64_t, uint64_t, uint64_t>
+      attr_reader(&die_reader,
+                  {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc, DW_AT_high_pc,
+                   DW_AT_location, DW_AT_location, DW_AT_stmt_list,
+                   DW_AT_ranges, DW_AT_start_scope});
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
     THROW("debug info is present, but empty");
@@ -1946,7 +2007,7 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
     die_reader.set_compileunit_name(compileunit_name);
     if (!compileunit_name.empty()) {
       sink->AddFileRange(compileunit_name, die_reader.unit_range());
-      AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
+      AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
              die_reader.unit_sizes(), sink);
 
       if (attr_reader.HasAttribute<6>()) {
@@ -1954,17 +2015,16 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
         ReadDWARFStmtListRange(file, offset, compileunit_name, sink);
       }
 
+      string_view abbrev_data = file.debug_abbrev;
+      dwarf::SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
+      dwarf::AbbrevTable unit_abbrev;
+      abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
+      sink->AddFileRange(compileunit_name, abbrev_data);
+
       while (die_reader.NextDIE()) {
         attr_reader.ReadAttributes(&die_reader);
-        AddDIE(compileunit_name, attr_reader, symtab, symbol_map,
+        AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
                die_reader.unit_sizes(), sink);
-
-        if (attr_reader.HasAttribute<5>()) {
-          absl::string_view loc_range =
-              file.debug_loc.substr(attr_reader.GetAttribute<5>());
-          loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
-          sink->AddFileRange(compileunit_name, loc_range);
-        }
       }
     }
   } while (die_reader.NextCompilationUnit());
@@ -1981,7 +2041,8 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
   }
 
   ReadDWARFDebugInfo(file, symtab, symbol_map, sink);
-  ReadDWARFPubNames(file, sink);
+  ReadDWARFPubNames(file, file.debug_pubnames, sink);
+  ReadDWARFPubNames(file, file.debug_pubtypes, sink);
 }
 
 static std::string LineInfoKey(const std::string& file, uint32_t line,
