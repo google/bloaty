@@ -265,6 +265,48 @@ values are grouped into an `[Other]` bin.  Use `-n <num>`
 to override this setting.  If you pass `-n 0`, all data
 will be output without collapsing anything into `[Other]`.
 
+## Debugging Stripped Binaries
+
+Bloaty supports reading debuginfo/symbols from separate
+binaries.  This lets you profile a stripped binary, even for
+data sources like "compileunits" or "symbols" that require
+this extra information.
+
+Bloaty uses build IDs to verify that the binary and the
+debug file match.  Otherwise the results would be nonsense
+(this kind of mismatch might sound unlikely but it's a very
+easy mistake to make, and one that I made several times even
+as Bloaty's author!).
+
+Make sure you are compiling with build IDs enabled.  For gcc
+this happens automatically, but [Clang decided not to make
+this the default, since it makes the link
+slower](http://releases.llvm.org/3.9.0/tools/clang/docs/ReleaseNotes.html#major-new-features).
+For Clang add `-Wl,--build-id` to your link line.  (If you
+want a slightly faster link and don't care about
+reproducibility, you can use `-Wl,--build-id=uuid` instead).
+
+Then you can strip the binary and uses the unstripped binary
+as your debug file.  For example, with bloaty itself:
+
+```
+$ cp bloaty bloaty.stripped
+$ strip bloaty.stripped
+$ ./bloaty -d compileunits --debug-file=bloaty bloaty.stripped
+```
+
+It is also possible to remove debug sections only (see
+`objcopy --strip-debug`) while keeping the symbol table.
+You can also create debug file that contain *only* debug
+info (see `objcopy --only-keep-debug`).
+
+Bloaty does not currently support the GNU debuglink or
+looking up debug files by build ID, [which are the methods
+GDB uses to find debug
+files](https://sourceware.org/gdb/onlinedocs/gdb/Separate-Debug-Files.html).
+If there are use cases where Bloaty's `--debug-file` option
+won't work, we can reconsider implementing these.
+
 # Data Sources
 
 Bloaty has many data sources built in.  It's easy to add a
