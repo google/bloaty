@@ -914,6 +914,8 @@ static void ReadELFSymbolTables(const InputFile& file, RangeSink* sink) {
             string_view name = strtab_section.ReadString(sym.st_name);
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
+            // Capture the trailing NULL.
+            name = string_view(name.data(), name.size() + 1);
             sink->AddFileRangeFor(full_addr, name);
             sink->AddFileRangeFor(full_addr, sym_range);
           }
