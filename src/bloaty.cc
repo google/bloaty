@@ -84,8 +84,7 @@ constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
-    // Not a real data source, so we give it a junk DataSource::kInlines value
-    {DataSource::kInlines, "inputfiles",
+    {DataSource::kInputFiles, "inputfiles",
      "the filename specified on the Bloaty command-line"},
     {DataSource::kInlines, "inlines",
      "source line/file where inlined code came from.  requires debug info."},
@@ -970,8 +969,7 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
 
 template <class Func>
 void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                             const std::string& filename,
-                             int filename_position, Func func) {
+                             Func func) {
   assert(range_maps.size() > 0);
 
   std::vector<Map::const_iterator> iters;
@@ -1010,11 +1008,6 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
     for (i = 0; i < iters.size(); i++) {
       auto& iter = iters[i];
 
-      if (filename_position >= 0 &&
-          static_cast<unsigned>(filename_position) == i) {
-        keys.push_back(filename);
-      }
-
       // Advance the iterators if its range is behind the current point.
       while (!range_maps[i]->IterIsEnd(iter) && RangeEnd(iter) <= current) {
         ++iter;
@@ -1035,24 +1028,8 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
       }
     }
 
-    if (filename_position >= 0 &&
-        static_cast<unsigned>(filename_position) == i) {
-      keys.push_back(filename);
-    }
-
     if (next_break == UINTPTR_MAX) {
       break;
-    }
-
-    if (false) {
-      for (auto& key : keys) {
-        if (key == "[None]") {
-          std::stringstream stream;
-          stream << " [0x" << std::hex << current << ", 0x" << std::hex
-                 << next_break << "]";
-          key += stream.str();
-        }
-      }
     }
 
     if (have_data) {
@@ -1297,9 +1274,7 @@ class Bloaty {
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
 
-  size_t GetSourceCount() const {
-    return sources_.size() + (filename_position_ >= 0 ? 1 : 0);
-  }
+  size_t GetSourceCount() const { return sources_.size(); }
 
   void DefineCustomDataSource(const CustomDataSource& source);
 
@@ -1359,11 +1334,10 @@ class Bloaty {
   std::vector<std::unique_ptr<ObjectFile>> input_files_;
   std::vector<std::unique_ptr<ObjectFile>> base_files_;
   std::map<std::string, std::unique_ptr<ObjectFile>> debug_files_;
-  int filename_position_;
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
-    : file_factory_(factory), filename_position_(-1) {
+    : file_factory_(factory) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -1434,12 +1408,6 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
 
 void Bloaty::AddDataSource(const std::string& name) {
   source_names_.emplace_back(name);
-
-  if (name == "inputfiles") {
-    filename_position_ = sources_.size() + 1;
-    return;
-  }
-
   auto it = all_known_sources_.find(name);
   if (it == all_known_sources_.end()) {
     THROWF("no such data source: $0", name);
@@ -1461,42 +1429,32 @@ struct DualMaps {
     return maps_.back().get();
   }
 
-  void ComputeRollup(const std::string& filename, int filename_position,
-                     Rollup* rollup) {
-    RangeMap::ComputeRollup(VmMaps(), filename, filename_position,
-                            [=](const std::vector<std::string>& keys,
-                                uint64_t addr, uint64_t end) {
-                              return rollup->AddSizes(keys, end - addr, true);
-                            });
-    RangeMap::ComputeRollup(FileMaps(), filename, filename_position,
-                            [=](const std::vector<std::string>& keys,
-                                uint64_t addr, uint64_t end) {
-                              return rollup->AddSizes(keys, end - addr,
-                                                      false);
-                            });
+  void ComputeRollup(Rollup* rollup) {
+    RangeMap::ComputeRollup(VmMaps(), [=](const std::vector<std::string>& keys,
+                                          uint64_t addr, uint64_t end) {
+      return rollup->AddSizes(keys, end - addr, true);
+    });
+    RangeMap::ComputeRollup(
+        FileMaps(),
+        [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+          return rollup->AddSizes(keys, end - addr, false);
+        });
   }
 
-  void PrintMaps(const std::vector<const RangeMap*> maps,
-                 const std::string& filename, int filename_position) {
+  void PrintMaps(const std::vector<const RangeMap*> maps) {
     uint64_t last = 0;
-    RangeMap::ComputeRollup(maps, filename, filename_position,
-                            [&](const std::vector<std::string>& keys,
-                                uint64_t addr, uint64_t end) {
-                              if (addr > last) {
-                                PrintMapRow("NO ENTRY", last, addr);
-                              }
-                              PrintMapRow(KeysToString(keys), addr, end);
-                              last = end;
-                            });
+    RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
+                                      uint64_t addr, uint64_t end) {
+      if (addr > last) {
+        PrintMapRow("NO ENTRY", last, addr);
+      }
+      PrintMapRow(KeysToString(keys), addr, end);
+      last = end;
+    });
   }
 
-  void PrintFileMaps(const std::string& filename, int filename_position) {
-    PrintMaps(FileMaps(), filename, filename_position);
-  }
-
-  void PrintVMMaps(const std::string& filename, int filename_position) {
-    PrintMaps(VmMaps(), filename, filename_position);
-  }
+  void PrintFileMaps() { PrintMaps(FileMaps()); }
+  void PrintVMMaps() { PrintMaps(VmMaps()); }
 
   std::string KeysToString(const std::vector<std::string>& keys) {
     std::string ret;
@@ -1540,10 +1498,10 @@ struct DualMaps {
 
 void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
                                std::string* out_build_id) const {
-  const std::string& filename = file->file_data().filename();
   DualMaps maps;
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
+  std::vector<RangeSink*> filename_sink_ptrs;
 
   // Base map always goes first.
   sinks.push_back(absl::make_unique<RangeSink>(
@@ -1556,7 +1514,14 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     sinks.push_back(absl::make_unique<RangeSink>(
         &file->file_data(), source->effective_source, maps.base_map()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
-    sink_ptrs.push_back(sinks.back().get());
+    // We handle the kInputFiles data source internally, without handing it off
+    // to the file format implementation.  This seems slightly simpler, since
+    // the file format has to deal with armembers too.
+    if (source->effective_source == DataSource::kInputFiles) {
+      filename_sink_ptrs.push_back(sinks.back().get());
+    } else {
+      sink_ptrs.push_back(sinks.back().get());
+    }
   }
 
   std::string build_id = file->GetBuildId();
@@ -1570,7 +1535,20 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
 
   int64_t filesize_before = rollup->file_total();
   file->ProcessFile(sink_ptrs);
-  maps.ComputeRollup(filename, filename_position_, rollup);
+
+  // Copy the base map to the filename sink(s).
+  for (auto sink : filename_sink_ptrs) {
+    maps.base_map()->vm_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddVMRange(start, length, sink->input_file().filename());
+        });
+    maps.base_map()->file_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddFileRange(sink->input_file().filename(), start, length);
+        });
+  }
+
+  maps.ComputeRollup(rollup);
 
   // The ObjectFile implementation must guarantee this.
   int64_t filesize = rollup->file_total() - filesize_before;
@@ -1579,9 +1557,9 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
 
   if (verbose_level > 0) {
     fprintf(stdout, "FILE MAP:\n");
-    maps.PrintFileMaps(filename, filename_position_);
+    maps.PrintFileMaps();
     fprintf(stdout, "VM MAP:\n");
-    maps.PrintVMMaps(filename, filename_position_);
+    maps.PrintVMMaps();
   }
 }
 

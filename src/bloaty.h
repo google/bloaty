@@ -61,6 +61,7 @@ enum class DataSource {
   kArchiveMembers,
   kCompileUnits,
   kInlines,
+  kInputFiles,
   kSections,
   kSegments,
 
@@ -407,8 +408,14 @@ class RangeMap {
 
   template <class Func>
   static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                            const std::string& filename, int filename_position,
                             Func func);
+
+  template <class Func>
+  void ForEachRange(Func func) {
+    for (const auto& pair : mappings_) {
+      func(pair.first, pair.second.end - pair.first);
+    }
+  }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeMap);

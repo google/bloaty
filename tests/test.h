@@ -24,13 +24,14 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "gmock/gmock.h"
+#include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
 
 #include "strarr.h"
 #include "bloaty.h"
 #include "bloaty.pb.h"
 
-bool GetFileSize(const std::string& filename, uint64_t* size) {
+inline bool GetFileSize(const std::string& filename, uint64_t* size) {
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
     std::cerr << "Couldn't get file size for: " << filename << "\n";
@@ -42,7 +43,7 @@ bool GetFileSize(const std::string& filename, uint64_t* size) {
   return true;
 }
 
-std::string GetTestDirectory() {
+inline std::string GetTestDirectory() {
   char pathbuf[PATH_MAX];
   if (!getcwd(pathbuf, sizeof(pathbuf))) {
     return "";
@@ -50,6 +51,12 @@ std::string GetTestDirectory() {
   std::string path(pathbuf);
   size_t pos = path.rfind('/');
   return path.substr(pos + 1);
+}
+
+inline std::string DebugString(const google::protobuf::Message& message) {
+  std::string ret;
+  google::protobuf::TextFormat::PrintToString(message, &ret);
+  return ret;
 }
 
 #define NONE_STRING "[None]"
@@ -153,10 +160,23 @@ class BloatyTest : public ::testing::Test {
     return ret;
   }
 
-  bool TryRunBloaty(const std::vector<std::string>& strings) {
-    std::cerr << "Running bloaty: " << JoinStrings(strings) << "\n";
+  bool TryRunBloatyWithOptions(const bloaty::Options& options,
+                               const bloaty::OutputOptions& output_options) {
     output_.reset(new bloaty::RollupOutput);
     top_row_ = &output_->toplevel_row();
+    std::string error;
+    bloaty::MmapInputFileFactory factory;
+    if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
+      CheckConsistency(options);
+      output_->Print(output_options, &std::cerr);
+      return true;
+    } else {
+      std::cerr << "Bloaty returned error:" << error << "\n";
+      return false;
+    }
+  }
+
+  bool TryRunBloaty(const std::vector<std::string>& strings) {
     bloaty::Options options;
     bloaty::OutputOptions output_options;
     std::string error;
@@ -170,19 +190,18 @@ class BloatyTest : public ::testing::Test {
       return false;
     }
 
-    bloaty::MmapInputFileFactory factory;
-    if (bloaty::BloatyMain(options, factory, output_.get(), &error)) {
-      CheckConsistency(options);
-      output_->Print(output_options, &std::cerr);
-      return true;
-    } else {
-      std::cerr << "Bloaty returned error:" << error << "\n";
-      return false;
-    }
+    return TryRunBloatyWithOptions(options, output_options);
   }
 
   void RunBloaty(const std::vector<std::string>& strings) {
+    std::cerr << "Running bloaty: " << JoinStrings(strings) << "\n";
     ASSERT_TRUE(TryRunBloaty(strings));
+  }
+
+  void RunBloatyWithOptions(const bloaty::Options& options,
+                            const bloaty::OutputOptions& output_options) {
+    std::cerr << "Running bloaty, options: " << DebugString(options) << "\n";
+    ASSERT_TRUE(TryRunBloatyWithOptions(options, output_options));
   }
 
   void AssertBloatyFails(const std::vector<std::string>& strings,

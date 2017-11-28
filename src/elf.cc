@@ -923,7 +923,7 @@ enum ReportSectionsBy {
   kReportBySectionName,
   kReportByEscapedSectionName,
   kReportByFlags,
-  kReportByFilename,
+  kReportByArchiveMember,
 };
 
 static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) {
@@ -975,12 +975,12 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
           } else if (report_by == kReportByEscapedSectionName) {
             sink->AddRange(std::string("[section ") + std::string(name) + "]",
                            full_addr, vmsize, contents);
-          } else if (report_by == kReportByFilename) {
+          } else if (report_by == kReportByArchiveMember) {
             sink->AddRange(filename, full_addr, vmsize, contents);
           }
         }
 
-        if (report_by == kReportByFilename) {
+        if (report_by == kReportByArchiveMember) {
           // Cover unmapped parts of the file.
           sink->AddFileRange(filename, elf.entire_file());
         }
@@ -1169,7 +1169,7 @@ class ElfObjectFile : public ObjectFile {
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         case DataSource::kArchiveMembers:
-          DoReadELFSections(sink, kReportByFilename);
+          DoReadELFSections(sink, kReportByArchiveMember);
           break;
         case DataSource::kCompileUnits: {
           CheckNotObject("compileunits", sink);
