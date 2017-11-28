@@ -708,24 +708,6 @@ void MaybeAddFileRange(RangeSink* sink, string_view label, string_view range) {
 }
 
 template <class Func>
-void OnElfFile(const ElfFile& elf, string_view filename,
-               unsigned long index_base, RangeSink* sink, Func func) {
-  func(elf, filename, index_base);
-
-  // Add these *after* running the user callback.  That way if there is
-  // overlap, the user's annotations will take precedence.
-  MaybeAddFileRange(sink, "[ELF Headers]", elf.header_region());
-  MaybeAddFileRange(sink, "[ELF Headers]", elf.section_headers());
-  MaybeAddFileRange(sink, "[ELF Headers]", elf.segment_headers());
-
-  // Any sections of the file not covered by any segments/sections/symbols/etc.
-  if (sink && (sink->data_source() == DataSource::kSegments ||
-               sink->data_source() == DataSource::kSections)) {
-    sink->AddFileRange("[Unmapped]", elf.entire_file());
-  }
-}
-
-template <class Func>
 bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
   ArFile ar_file(file.data());
   unsigned long index_base = 0;
@@ -742,7 +724,7 @@ bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
         case ArFile::MemberFile::kNormal: {
           ElfFile elf(member.contents);
           if (elf.IsOpen()) {
-            OnElfFile(elf, member.filename, index_base, sink, func);
+            func(elf, member.filename, index_base);
             index_base += elf.section_count();
           } else {
             MaybeAddFileRange(sink, "[AR Non-ELF Member File]",
@@ -766,20 +748,24 @@ bool ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
       return false;
     }
 
-    OnElfFile(elf, file.filename(), index_base, sink, func);
+    func(elf, file.filename(), index_base);
   }
 
   return true;
 }
 
+void AddELFFallback(RangeSink* sink) {
+  ForEachElf(sink->input_file(), sink,
+             [sink](const ElfFile& elf, string_view /*filename*/,
+                    uint32_t /*index_base*/) {
+               sink->AddFileRange("[ELF Headers]", elf.header_region());
+               sink->AddFileRange("[ELF Headers]", elf.section_headers());
+               sink->AddFileRange("[ELF Headers]", elf.segment_headers());
 
-// There are several programs that offer useful information about
-// binaries:
-//
-// - objdump: display object file headers and contents (including disassembly)
-// - readelf: more ELF-specific objdump (no disassembly though)
-// - nm: display symbols
-// - size: display binary size
+             });
+  // The last-line fallback to make sure we cover the entire file.
+  sink->AddFileRange("[Unmapped]", sink->input_file().data());
+}
 
 // For object files, addresses are relative to the section they live in, which
 // is indicated by ndx.  We split this into:
@@ -1127,6 +1113,7 @@ class ElfObjectFile : public ObjectFile {
         default:
           THROW("unknown data source");
       }
+      AddELFFallback(sink);
     }
   }
 

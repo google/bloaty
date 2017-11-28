@@ -254,3 +254,8 @@ TEST_F(BloatyTest, DiffMode) {
     std::make_tuple("foo_y", 4, 0)
   });
 }
+
+TEST_F(BloatyTest, SeparateDebug) {
+  RunBloaty({"bloaty", "--debug-file=05-binary.bin", "07-binary-stripped.bin",
+             "-d", "symbols"});
+}

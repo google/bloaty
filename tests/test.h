@@ -128,6 +128,17 @@ class BloatyTest : public ::testing::Test {
 
   void CheckConsistency(const bloaty::Options& options) {
     ASSERT_EQ(options.base_filename_size() > 0, output_->diff_mode());
+
+    if (!output_->diff_mode()) {
+      size_t total_input_size = 0;
+      for (const auto& filename : options.filename()) {
+        uint64_t size;
+        ASSERT_TRUE(GetFileSize(filename, &size));
+        total_input_size += size;
+      }
+      ASSERT_EQ(top_row_->filesize, total_input_size);
+    }
+
     int rows = 0;
     CheckConsistencyForRow(*top_row_, true, output_->diff_mode(), &rows);
     CheckCSVConsistency(rows);

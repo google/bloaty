@@ -114,3 +114,7 @@ int foo_func() { return foo_y / 17 * 37 / 21; }
 "
 
 make_ar "06-diff.a" "foo2.o" "bar.o" "a_filename_longer_than_sixteen_chars.o"
+
+cp "05-binary.bin" "07-binary-stripped.bin"
+strip "07-binary-stripped.bin"
+publish "07-binary-stripped.bin"

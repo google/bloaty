@@ -372,6 +372,8 @@ class Rollup {
     }
   }
 
+  int64_t file_total() const { return file_total_; }
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Rollup);
 
@@ -1134,6 +1136,8 @@ void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
       pair.first->file_map.AddRangeWithTranslation(fileoff, filesize, label,
                                                     translator_->file_map,
                                                     &pair.first->vm_map);
+    } else {
+      pair.first->file_map.AddRange(fileoff, filesize, label);
     }
   }
 }
@@ -1513,10 +1517,6 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     sink_ptrs.push_back(sinks.back().get());
   }
 
-  // Ensure all parts of the VM/file-space are covered.  If all data sources had
-  // 100% coverage, this wouldn't be necessary.
-  maps.base_map()->file_map.AddRange(0, file->file_data().data().size(),
-                                     "[None]");
   std::string build_id = file->GetBuildId();
   if (!build_id.empty()) {
     auto iter = debug_files_.find(build_id);
@@ -1525,9 +1525,16 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
       *out_build_id = build_id;
     }
   }
-  file->ProcessFile(sink_ptrs);
 
+  int64_t filesize_before = rollup->file_total();
+  file->ProcessFile(sink_ptrs);
   maps.ComputeRollup(filename, filename_position_, rollup);
+
+  // The ObjectFile implementation must guarantee this.
+  int64_t filesize = rollup->file_total() - filesize_before;
+  (void)filesize;
+  assert(filesize == file->file_data().data().size());
+
   if (verbose_level > 0) {
     fprintf(stderr, "FILE MAP:\n");
     maps.PrintFileMaps(filename, filename_position_);
