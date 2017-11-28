@@ -760,21 +760,17 @@ void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
   }
 }
 
-static void AddCatchAll(RangeSink* sink) {
+void AddCatchAll(RangeSink* sink) {
   ForEachElf(sink->input_file(), sink,
-             [=](const ElfFile& elf, string_view /*filename*/,
-                 uint32_t /*index_base*/) {
-               MaybeAddFileRange(sink, "[ELF Headers]", elf.header_region());
-               MaybeAddFileRange(sink, "[ELF Headers]", elf.section_headers());
-               MaybeAddFileRange(sink, "[ELF Headers]", elf.segment_headers());
+             [sink](const ElfFile& elf, string_view /*filename*/,
+                    uint32_t /*index_base*/) {
+               sink->AddFileRange("[ELF Headers]", elf.header_region());
+               sink->AddFileRange("[ELF Headers]", elf.section_headers());
+               sink->AddFileRange("[ELF Headers]", elf.segment_headers());
 
-               // Any sections of the file not covered by any
-               // segments/sections/symbols/etc.
-               if (sink && (sink->data_source() == DataSource::kSegments ||
-                            sink->data_source() == DataSource::kSections)) {
-                 sink->AddFileRange("[Unmapped]", elf.entire_file());
-               }
              });
+  // The last-line fallback to make sure we cover the entire file.
+  sink->AddFileRange("[Unmapped]", sink->input_file().data());
 }
 
 // For object files, addresses are relative to the section they live in, which
