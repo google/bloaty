@@ -377,6 +377,10 @@ static void ParseMachOFile(RangeSink* sink) {
   }
 }
 
+static void AddMachOFallback(RangeSink* sink) {
+  sink->AddFileRange("[Unmapped]", sink->input_file().data());
+}
+
 class MachOObjectFile : public ObjectFile {
  public:
   MachOObjectFile(std::unique_ptr<InputFile> file_data)
@@ -404,6 +408,7 @@ class MachOObjectFile : public ObjectFile {
         default:
           THROW("Mach-O doesn't support this data source");
       }
+      AddMachOFallback(sink);
     }
   }
 
