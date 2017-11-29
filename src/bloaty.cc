@@ -1131,9 +1131,8 @@ void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     if (translator_) {
-      pair.first->file_map.AddRangeWithTranslation(fileoff, filesize, label,
-                                                    translator_->file_map,
-                                                    &pair.first->vm_map);
+      pair.first->file_map.AddRangeWithTranslation(
+          fileoff, filesize, label, translator_->file_map, &pair.first->vm_map);
     } else {
       pair.first->file_map.AddRange(fileoff, filesize, label);
     }

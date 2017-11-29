@@ -162,8 +162,18 @@ class RangeSink {
                        absl::string_view file_range);
 
   void AddFileRange(absl::string_view name, absl::string_view file_range) {
-    AddFileRange(name, file_range.data() - file_->data().data(),
-                 file_range.size());
+    absl::string_view file_data = file_->data().data();
+    const char* ptr = file_range.data();
+    // When separate debug files are being used, the DWARF analyzer will try to
+    // add sections of the debug file.  We want to prevent this because we only
+    // want to profile the main file (not the debug file), so we filter these
+    // out.  This approach is simple to implement, but does result in some
+    // useless work being done.  We may want to avoid doing this useless work in
+    // the first place.
+    if (ptr >= file_data.data() && ptr < file_data.data() + file_data.size()) {
+      AddFileRange(name, file_range.data() - file_->data().data(),
+                   file_range.size());
+    }
   }
 
   // The VM-only functions below may not be used to populate the base map!
