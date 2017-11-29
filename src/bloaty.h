@@ -62,6 +62,7 @@ enum class DataSource {
   kCompileUnits,
   kInlines,
   kInputFiles,
+  kRawRanges,
   kSections,
   kSegments,
 
@@ -411,7 +412,7 @@ class RangeMap {
                             Func func);
 
   template <class Func>
-  void ForEachRange(Func func) {
+  void ForEachRange(Func func) const {
     for (const auto& pair : mappings_) {
       func(pair.first, pair.second.end - pair.first);
     }
