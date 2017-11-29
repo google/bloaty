@@ -1985,9 +1985,10 @@ static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
-static void ReadDWARFDebugInfo(const dwarf::File& file,
-                               const SymbolTable& symtab,
-                               const DualMap& symbol_map, RangeSink* sink) {
+static void ReadDWARFDebugInfo(
+    const dwarf::File& file, dwarf::DIEReader::Section section,
+    const SymbolTable& symtab, const DualMap& symbol_map, RangeSink* sink,
+    std::unordered_map<uint64_t, std::string>* stmt_list_map) {
   dwarf::DIEReader die_reader(file);
   die_reader.set_strp_sink(sink);
   dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
@@ -1997,35 +1998,50 @@ static void ReadDWARFDebugInfo(const dwarf::File& file,
                    DW_AT_location, DW_AT_location, DW_AT_stmt_list,
                    DW_AT_ranges, DW_AT_start_scope});
 
-  if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
+  if (!die_reader.SeekToStart(section)) {
     THROW("debug info is present, but empty");
   }
 
   do {
     attr_reader.ReadAttributes(&die_reader);
     std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
+
+    if (attr_reader.HasAttribute<6>()) {
+      uint64_t stmt_list = attr_reader.GetAttribute<6>();
+      if (compileunit_name.empty()) {
+        auto iter = stmt_list_map->find(stmt_list);
+        if (iter != stmt_list_map->end()) {
+          compileunit_name = iter->second;
+        }
+      } else {
+        (*stmt_list_map)[stmt_list] = compileunit_name;
+      }
+    }
+
+    if (compileunit_name.empty()) {
+      continue;
+    }
+
     die_reader.set_compileunit_name(compileunit_name);
-    if (!compileunit_name.empty()) {
-      sink->AddFileRange(compileunit_name, die_reader.unit_range());
+    sink->AddFileRange(compileunit_name, die_reader.unit_range());
+    AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
+           die_reader.unit_sizes(), sink);
+
+    if (attr_reader.HasAttribute<6>()) {
+      uint64_t offset = attr_reader.GetAttribute<6>();
+      ReadDWARFStmtListRange(file, offset, compileunit_name, sink);
+    }
+
+    string_view abbrev_data = file.debug_abbrev;
+    dwarf::SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
+    dwarf::AbbrevTable unit_abbrev;
+    abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
+    sink->AddFileRange(compileunit_name, abbrev_data);
+
+    while (die_reader.NextDIE()) {
+      attr_reader.ReadAttributes(&die_reader);
       AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
              die_reader.unit_sizes(), sink);
-
-      if (attr_reader.HasAttribute<6>()) {
-        uint64_t offset = attr_reader.GetAttribute<6>();
-        ReadDWARFStmtListRange(file, offset, compileunit_name, sink);
-      }
-
-      string_view abbrev_data = file.debug_abbrev;
-      dwarf::SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
-      dwarf::AbbrevTable unit_abbrev;
-      abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
-      sink->AddFileRange(compileunit_name, abbrev_data);
-
-      while (die_reader.NextDIE()) {
-        attr_reader.ReadAttributes(&die_reader);
-        AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
-               die_reader.unit_sizes(), sink);
-      }
     }
   } while (die_reader.NextCompilationUnit());
 }
@@ -2040,7 +2056,11 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
     ReadDWARFAddressRanges(file, sink);
   }
 
-  ReadDWARFDebugInfo(file, symtab, symbol_map, sink);
+  std::unordered_map<uint64_t, std::string> stmt_list_map;
+  ReadDWARFDebugInfo(file, dwarf::DIEReader::Section::kDebugInfo, symtab,
+                     symbol_map, sink, &stmt_list_map);
+  ReadDWARFDebugInfo(file, dwarf::DIEReader::Section::kDebugTypes, symtab,
+                     symbol_map, sink, &stmt_list_map);
   ReadDWARFPubNames(file, file.debug_pubnames, sink);
   ReadDWARFPubNames(file, file.debug_pubtypes, sink);
 }

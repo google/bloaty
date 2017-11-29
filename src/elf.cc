@@ -1051,6 +1051,8 @@ static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
       dwarf->debug_str = section.contents();
     } else if (name == ".debug_info") {
       dwarf->debug_info = section.contents();
+    } else if (name == ".debug_types") {
+      dwarf->debug_types = section.contents();
     } else if (name == ".debug_abbrev") {
       dwarf->debug_abbrev = section.contents();
     } else if (name == ".debug_line") {
