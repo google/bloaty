@@ -176,10 +176,12 @@ class ElfFile {
                     string_view* file_range) const;
 
     // Requires: header().sh_type == SHT_REL
-    void ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const;
+    void ReadRelocation(Elf64_Word index, Elf64_Rel* rel,
+                        string_view* file_range) const;
 
     // Requires: header().sh_type == SHT_RELA
-    void ReadRelocationWithAddend(Elf64_Word index, Elf64_Rela* rel) const;
+    void ReadRelocationWithAddend(Elf64_Word index, Elf64_Rela* rel,
+                                  string_view* file_range) const;
 
     const ElfFile& elf() const { return *elf_; }
 
@@ -451,22 +453,31 @@ void ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym,
   size_t offset = header_.sh_entsize * index;
   reader.Read<Elf32_Sym>(offset, SymMunger(), sym);
   if (file_range) {
-    size_t size = elf_->is_64bit() ? sizeof(Elf64_Sym) : sizeof(Elf32_Sym);
-    *file_range = contents().substr(offset, size);
+    *file_range = contents().substr(offset, header_.sh_entsize);
   }
 }
 
-void ElfFile::Section::ReadRelocation(Elf64_Word index, Elf64_Rel* rel) const {
+void ElfFile::Section::ReadRelocation(Elf64_Word index, Elf64_Rel* rel,
+                                      string_view* file_range) const {
   assert(header().sh_type == SHT_REL);
   ElfFile::StructReader reader(*elf_, contents());
-  reader.Read<Elf32_Rel>(header_.sh_entsize * index, RelMunger(), rel);
+  size_t offset = header_.sh_entsize * index;
+  reader.Read<Elf32_Rel>(offset, RelMunger(), rel);
+  if (file_range) {
+    *file_range = contents().substr(offset, header_.sh_entsize);
+  }
 }
 
 void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
-                                                Elf64_Rela* rela) const {
+                                                Elf64_Rela* rela,
+                                                string_view* file_range) const {
   assert(header().sh_type == SHT_RELA);
   ElfFile::StructReader reader(*elf_, contents());
-  reader.Read<Elf32_Rela>(header_.sh_entsize * index, RelaMunger(), rela);
+  size_t offset = header_.sh_entsize * index;
+  reader.Read<Elf32_Rela>(offset, RelaMunger(), rela);
+  if (file_range) {
+    *file_range = contents().substr(offset, header_.sh_entsize);
+  }
 }
 
 bool ElfFile::Initialize() {
@@ -865,13 +876,63 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
       });
 }
 
+static void ReadELFSymbolTableEntries(const ElfFile& elf,
+                                      const ElfFile::Section& section,
+                                      uint64_t index_base, bool is_object,
+                                      RangeSink* sink) {
+  Elf64_Word symbol_count = section.GetEntryCount();
+
+  // Find the corresponding section where the strings for the symbol
+  // table can be found.
+  ElfFile::Section strtab_section;
+  elf.ReadSection(section.header().sh_link, &strtab_section);
+  if (strtab_section.header().sh_type != SHT_STRTAB) {
+    THROW("symtab section pointed to non-strtab section");
+  }
+
+  for (Elf64_Word i = 1; i < symbol_count; i++) {
+    Elf64_Sym sym;
+    string_view sym_range;
+    section.ReadSymbol(i, &sym, &sym_range);
+
+    if (ELF64_ST_TYPE(sym.st_info) == STT_SECTION ||
+        sym.st_shndx == STN_UNDEF ||
+        sym.st_name == SHN_UNDEF) {
+      continue;
+    }
+
+    string_view name = strtab_section.ReadString(sym.st_name);
+    uint64_t full_addr =
+        ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
+    // Capture the trailing NULL.
+    name = string_view(name.data(), name.size() + 1);
+    sink->AddFileRangeFor(full_addr, name);
+    sink->AddFileRangeFor(full_addr, sym_range);
+  }
+}
+
+static void ReadELFRelaEntries(const ElfFile::Section& section,
+                               uint64_t index_base, bool is_object,
+                               RangeSink* sink) {
+  Elf64_Word rela_count = section.GetEntryCount();
+  for (Elf64_Word i = 1; i < rela_count; i++) {
+    Elf64_Rela rela;
+    string_view rela_range;
+    section.ReadRelocationWithAddend(i, &rela, &rela_range);
+    // TODO(haberman): fix this for object files.
+    uint64_t full_addr = ToVMAddr(rela.r_offset, index_base, is_object);
+    full_addr = rela.r_offset;
+    sink->AddFileRangeFor(full_addr, rela_range);
+  }
+}
+
 // Adds file ranges for the symbol tables and string tables *themselves* (ie.
 // the space that the symtab/strtab take up in the file).  This will cover
 //   .symtab
 //   .strtab
 //   .dynsym
 //   .dynstr
-static void ReadELFSymbolTables(const InputFile& file, RangeSink* sink) {
+static void ReadELFTables(const InputFile& file, RangeSink* sink) {
   bool is_object = IsObjectFile(file.data());
 
   ForEachElf(
@@ -881,39 +942,15 @@ static void ReadELFSymbolTables(const InputFile& file, RangeSink* sink) {
           ElfFile::Section section;
           elf.ReadSection(i, &section);
 
-          if (section.header().sh_type != SHT_SYMTAB &&
-              section.header().sh_type != SHT_DYNSYM) {
-            continue;
-          }
-
-          Elf64_Word symbol_count = section.GetEntryCount();
-
-          // Find the corresponding section where the strings for the symbol
-          // table can be found.
-          ElfFile::Section strtab_section;
-          elf.ReadSection(section.header().sh_link, &strtab_section);
-          if (strtab_section.header().sh_type != SHT_STRTAB) {
-            THROW("symtab section pointed to non-strtab section");
-          }
-
-          for (Elf64_Word i = 1; i < symbol_count; i++) {
-            Elf64_Sym sym;
-            string_view sym_range;
-            section.ReadSymbol(i, &sym, &sym_range);
-
-            if (ELF64_ST_TYPE(sym.st_info) == STT_SECTION ||
-                sym.st_shndx == STN_UNDEF ||
-                sym.st_name == SHN_UNDEF) {
-              continue;
-            }
-
-            string_view name = strtab_section.ReadString(sym.st_name);
-            uint64_t full_addr =
-                ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
-            // Capture the trailing NULL.
-            name = string_view(name.data(), name.size() + 1);
-            sink->AddFileRangeFor(full_addr, name);
-            sink->AddFileRangeFor(full_addr, sym_range);
+          switch (section.header().sh_type) {
+            case SHT_SYMTAB:
+            case SHT_DYNSYM:
+              ReadELFSymbolTableEntries(elf, section, index_base, is_object,
+                                        sink);
+              break;
+            case SHT_RELA:
+              ReadELFRelaEntries(section, index_base, is_object, sink);
+              break;
           }
         }
       });
@@ -1167,8 +1204,6 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
           ReadELFSymbols(debug_file().file_data(), sink, nullptr);
-          ReadELFSymbolTables(sink->input_file(), sink);
-          DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         case DataSource::kArchiveMembers:
           DoReadELFSections(sink, kReportByArchiveMember);
@@ -1186,8 +1221,6 @@ class ElfObjectFile : public ObjectFile {
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
-          ReadELFSymbolTables(sink->input_file(), sink);
-          DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }
         case DataSource::kInlines: {
@@ -1201,6 +1234,18 @@ class ElfObjectFile : public ObjectFile {
         default:
           THROW("unknown data source");
       }
+
+      switch (sink->data_source()) {
+        case DataSource::kSegments:
+        case DataSource::kSections:
+        case DataSource::kArchiveMembers:
+          break;
+        default:
+          ReadELFTables(sink->input_file(), sink);
+          DoReadELFSections(sink, kReportByEscapedSectionName);
+          break;
+      }
+
       // Add these *after* processing all other data sources.
       AddCatchAll(sink);
     }
