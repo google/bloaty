@@ -162,15 +162,13 @@ class RangeSink {
                        absl::string_view file_range);
 
   void AddFileRange(absl::string_view name, absl::string_view file_range) {
-    absl::string_view file_data = file_->data().data();
-    const char* ptr = file_range.data();
     // When separate debug files are being used, the DWARF analyzer will try to
     // add sections of the debug file.  We want to prevent this because we only
     // want to profile the main file (not the debug file), so we filter these
     // out.  This approach is simple to implement, but does result in some
     // useless work being done.  We may want to avoid doing this useless work in
     // the first place.
-    if (ptr >= file_data.data() && ptr < file_data.data() + file_data.size()) {
+    if (FileContainsPointer(file_range.data())) {
       AddFileRange(name, file_range.data() - file_->data().data(),
                    file_range.size());
     }
@@ -205,8 +203,18 @@ class RangeSink {
     return *outputs_[index].first;
   }
 
+  // Translates the given pointer (which must be within the range of
+  // input_file().data()) to a VM address.
+  uint64_t TranslateFileToVM(const char* ptr);
+  absl::string_view TranslateVMToFile(uint64_t address);
+
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeSink);
+
+  bool FileContainsPointer(const void* ptr) const {
+    absl::string_view file_data = file_->data();
+    return ptr >= file_data.data() && ptr < file_data.data() + file_data.size();
+  }
 
   const InputFile* file_;
   DataSource data_source_;
@@ -298,6 +306,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
                            const DualMap& map, RangeSink* sink);
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
+void ReadEhFrame(absl::string_view contents, RangeSink* sink);
 
 
 // LineReader //////////////////////////////////////////////////////////////////

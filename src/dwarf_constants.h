@@ -619,5 +619,31 @@ enum DwarfSectionId {
   DW_SECT_MACRO = 8
 };
 
+// For .eh_frame, see: http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/dwarfext.html
+enum PointerEncoding {
+  DW_EH_PE_absptr      = 0x00,
+  DW_EH_PE_uleb128     = 0x01,
+  DW_EH_PE_udata2      = 0x02,
+  DW_EH_PE_udata4      = 0x03,
+  DW_EH_PE_udata8      = 0x04,
+  DW_EH_PE_sleb128     = 0x09,
+  DW_EH_PE_sdata2      = 0x0A,
+  DW_EH_PE_sdata4      = 0x0B,
+  DW_EH_PE_sdata8      = 0x0C,
+  DW_EH_PE_FORMAT_MASK = 0x0f,
+
+  DW_EH_PE_pcrel       = 0x10,
+  DW_EH_PE_textre      = 0x20,
+  DW_EH_PE_datarel     = 0x30,
+  DW_EH_PE_funcrel     = 0x40,
+  DW_EH_PE_aligned     = 0x50,
+  DW_EH_PE_APPLICATION_MASK = 0x70,
+
+  // This acts as a flag.
+  DW_EH_PE_indirect    = 0x80,
+
+  DW_EH_PE_omit        = 0xff
+};
+
 }  // namespace dwarf2reader
 #endif  // UTIL_DEBUGINFO_DWARF2ENUMS_H__

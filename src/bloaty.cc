@@ -1210,6 +1210,28 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
   }
 }
 
+uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
+  assert(translator_);
+  uint64_t offset = ptr - file_->data().data();
+  uint64_t translated;
+  if (!FileContainsPointer(ptr) ||
+      !translator_->file_map.Translate(offset, &translated)) {
+    THROWF("Can't translate file offset ($0) to VM, contains: $1, map:\n$2",
+           offset, FileContainsPointer(ptr),
+           translator_->file_map.DebugString().c_str());
+  }
+  return translated;
+}
+
+absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
+  assert(translator_);
+  uint64_t translated;
+  if (!translator_->vm_map.Translate(address, &translated) ||
+      translated > file_->data().size()) {
+    THROW("Can't translate VM pointer to file");
+  }
+  return file_->data().substr(translated);
+}
 
 // ThreadSafeIterIndex /////////////////////////////////////////////////////////
 

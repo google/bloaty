@@ -952,6 +952,10 @@ static void ReadELFTables(const InputFile& file, RangeSink* sink) {
               ReadELFRelaEntries(section, index_base, is_object, sink);
               break;
           }
+
+          if (section.GetName() == ".eh_frame") {
+            ReadEhFrame(section.contents(), sink);
+          }
         }
       });
 }

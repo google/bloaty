@@ -1970,6 +1970,181 @@ static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
   }
 }
 
+uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
+                            RangeSink* sink) {
+  uint64_t value;
+  const char *ptr = data->data();
+
+  switch (encoding & DW_EH_PE_FORMAT_MASK) {
+    case DW_EH_PE_absptr:
+      if (is_64bit) {
+        value = dwarf::ReadMemcpy<uint64_t>(data);
+      } else {
+        value = dwarf::ReadMemcpy<uint32_t>(data);
+      }
+      break;
+    case DW_EH_PE_uleb128:
+      value = dwarf::ReadLEB128<uint64_t>(data);
+      break;
+    case DW_EH_PE_udata2:
+      value = dwarf::ReadMemcpy<uint16_t>(data);
+      break;
+    case DW_EH_PE_udata4:
+      value = dwarf::ReadMemcpy<uint32_t>(data);
+      break;
+    case DW_EH_PE_udata8:
+      value = dwarf::ReadMemcpy<uint64_t>(data);
+      break;
+    case DW_EH_PE_sleb128:
+      value = dwarf::ReadLEB128<int64_t>(data);
+      break;
+    case DW_EH_PE_sdata2:
+      value = dwarf::ReadMemcpy<int16_t>(data);
+      break;
+    case DW_EH_PE_sdata4:
+      value = dwarf::ReadMemcpy<int32_t>(data);
+      break;
+    case DW_EH_PE_sdata8:
+      value = dwarf::ReadMemcpy<int64_t>(data);
+      break;
+    default:
+      THROW("Unexpected eh_frame format value.");
+  }
+
+  switch(encoding & DW_EH_PE_APPLICATION_MASK) {
+    case 0:
+      break;
+    case DW_EH_PE_pcrel:
+      value += sink->TranslateFileToVM(ptr);
+      break;
+    case DW_EH_PE_textre:
+    case DW_EH_PE_datarel:
+    case DW_EH_PE_funcrel:
+    case DW_EH_PE_aligned:
+      THROW("Unimplemented eh_frame application value.");
+  }
+
+  if (encoding & DW_EH_PE_indirect) {
+    string_view location = sink->TranslateVMToFile(value);
+    if (is_64bit) {
+      value = dwarf::ReadMemcpy<uint64_t>(&location);
+    } else {
+      value = dwarf::ReadMemcpy<uint32_t>(&location);
+    }
+  }
+
+  return value;
+}
+
+// Code to read the .eh_frame section.  This is not technically DWARF, but it
+// is similar to .debug_frame (which is DWARF) so it's convenient to put it
+// here.
+//
+// The best documentation I can find for this format comes from:
+//
+// * http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html
+// * https://www.airs.com/blog/archives/460
+//
+// However these are both under-specified.  Some details are not mentioned in
+// either of these (for example, the fact that the function length uses the FDE
+// encoding, but always absolute).  libdwarf's implementation contains a comment
+// saying "It is not clear if this is entirely correct".  Basically the only
+// thing you can trust for some of these details is the code that actually
+// implements unwinding in production:
+//
+// * libunwind http://www.nongnu.org/libunwind/
+//   https://github.com/pathscale/libunwind/blob/master/src/dwarf/Gfde.c
+// * LLVM libunwind (a different project!!)
+//   https://github.com/llvm-mirror/libunwind/blob/master/src/DwarfParser.hpp
+// * libgcc
+//   https://github.com/gcc-mirror/gcc/blob/master/libgcc/unwind-dw2-fde.c
+void ReadEhFrame(string_view data, RangeSink* sink) {
+  string_view remaining = data;
+
+  struct CIEInfo {
+    int version = 0;
+    uint32_t code_align = 0;
+    int32_t data_align = 0;
+    uint8_t fde_encoding = 0;
+    uint8_t lsda_encoding = 0;
+    bool is_signal_handler = false;
+    uint64_t personality_function = 0;
+    uint32_t return_address_reg = 0;
+  };
+
+  std::unordered_map<const char*, CIEInfo> cie_map;
+
+  while (remaining.size() > 0) {
+    dwarf::CompilationUnitSizes sizes;
+    string_view full_entry = remaining;
+    string_view entry = sizes.ReadInitialLength(&remaining);
+    if (entry.size() == 0 && remaining.size() == 0) {
+      return;
+    }
+    full_entry =
+        full_entry.substr(0, entry.size() + (entry.data() - full_entry.data()));
+    uint32_t id = dwarf::ReadMemcpy<uint32_t>(&entry);
+    if (id == 0) {
+      // CIE, we don't attribute this yet.
+      CIEInfo& cie_info = cie_map[full_entry.data()];
+      cie_info.version = dwarf::ReadMemcpy<uint8_t>(&entry);
+      string_view aug_string = dwarf::ReadNullTerminated(&entry);
+      cie_info.code_align = dwarf::ReadLEB128<uint32_t>(&entry);
+      cie_info.data_align = dwarf::ReadLEB128<int32_t>(&entry);
+      switch (cie_info.version) {
+        case 1:
+          cie_info.return_address_reg = dwarf::ReadMemcpy<uint8_t>(&entry);
+          break;
+        case 3:
+          cie_info.return_address_reg = dwarf::ReadLEB128<uint32_t>(&entry);
+          break;
+        default:
+          THROW("Unexpected eh_frame CIE version");
+      }
+      while (aug_string.size() > 0) {
+        switch (aug_string[0]) {
+          case 'z':
+            // Length until the end of augmentation data.
+            dwarf::ReadLEB128<uint32_t>(&entry);
+            break;
+          case 'L':
+            cie_info.lsda_encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            break;
+          case 'R':
+            cie_info.fde_encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            break;
+          case 'S':
+            cie_info.is_signal_handler = true;
+            break;
+          case 'P': {
+            uint8_t encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            cie_info.personality_function =
+                ReadEncodedPointer(encoding, true, &entry, sink);
+            break;
+          }
+          default:
+            THROW("Unexepcted augmentation character");
+        }
+        aug_string.remove_prefix(1);
+      }
+    } else {
+      auto iter = cie_map.find(entry.data() - id - 4);
+      if (iter == cie_map.end()) {
+        THROW("Couldn't find CIE for FDE");
+      }
+      const CIEInfo& cie_info = iter->second;
+      // TODO(haberman): don't hard-code 64-bit.
+      uint64_t address =
+          ReadEncodedPointer(cie_info.fde_encoding, true, &entry, sink);
+      // TODO(haberman); Technically the FDE addresses could span a
+      // function/compilation unit?  They can certainly span inlines.
+      // uint64_t length =
+      //   ReadEncodedPointer(cie_info.fde_encoding & 0xf, true, &entry, sink);
+      sink->AddFileRangeFor(address, full_entry);
+    }
+  }
+}
+
 static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
                                    string_view unit_name, RangeSink* sink) {
   string_view data = file.debug_line;
@@ -1999,7 +2174,7 @@ static void ReadDWARFDebugInfo(
                    DW_AT_ranges, DW_AT_start_scope});
 
   if (!die_reader.SeekToStart(section)) {
-    THROW("debug info is present, but empty");
+    return;
   }
 
   do {
