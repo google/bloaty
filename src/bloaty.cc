@@ -788,260 +788,6 @@ void RollupOutput::PrintToCSV(std::ostream* out) const {
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
-template <class T>
-uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) {
-  assert(EntryContains(iter, addr));
-  assert(iter->second.HasTranslation());
-  return addr - iter->first + iter->second.other_start;
-}
-
-template <class T>
-bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
-                                              uint64_t end, uint64_t* out_addr,
-                                              uint64_t* out_size) {
-  addr = std::max(addr, iter->first);
-  end = std::min(end, iter->second.end);
-
-  if (addr >= end || !iter->second.HasTranslation()) return false;
-
-  *out_addr = TranslateWithEntry(iter, addr);
-  *out_size = end - addr;
-  return true;
-}
-
-RangeMap::Map::iterator RangeMap::FindContaining(uint64_t addr) {
-  auto it = mappings_.upper_bound(addr);  // Entry directly after.
-  if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {
-    return mappings_.end();
-  } else {
-    return it;
-  }
-}
-
-RangeMap::Map::const_iterator RangeMap::FindContaining(uint64_t addr) const {
-  auto it = mappings_.upper_bound(addr);  // Entry directly after.
-  if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {
-    return mappings_.end();
-  } else {
-    return it;
-  }
-}
-
-RangeMap::Map::const_iterator RangeMap::FindContainingOrAfter(
-    uint64_t addr) const {
-  auto after = mappings_.upper_bound(addr);
-  auto it = after;
-  if (it != mappings_.begin() && (--it, EntryContains(it, addr))) {
-    return it;  // Containing
-  } else {
-    return after;  // May be end().
-  }
-}
-
-bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
-  auto iter = FindContaining(addr);
-  if (iter == mappings_.end() || !iter->second.HasTranslation()) {
-    return false;
-  } else {
-    *translated = TranslateWithEntry(iter, addr);
-    return true;
-  }
-}
-
-bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const {
-  auto iter = FindContaining(addr);
-  if (iter == mappings_.end()) {
-    return false;
-  } else {
-    *label = iter->second.label;
-    *offset = addr - iter->first;
-    return true;
-  }
-}
-
-bool RangeMap::TryGetSize(uint64_t addr, uint64_t* size) const {
-  auto iter = mappings_.find(addr);
-  if (iter == mappings_.end()) {
-    return false;
-  } else {
-    *size = iter->second.end - addr;
-    return true;
-  }
-}
-
-std::string RangeMap::DebugString() const {
-  std::string ret;
-  for (const auto& pair : mappings_) {
-    absl::StrAppend(&ret, "[", absl::Hex(pair.first), ", ",
-                    absl::Hex(pair.second.end), "]: ", pair.second.label);
-    if (pair.second.other_start != UINT64_MAX) {
-      absl::StrAppend(&ret,
-                      ", other_start=", absl::Hex(pair.second.other_start));
-    }
-    absl::StrAppend(&ret, "\n");
-  }
-  return ret;
-}
-
-void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
-  AddDualRange(addr, size, UINT64_MAX, val);
-}
-
-void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
-                            const std::string& val) {
-  if (size == 0) return;
-
-  const uint64_t base = addr;
-  uint64_t end = addr + size;
-  auto it = FindContainingOrAfter(addr);
-
-
-  while (1) {
-    while (it != mappings_.end() && EntryContains(it, addr)) {
-      if (verbose_level > 1) {
-        fprintf(stdout,
-                "WARN: adding mapping [%" PRIx64 "x, %" PRIx64 "x] for label"
-                "%s, this conflicts with existing mapping [%" PRIx64 ", %"
-                PRIx64 "] for label %s\n",
-                addr, end, val.c_str(), it->first, it->second.end,
-                it->second.label.c_str());
-      }
-      addr = it->second.end;
-      ++it;
-    }
-
-    if (addr >= end) {
-      return;
-    }
-
-    uint64_t this_end = end;
-    if (it != mappings_.end() && end > it->first) {
-      this_end = std::min(end, it->first);
-      if (verbose_level > 1) {
-        fprintf(stdout,
-                "WARN(2): adding mapping [%" PRIx64 ", %" PRIx64 "] for label "
-                "%s, this conflicts with existing mapping [%" PRIx64 ", %"
-                PRIx64 "] for label %s\n",
-                addr, end, val.c_str(), it->first, it->second.end,
-                it->second.label.c_str());
-      }
-    }
-
-    uint64_t other =
-        (otheraddr == UINT64_MAX) ? UINT64_MAX : addr - base + otheraddr;
-    mappings_.insert(it, std::make_pair(addr, Entry(val, this_end, other)));
-    addr = this_end;
-  }
-}
-
-// In most cases we don't expect the range we're translating to span mappings
-// in the translator.  For example, we would never expect a symbol to span
-// sections.
-//
-// However there are some examples.  An archive member (in the file domain) can
-// span several section mappings.  If we really wanted to get particular here,
-// we could pass a parameter indicating whether such spanning is expected, and
-// warn if not.
-void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
-                                       const std::string& val,
-                                       const RangeMap& translator,
-                                       RangeMap* other) {
-  AddRange(addr, size, val);
-
-  auto it = translator.FindContainingOrAfter(addr);
-  uint64_t end = addr + size;
-
-  // TODO: optionally warn about when we span ranges of the translator.  In some
-  // cases this would be a bug (ie. symbols VM->file).  In other cases it's
-  // totally normal (ie. archive members file->VM).
-  while (it != translator.mappings_.end() && it->first < end) {
-    uint64_t this_addr;
-    uint64_t this_size;
-    if (translator.TranslateAndTrimRangeWithEntry(it, addr, end, &this_addr,
-                                                  &this_size)) {
-      if (verbose_level > 2) {
-        fprintf(stdout, "  -> translates to: [%" PRIx64 " %" PRIx64 "]\n",
-                this_addr, this_size);
-      }
-      other->AddRange(this_addr, this_size, val);
-    }
-    ++it;
-  }
-}
-
-template <class Func>
-void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                             Func func) {
-  assert(range_maps.size() > 0);
-
-  std::vector<Map::const_iterator> iters;
-  std::vector<std::string> keys;
-  uint64_t current = UINTPTR_MAX;
-
-  for (auto range_map : range_maps) {
-    iters.push_back(range_map->mappings_.begin());
-    if (!range_map->IterIsEnd(iters.back())) {
-      current = std::min(current, iters.back()->first);
-    }
-  }
-
-  // Iterate over all ranges in parallel to perform this transformation:
-  //
-  //   -----  -----  -----             ---------------
-  //     |      |      1                    A,X,1
-  //     |      X    -----             ---------------
-  //     |      |      |                    A,X,2
-  //     A    -----    |               ---------------
-  //     |      |      |                      |
-  //     |      |      2      ----->          |
-  //     |      Y      |                    A,Y,2
-  //     |      |      |                      |
-  //   -----    |      |               ---------------
-  //     B      |      |                    B,Y,2
-  //   -----    |    -----             ---------------
-  //            |                      [None],Y,[None]
-  //          -----
-  while (true) {
-    uint64_t next_break = UINTPTR_MAX;
-    bool have_data = false;
-    keys.clear();
-    size_t i;
-
-    for (i = 0; i < iters.size(); i++) {
-      auto& iter = iters[i];
-
-      // Advance the iterators if its range is behind the current point.
-      while (!range_maps[i]->IterIsEnd(iter) && RangeEnd(iter) <= current) {
-        ++iter;
-        //assert(range_maps[i]->IterIsEnd(iter) || RangeEnd(iter) > current);
-      }
-
-      // Push a label and help calculate the next break.
-      bool is_end = range_maps[i]->IterIsEnd(iter);
-      if (is_end || iter->first > current) {
-        keys.push_back("[None]");
-        if (!is_end) {
-          next_break = std::min(next_break, iter->first);
-        }
-      } else {
-        have_data = true;
-        keys.push_back(iter->second.label);
-        next_break = std::min(next_break, RangeEnd(iter));
-      }
-    }
-
-    if (next_break == UINTPTR_MAX) {
-      break;
-    }
-
-    if (have_data) {
-      func(keys, current, next_break);
-    }
-
-    current = next_break;
-  }
-}
-
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
@@ -1158,6 +904,26 @@ void RangeSink::AddFileRangeFor(uint64_t label_from_vmaddr,
       pair.first->file_map.AddRangeWithTranslation(
           file_offset, file_range.size(), label, translator_->file_map,
           &pair.first->vm_map);
+    }
+  }
+}
+
+void RangeSink::AddVMRangeFor(uint64_t label_from_vmaddr, uint64_t addr,
+                              uint64_t size) {
+  if (verbose_level > 2) {
+    fprintf(stdout,
+            "[%s] AddVMRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
+            GetDataSourceLabel(data_source_), label_from_vmaddr, addr, size);
+    fprintf(stdout, "Translation map:\n%s",
+            translator_->file_map.DebugString().c_str());
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label;
+    uint64_t offset;
+    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
+      pair.first->vm_map.AddRangeWithTranslation(
+          addr, size, label, translator_->vm_map, &pair.first->file_map);
     }
   }
 }

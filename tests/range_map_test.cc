@@ -23,20 +23,48 @@ namespace bloaty {
 
 class RangeMapTest : public ::testing::Test {
  protected:
-  void CheckConsistencyFor(const bloaty::RangeMap& /*map*/) {
+  void CheckConsistencyFor(const bloaty::RangeMap& map) {
     uint64_t last_end = 0;
-    for (const auto& entry : map_.mappings_) {
-      ASSERT_GT(entry.second.end, entry.first);
-      ASSERT_GE(entry.first, last_end);
+    for (auto it = map.mappings_.begin(); it != map.mappings_.end(); ++it) {
+      ASSERT_GE(it->first, last_end);
+      last_end = map.RangeEnd(it);
     }
   }
 
   void CheckConsistency() {
     CheckConsistencyFor(map_);
     CheckConsistencyFor(map2_);
+    CheckConsistencyFor(map3_);
   }
 
-  typedef std::tuple<uint64_t, uint64_t, uint64_t, std::string> Entry;
+  struct Row {
+    std::vector<std::string> keys;
+    uint64_t start;
+    uint64_t end;
+  };
+
+  void AssertRollupEquals(const std::vector<const RangeMap*> maps,
+                          const std::vector<Row>& rows) {
+    int i = 0;
+    RangeMap::ComputeRollup(
+        maps, [&i, &rows](const std::vector<std::string>& keys, uint64_t start,
+                          uint64_t end) {
+          ASSERT_LT(i, rows.size());
+          const auto& row = rows[i];
+          ASSERT_EQ(row.keys, keys);
+          ASSERT_EQ(row.start, start);
+          ASSERT_EQ(row.end, end);
+          i++;
+        });
+    ASSERT_EQ(rows.size(), i);
+  }
+
+  struct Entry {
+    uint64_t addr;
+    uint64_t end;
+    uint64_t other_start;
+    std::string label;
+  };
 
   void AssertMapEquals(const bloaty::RangeMap& map,
                        const std::vector<Entry>& entries) {
@@ -44,13 +72,27 @@ class RangeMapTest : public ::testing::Test {
     size_t i = 0;
     for (; i < entries.size() && iter != map.mappings_.end(); ++i, ++iter) {
       const auto& entry = entries[i];
-      ASSERT_EQ(std::get<0>(entry), iter->first) << i;
-      ASSERT_EQ(std::get<1>(entry), iter->second.end) << i;
-      ASSERT_EQ(std::get<2>(entry), iter->second.other_start) << i;
-      ASSERT_EQ(std::get<3>(entry), iter->second.label) << i;
+      ASSERT_EQ(entry.addr, iter->first) << i;
+      ASSERT_EQ(entry.end, map.RangeEnd(iter)) << i;
+      ASSERT_EQ(entry.other_start, iter->second.other_start) << i;
+      ASSERT_EQ(entry.label, iter->second.label) << i;
     }
     ASSERT_EQ(i, entries.size());
     ASSERT_EQ(iter, map.mappings_.end());
+
+    // Also test that ComputeRollup yields the same thing.
+    i = 0;
+    RangeMap::ComputeRollup({&map},
+                            [&i, &entries](const std::vector<std::string>& keys,
+                                           uint64_t start, uint64_t end) {
+                              ASSERT_LT(i, entries.size());
+                              const auto& entry = entries[i];
+                              ASSERT_EQ(entry.addr, start);
+                              ASSERT_EQ(entry.end, end);
+                              ASSERT_EQ(entry.label, keys[0]);
+                              i++;
+                            });
+    ASSERT_EQ(entries.size(), i);
   }
 
   void AssertMainMapEquals(const std::vector<Entry>& entries) {
@@ -60,6 +102,9 @@ class RangeMapTest : public ::testing::Test {
   bloaty::RangeMap map_;
   bloaty::RangeMap map2_;
   bloaty::RangeMap map3_;
+
+  const uint64_t kNoTranslation = RangeMap::kNoTranslation;
+  const uint64_t kUnknownSize = RangeMap::kUnknownSize;
 };
 
 TEST_F(RangeMapTest, AddRange) {
@@ -69,21 +114,21 @@ TEST_F(RangeMapTest, AddRange) {
   map_.AddRange(4, 3, "foo");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(4, 7, UINT64_MAX, "foo")
+    {4, 7, kNoTranslation, "foo"}
   });
 
   map_.AddRange(30, 5, "bar");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(4, 7, UINT64_MAX, "foo"),
-    std::make_tuple(30, 35, UINT64_MAX, "bar")
+    {4, 7, kNoTranslation, "foo"},
+    {30, 35, kNoTranslation, "bar"}
   });
 
   map_.AddRange(50, 0, "baz");  // No-op due to 0 size.
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(4, 7, UINT64_MAX, "foo"),
-    std::make_tuple(30, 35, UINT64_MAX, "bar")
+    {4, 7, kNoTranslation, "foo"},
+    {30, 35, kNoTranslation, "bar"}
   });
 
   map_.AddRange(20, 5, "baz");
@@ -91,50 +136,121 @@ TEST_F(RangeMapTest, AddRange) {
   map_.AddRange(40, 5, "quux");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(4, 7, UINT64_MAX, "foo"),
-    std::make_tuple(20, 25, UINT64_MAX, "baz"),
-    std::make_tuple(25, 30, UINT64_MAX, "baz2"),
-    std::make_tuple(30, 35, UINT64_MAX, "bar"),
-    std::make_tuple(40, 45, UINT64_MAX, "quux")
+    {4, 7, kNoTranslation, "foo"},
+    {20, 25, kNoTranslation, "baz"},
+    {25, 30, kNoTranslation, "baz2"},
+    {30, 35, kNoTranslation, "bar"},
+    {40, 45, kNoTranslation, "quux"}
   });
 
   map_.AddRange(21, 25, "overlapping");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(4, 7, UINT64_MAX, "foo"),
-    std::make_tuple(20, 25, UINT64_MAX, "baz"),
-    std::make_tuple(25, 30, UINT64_MAX, "baz2"),
-    std::make_tuple(30, 35, UINT64_MAX, "bar"),
-    std::make_tuple(35, 40, UINT64_MAX, "overlapping"),
-    std::make_tuple(40, 45, UINT64_MAX, "quux"),
-    std::make_tuple(45, 46, UINT64_MAX, "overlapping")
+    {4, 7, kNoTranslation, "foo"},
+    {20, 25, kNoTranslation, "baz"},
+    {25, 30, kNoTranslation, "baz2"},
+    {30, 35, kNoTranslation, "bar"},
+    {35, 40, kNoTranslation, "overlapping"},
+    {40, 45, kNoTranslation, "quux"},
+    {45, 46, kNoTranslation, "overlapping"}
   });
 
   map_.AddRange(21, 25, "overlapping no-op");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(4, 7, UINT64_MAX, "foo"),
-    std::make_tuple(20, 25, UINT64_MAX, "baz"),
-    std::make_tuple(25, 30, UINT64_MAX, "baz2"),
-    std::make_tuple(30, 35, UINT64_MAX, "bar"),
-    std::make_tuple(35, 40, UINT64_MAX, "overlapping"),
-    std::make_tuple(40, 45, UINT64_MAX, "quux"),
-    std::make_tuple(45, 46, UINT64_MAX, "overlapping")
+    {4, 7, kNoTranslation, "foo"},
+    {20, 25, kNoTranslation, "baz"},
+    {25, 30, kNoTranslation, "baz2"},
+    {30, 35, kNoTranslation, "bar"},
+    {35, 40, kNoTranslation, "overlapping"},
+    {40, 45, kNoTranslation, "quux"},
+    {45, 46, kNoTranslation, "overlapping"}
   });
 
   map_.AddRange(0, 100, "overlap everything");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(0, 4, UINT64_MAX, "overlap everything"),
-    std::make_tuple(4, 7, UINT64_MAX, "foo"),
-    std::make_tuple(7, 20, UINT64_MAX, "overlap everything"),
-    std::make_tuple(20, 25, UINT64_MAX, "baz"),
-    std::make_tuple(25, 30, UINT64_MAX, "baz2"),
-    std::make_tuple(30, 35, UINT64_MAX, "bar"),
-    std::make_tuple(35, 40, UINT64_MAX, "overlapping"),
-    std::make_tuple(40, 45, UINT64_MAX, "quux"),
-    std::make_tuple(45, 46, UINT64_MAX, "overlapping"),
-    std::make_tuple(46, 100, UINT64_MAX, "overlap everything"),
+    {0, 4, kNoTranslation, "overlap everything"},
+    {4, 7, kNoTranslation, "foo"},
+    {7, 20, kNoTranslation, "overlap everything"},
+    {20, 25, kNoTranslation, "baz"},
+    {25, 30, kNoTranslation, "baz2"},
+    {30, 35, kNoTranslation, "bar"},
+    {35, 40, kNoTranslation, "overlapping"},
+    {40, 45, kNoTranslation, "quux"},
+    {45, 46, kNoTranslation, "overlapping"},
+    {46, 100, kNoTranslation, "overlap everything"},
+  });
+}
+
+TEST_F(RangeMapTest, UnknownSize) {
+  map_.AddRange(5, kUnknownSize, "foo");
+  CheckConsistency();
+  AssertMainMapEquals({
+    {5, UINT64_MAX, kNoTranslation, "foo"}
+  });
+
+  map_.AddRange(100, 15, "bar");
+  map_.AddRange(200, kUnknownSize, "baz");
+  CheckConsistency();
+  AssertMainMapEquals({
+    {5, 100, kNoTranslation, "foo"},
+    {100, 115, kNoTranslation, "bar"},
+    {200, UINT64_MAX, kNoTranslation, "baz"}
+  });
+
+  map2_.AddRange(5, 110, "base0");
+  map2_.AddRange(200, 50, "base1");
+
+  AssertRollupEquals({&map2_, &map_}, {
+    {{"base0", "foo"}, 5, 100},
+    {{"base0", "bar"}, 100, 115},
+    {{"base1", "baz"}, 200, 250},
+  });
+}
+
+TEST_F(RangeMapTest, UnknownSize2) {
+  // This case is slightly weird, but we do consider the "100" below to be a
+  // hard fact even if the size is unknown, so the "[95, 105]: bar" range
+  // doesn't override it.
+  map_.AddRange(100, kUnknownSize, "foo");
+  map_.AddRange(95, 10, "bar");
+  AssertMainMapEquals({
+    {95, 100, kNoTranslation, "bar"},
+    {100, 105, kNoTranslation, "foo"},
+  });
+}
+
+TEST_F(RangeMapTest, UnknownSize3) {
+  map_.AddRange(100, kUnknownSize, "foo");
+  map_.AddRange(150, kUnknownSize, "bar");
+  // This tells us the ultimate size of "foo", and we keep the "foo" label even
+  // though the new label is "baz".
+  map_.AddRange(100, 100, "baz");
+  AssertMainMapEquals({
+    {100, 200, kNoTranslation, "foo"},
+  });
+}
+
+TEST_F(RangeMapTest, UnknownSize4) {
+  map_.AddRange(100, kUnknownSize, "foo");
+  map_.AddRange(150, 100, "bar");
+  // This tells us the ultimate size of "foo", and we keep the "foo" label even
+  // though the new label is "baz".
+  map_.AddRange(100, 100, "baz");
+  AssertMainMapEquals({
+    {100, 150, kNoTranslation, "foo"},
+    {150, 250, kNoTranslation, "bar"},
+  });
+}
+
+TEST_F(RangeMapTest, Bug1) {
+  map_.AddRange(100, 20, "foo");
+  map_.AddRange(120, 20, "bar");
+  map_.AddRange(100, 15, "baz");
+  AssertMainMapEquals({
+    {100, 120, kNoTranslation, "foo"},
+    {120, 140, kNoTranslation, "bar"},
   });
 }
 
@@ -142,27 +258,27 @@ TEST_F(RangeMapTest, Translation) {
   map_.AddDualRange(20, 5, 120, "foo");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(20, 25, 120, "foo")
+    {20, 25, 120, "foo"}
   });
 
   map2_.AddRangeWithTranslation(15, 15, "translate me", map_, &map3_);
   CheckConsistency();
   AssertMapEquals(map2_, {
-    std::make_tuple(15, 30, UINT64_MAX, "translate me")
+    {15, 30, kNoTranslation, "translate me"}
   });
   AssertMapEquals(map3_, {
-    std::make_tuple(120, 125, UINT64_MAX, "translate me")
+    {120, 125, kNoTranslation, "translate me"}
   });
 
   map_.AddDualRange(1000, 30, 1100, "bar");
   map2_.AddRangeWithTranslation(1000, 5, "translate me2", map_, &map3_);
   AssertMapEquals(map2_, {
-    std::make_tuple(15, 30, UINT64_MAX, "translate me"),
-    std::make_tuple(1000, 1005, UINT64_MAX, "translate me2")
+    {15, 30, kNoTranslation, "translate me"},
+    {1000, 1005, kNoTranslation, "translate me2"}
   });
   AssertMapEquals(map3_, {
-    std::make_tuple(120, 125, UINT64_MAX, "translate me"),
-    std::make_tuple(1100, 1105, UINT64_MAX, "translate me2")
+    {120, 125, kNoTranslation, "translate me"},
+    {1100, 1105, kNoTranslation, "translate me2"}
   });
 }
 
@@ -173,20 +289,20 @@ TEST_F(RangeMapTest, Translation2) {
   map_.AddDualRange(30, 5, 130, "quux");
   CheckConsistency();
   AssertMainMapEquals({
-    std::make_tuple(5, 10, UINT64_MAX, "foo"),
-    std::make_tuple(20, 25, 120, "bar"),
-    std::make_tuple(25, 30, UINT64_MAX, "baz"),
-    std::make_tuple(30, 35, 130, "quux")
+    {5, 10, kNoTranslation, "foo"},
+    {20, 25, 120, "bar"},
+    {25, 30, kNoTranslation, "baz"},
+    {30, 35, 130, "quux"}
   });
 
   map2_.AddRangeWithTranslation(0, 50, "translate me", map_, &map3_);
   CheckConsistency();
   AssertMapEquals(map2_, {
-    std::make_tuple(0, 50, UINT64_MAX, "translate me")
+    {0, 50, kNoTranslation, "translate me"}
   });
   AssertMapEquals(map3_, {
-    std::make_tuple(120, 125, UINT64_MAX, "translate me"),
-    std::make_tuple(130, 135, UINT64_MAX, "translate me")
+    {120, 125, kNoTranslation, "translate me"},
+    {130, 135, kNoTranslation, "translate me"}
   });
 }
 

@@ -84,6 +84,7 @@ add_library(libbloaty
     src/dwarf.cc
     src/elf.cc
     src/macho.cc
+    src/range_map.cc
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
     third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
