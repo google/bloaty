@@ -87,8 +87,8 @@ class RangeMap {
                                       const std::string& label) {
     std::string end =
         size == kUnknownSize ? "?" : absl::StrCat(absl::Hex(addr + size));
-    std::string ret =
-        absl::StrCat("[", absl::Hex(addr), ", ", end, "]: ", label);
+    std::string ret = absl::StrCat("[", absl::Hex(addr), ", ", end,
+                                   "] (size=", absl::Hex(size), "): ", label);
     if (other_start != UINT64_MAX) {
       absl::StrAppend(&ret, ", other_start=", absl::Hex(other_start));
     }
@@ -159,6 +159,15 @@ class RangeMap {
   }
 
   template <class T>
+  bool EntryContainsStrict(T iter, uint64_t addr) const {
+    if (iter->second.size == kUnknownSize) {
+      return iter->first == addr;
+    } else {
+      return addr >= iter->first && addr < RangeEnd(iter);
+    }
+  }
+
+  template <class T>
   void MaybeSetLabel(T iter, const std::string& label, uint64_t addr,
                      uint64_t end);
 
@@ -167,7 +176,11 @@ class RangeMap {
                                 uint64_t unknown) const {
     if (iter->second.size == kUnknownSize) {
       Map::const_iterator next = std::next(iter);
-      return IterIsEnd(next) ? unknown : next->first;
+      if (IterIsEnd(next) || next->first > unknown) {
+        return unknown;
+      } else {
+        return next->first;
+      }
     } else {
       uint64_t ret = iter->first + iter->second.size;
       if (ret <= iter->first) {

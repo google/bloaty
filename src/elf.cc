@@ -936,24 +936,16 @@ static void ReadELFTables(const InputFile& file, DisassemblyInfo* info,
                           RangeSink* sink) {
   bool is_object = IsObjectFile(file.data());
 
+  // Disassemble first, because sometimes other tables will refer to things we
+  // discovered through disassembling.
   ForEachElf(
       file, sink,
-      [&file, info, sink, is_object](
-          const ElfFile& elf, string_view /*filename*/, uint32_t index_base) {
+      [&file, info, sink, is_object](const ElfFile& elf,
+                                     string_view /*filename*/,
+                                     uint32_t /*index_base*/) {
         for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
           ElfFile::Section section;
           elf.ReadSection(i, &section);
-
-          switch (section.header().sh_type) {
-            case SHT_SYMTAB:
-            case SHT_DYNSYM:
-              ReadELFSymbolTableEntries(elf, section, index_base, is_object,
-                                        sink);
-              break;
-            case SHT_RELA:
-              ReadELFRelaEntries(section, index_base, is_object, sink);
-              break;
-          }
 
           if (section.header().sh_flags & SHF_EXECINSTR) {
             // Use symbols to find functions in this executable section.
@@ -975,6 +967,28 @@ static void ReadELFTables(const InputFile& file, DisassemblyInfo* info,
                   DisassembleFindReferences(*info, sink);
                   return true;
                 });
+          }
+        }
+      });
+
+  // Now scan other tables.
+  ForEachElf(
+      file, sink,
+      [&file, info, sink, is_object](
+          const ElfFile& elf, string_view /*filename*/, uint32_t index_base) {
+        for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
+          ElfFile::Section section;
+          elf.ReadSection(i, &section);
+
+          switch (section.header().sh_type) {
+            case SHT_SYMTAB:
+            case SHT_DYNSYM:
+              ReadELFSymbolTableEntries(elf, section, index_base, is_object,
+                                        sink);
+              break;
+            case SHT_RELA:
+              ReadELFRelaEntries(section, index_base, is_object, sink);
+              break;
           }
 
           if (section.GetName() == ".eh_frame") {

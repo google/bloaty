@@ -228,7 +228,8 @@ TEST_F(RangeMapTest, UnknownSize3) {
   // though the new label is "baz".
   map_.AddRange(100, 100, "baz");
   AssertMainMapEquals({
-    {100, 200, kNoTranslation, "foo"},
+    {100, 150, kNoTranslation, "foo"},
+    {150, 200, kNoTranslation, "bar"},
   });
 }
 
@@ -251,6 +252,28 @@ TEST_F(RangeMapTest, Bug1) {
   AssertMainMapEquals({
     {100, 120, kNoTranslation, "foo"},
     {120, 140, kNoTranslation, "bar"},
+  });
+}
+
+TEST_F(RangeMapTest, Bug2) {
+  map_.AddRange(100, kUnknownSize, "foo");
+  map_.AddRange(200, 50, "bar");
+  map_.AddRange(150, 10, "baz");
+  AssertMainMapEquals({
+    {100, 150, kNoTranslation, "foo"},
+    {150, 160, kNoTranslation, "baz"},
+    {200, 250, kNoTranslation, "bar"},
+  });
+}
+
+TEST_F(RangeMapTest, Bug3) {
+  map_.AddRange(100, kUnknownSize, "foo");
+  map_.AddRange(200, kUnknownSize, "bar");
+  map_.AddRange(150, 10, "baz");
+  AssertMainMapEquals({
+    {100, 150, kNoTranslation, "foo"},
+    {150, 160, kNoTranslation, "baz"},
+    {200, UINT64_MAX, kNoTranslation, "bar"},
   });
 }
 
@@ -303,6 +326,23 @@ TEST_F(RangeMapTest, Translation2) {
   AssertMapEquals(map3_, {
     {120, 125, kNoTranslation, "translate me"},
     {130, 135, kNoTranslation, "translate me"}
+  });
+}
+
+TEST_F(RangeMapTest, UnknownTranslation) {
+  map_.AddDualRange(20, 10, 120, "foo");
+  CheckConsistency();
+  AssertMainMapEquals({
+    {20, 30, 120, "foo"}
+  });
+
+  map2_.AddRangeWithTranslation(25, kUnknownSize, "translate me", map_, &map3_);
+  CheckConsistency();
+  AssertMapEquals(map2_, {
+    {25, UINT64_MAX, kNoTranslation, "translate me"}
+  });
+  AssertMapEquals(map3_, {
+    {125, UINT64_MAX, kNoTranslation, "translate me"}
   });
 }
 

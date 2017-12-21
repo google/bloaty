@@ -893,8 +893,6 @@ void RangeSink::AddFileRangeFor(uint64_t label_from_vmaddr,
             "[%s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
             GetDataSourceLabel(data_source_), label_from_vmaddr, file_offset,
             file_range.size());
-    fprintf(stdout, "Translation map:\n%s",
-            translator_->file_map.DebugString().c_str());
   }
   assert(translator_);
   for (auto& pair : outputs_) {
@@ -904,6 +902,8 @@ void RangeSink::AddFileRangeFor(uint64_t label_from_vmaddr,
       pair.first->file_map.AddRangeWithTranslation(
           file_offset, file_range.size(), label, translator_->file_map,
           &pair.first->vm_map);
+    } else if (verbose_level > 2) {
+      printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
   }
 }
@@ -924,6 +924,8 @@ void RangeSink::AddVMRangeFor(uint64_t label_from_vmaddr, uint64_t addr,
     if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
       pair.first->vm_map.AddRangeWithTranslation(
           addr, size, label, translator_->vm_map, &pair.first->file_map);
+    } else if (verbose_level > 2) {
+      printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
   }
 }

@@ -29,13 +29,23 @@ template <class T>
 bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
                                               uint64_t size, uint64_t* out_addr,
                                               uint64_t* out_size) const {
-  addr = std::max(addr, iter->first);
-  uint64_t end = std::min(addr + size, iter->first + iter->second.size);
+  if (!iter->second.HasTranslation()) {
+    return false;
+  }
 
-  if (addr >= end || !iter->second.HasTranslation()) return false;
+  addr = std::max(addr, iter->first);
+
+  if (size == kUnknownSize) {
+    *out_size = kUnknownSize;
+  } else {
+    uint64_t end = std::min(addr + size, iter->first + iter->second.size);
+    if (addr >= end) {
+      return false;
+    }
+    *out_size = end - addr;
+  }
 
   *out_addr = TranslateWithEntry(iter, addr);
-  *out_size = end - addr;
   return true;
 }
 
@@ -126,33 +136,44 @@ void RangeMap::MaybeSetLabel(T iter, const std::string& label, uint64_t addr,
       if (!IterIsEnd(next)) {
         end = std::min(end, next->first);
       }
+      uint64_t new_size = end - iter->first;
+      if (verbose_level > 2) {
+        printf("  updating mapping (%s) with new size %" PRIx64 "\n",
+               EntryDebugString(addr, size, UINT64_MAX, label).c_str(),
+               new_size);
+      }
       // This new defined range encompassess all of the unknown-length range, so
       // just define the range to have our end.
-      iter->second.size = end - iter->first;
+      iter->second.size = new_size;
       CheckConsistency(iter);
     }
   } else if (verbose_level > 1) {
-    printf(
-        "WARN: adding mapping (%s), this conflicts with existing mapping "
-        "(%s)\n",
-        EntryDebugString(addr, size, UINT64_MAX, label).c_str(),
-        EntryDebugString(iter).c_str());
+    printf("  skipping existing mapping (%s)\n",
+           EntryDebugString(iter).c_str());
   }
 }
 
 void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
                             const std::string& label) {
+  if (verbose_level > 2) {
+    printf("%p AddDualRange([%" PRIx64 ", %" PRIx64 "], %" PRIx64 ", %s)\n",
+           this, addr, size, otheraddr, label.c_str());
+  }
+
   if (size == 0) return;
 
   auto it = FindContainingOrAfter(addr);
 
   if (size == kUnknownSize) {
     assert(otheraddr == kNoTranslation);
-    if (it != mappings_.end() && EntryContains(it, addr)) {
+    if (it != mappings_.end() && EntryContainsStrict(it, addr)) {
       MaybeSetLabel(it, label, addr, kUnknownSize);
     } else {
-      mappings_.emplace_hint(
+      auto iter = mappings_.emplace_hint(
           it, std::make_pair(addr, Entry(label, kUnknownSize, kNoTranslation)));
+      if (verbose_level > 2) {
+        printf("  added entry: %s\n", EntryDebugString(iter).c_str());
+      }
     }
     return;
   }
@@ -164,7 +185,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
   while (1) {
     // Advance past existing entries that intersect this range until we find a
     // gap.
-    while (addr < end && it != mappings_.end() && EntryContains(it, addr)) {
+    while (addr < end && !IterIsEnd(it) && EntryContains(it, addr)) {
       assert(end >= addr);
       MaybeSetLabel(it, label, addr, end - addr);
       addr = RangeEndUnknownLimit(it, addr);
@@ -189,6 +210,9 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
     assert(addr + this_size >= addr);
     auto iter = mappings_.emplace_hint(
         it, std::make_pair(addr, Entry(label, this_end - addr, other)));
+    if (verbose_level > 2) {
+      printf("  added entry: %s\n", EntryDebugString(iter).c_str());
+    }
     CheckConsistency(iter);
     addr = this_end;
   }
@@ -209,7 +233,13 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
   AddRange(addr, size, val);
 
   auto it = translator.FindContainingOrAfter(addr);
-  uint64_t end = addr + size;
+  uint64_t end;
+  if (size == kUnknownSize) {
+    end = addr + 1;
+  } else {
+    end = addr + size;
+    assert(end >= addr);
+  }
 
   // TODO: optionally warn about when we span ranges of the translator.  In some
   // cases this would be a bug (ie. symbols VM->file).  In other cases it's
