@@ -633,7 +633,7 @@ enum PointerEncoding {
   DW_EH_PE_FORMAT_MASK = 0x0f,
 
   DW_EH_PE_pcrel       = 0x10,
-  DW_EH_PE_textre      = 0x20,
+  DW_EH_PE_textrel     = 0x20,
   DW_EH_PE_datarel     = 0x30,
   DW_EH_PE_funcrel     = 0x40,
   DW_EH_PE_aligned     = 0x50,

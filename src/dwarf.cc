@@ -1971,11 +1971,14 @@ static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
 }
 
 uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
-                            RangeSink* sink) {
+                            const char* data_base, RangeSink* sink) {
   uint64_t value;
   const char *ptr = data->data();
+  uint8_t format = encoding & DW_EH_PE_FORMAT_MASK;
 
-  switch (encoding & DW_EH_PE_FORMAT_MASK) {
+  switch (format) {
+    case DW_EH_PE_omit:
+      return 0;
     case DW_EH_PE_absptr:
       if (is_64bit) {
         value = dwarf::ReadMemcpy<uint64_t>(data);
@@ -2008,20 +2011,27 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
       value = dwarf::ReadMemcpy<int64_t>(data);
       break;
     default:
-      THROW("Unexpected eh_frame format value.");
+      THROWF("Unexpected eh_frame format value: $0", format);
   }
 
-  switch(encoding & DW_EH_PE_APPLICATION_MASK) {
+  uint8_t application = encoding & DW_EH_PE_APPLICATION_MASK;
+
+  switch(application) {
     case 0:
       break;
     case DW_EH_PE_pcrel:
       value += sink->TranslateFileToVM(ptr);
       break;
-    case DW_EH_PE_textre:
     case DW_EH_PE_datarel:
+      if (data_base == nullptr) {
+        THROW("datarel requested but no data_base provided");
+      }
+      value += sink->TranslateFileToVM(data_base);
+      break;
+    case DW_EH_PE_textrel:
     case DW_EH_PE_funcrel:
     case DW_EH_PE_aligned:
-      THROW("Unimplemented eh_frame application value.");
+      THROWF("Unimplemented eh_frame application value: $0", application);
   }
 
   if (encoding & DW_EH_PE_indirect) {
@@ -2119,7 +2129,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
           case 'P': {
             uint8_t encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
             cie_info.personality_function =
-                ReadEncodedPointer(encoding, true, &entry, sink);
+                ReadEncodedPointer(encoding, true, &entry, nullptr, sink);
             break;
           }
           default:
@@ -2134,14 +2144,49 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
       }
       const CIEInfo& cie_info = iter->second;
       // TODO(haberman): don't hard-code 64-bit.
-      uint64_t address =
-          ReadEncodedPointer(cie_info.fde_encoding, true, &entry, sink);
+      uint64_t address = ReadEncodedPointer(cie_info.fde_encoding, true, &entry,
+                                            nullptr, sink);
       // TODO(haberman); Technically the FDE addresses could span a
       // function/compilation unit?  They can certainly span inlines.
       // uint64_t length =
       //   ReadEncodedPointer(cie_info.fde_encoding & 0xf, true, &entry, sink);
       sink->AddFileRangeFor(address, full_entry);
     }
+  }
+}
+
+// See documentation here:
+//   http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html#EHFRAME
+void ReadEhFrameHdr(string_view data, RangeSink* sink) {
+  const char* base = data.data();
+  uint8_t version = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t eh_frame_ptr_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t fde_count_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t table_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+
+  if (version != 1) {
+    THROWF("Unknown eh_frame_hdr version: $0", version);
+  }
+
+  // TODO(haberman): don't hard-code 64-bit.
+  uint64_t eh_frame_ptr =
+      ReadEncodedPointer(eh_frame_ptr_enc, true, &data, base, sink);
+  (void)eh_frame_ptr;
+  uint64_t fde_count =
+      ReadEncodedPointer(fde_count_enc, true, &data, base, sink);
+
+  for (uint64_t i = 0; i < fde_count; i++) {
+    string_view entry_data = data;
+    uint64_t initial_location =
+        ReadEncodedPointer(table_enc, true, &data, base, sink);
+    uint64_t fde_addr = ReadEncodedPointer(table_enc, true, &data, base, sink);
+    entry_data.remove_suffix(data.size());
+    sink->AddFileRangeFor(initial_location, entry_data);
+
+    // We could add fde_addr with an unknown length if we wanted to skip reading
+    // eh_frame.  We can't count on this table being available though, so we
+    // don't want to remove the eh_frame reading code altogether.
+    (void)fde_addr;
   }
 }
 

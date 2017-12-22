@@ -313,6 +313,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 void ReadEhFrame(absl::string_view contents, RangeSink* sink);
+void ReadEhFrameHdr(absl::string_view contents, RangeSink* sink);
 
 
 // LineReader //////////////////////////////////////////////////////////////////

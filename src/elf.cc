@@ -991,8 +991,15 @@ static void ReadELFTables(const InputFile& file, DisassemblyInfo* info,
               break;
           }
 
+          // We are looking by section name, which is a little different than
+          // what the loader actually does (which is find eh_frame_hdr from the
+          // program headers and then find eh_frame fde entries from there).
+          // But these section names should be standard enough that this
+          // approach works also.
           if (section.GetName() == ".eh_frame") {
             ReadEhFrame(section.contents(), sink);
+          } else if (section.GetName() == ".eh_frame_hdr") {
+            ReadEhFrameHdr(section.contents(), sink);
           }
         }
       });
