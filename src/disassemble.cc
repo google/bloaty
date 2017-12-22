@@ -63,7 +63,13 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
 
   while (size > 0) {
     if (!cs_disasm_iter(handle, &ptr, &size, &address, in)) {
-      THROWF("Error disassembling function, address: $0", address);
+      // Some symbols that end up in the .text section aren't really functions
+      // but data.  Not sure why this happens.
+      if (verbose_level > 1) {
+        printf("Error disassembling function at address: %" PRIx64 "\n",
+               address);
+      }
+      goto cleanup;
     }
 
     size_t count = in->detail->x86.op_count;
@@ -80,6 +86,7 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
     }
   }
 
+cleanup:
   cs_free(in, 1);
   cs_close(&handle);
 }

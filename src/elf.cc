@@ -771,19 +771,6 @@ void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
   }
 }
 
-void AddCatchAll(RangeSink* sink) {
-  ForEachElf(sink->input_file(), sink,
-             [sink](const ElfFile& elf, string_view /*filename*/,
-                    uint32_t /*index_base*/) {
-               sink->AddFileRange("[ELF Headers]", elf.header_region());
-               sink->AddFileRange("[ELF Headers]", elf.section_headers());
-               sink->AddFileRange("[ELF Headers]", elf.segment_headers());
-
-             });
-  // The last-line fallback to make sure we cover the entire file.
-  sink->AddFileRange("[Unmapped]", sink->input_file().data());
-}
-
 // For object files, addresses are relative to the section they live in, which
 // is indicated by ndx.  We split this into:
 //
@@ -1217,6 +1204,23 @@ static void ReadElfArchMode(const InputFile& file, cs_arch* arch, cs_mode* mode)
                // but a single .a file shouldn't have multiple archs in it.
                ElfMachineToCapstone(elf.header().e_machine, arch, mode);
              });
+}
+
+void AddCatchAll(RangeSink* sink) {
+  ForEachElf(sink->input_file(), sink,
+             [sink](const ElfFile& elf, string_view /*filename*/,
+                    uint32_t /*index_base*/) {
+               sink->AddFileRange("[ELF Headers]", elf.header_region());
+               sink->AddFileRange("[ELF Headers]", elf.section_headers());
+               sink->AddFileRange("[ELF Headers]", elf.segment_headers());
+
+             });
+
+  // The last-line fallback to make sure we cover the entire VM space.
+  DoReadELFSegments(sink, kReportByEscapedSegmentName);
+
+  // The last-line fallback to make sure we cover the entire file.
+  sink->AddFileRange("[Unmapped]", sink->input_file().data());
 }
 
 }  // namespace
