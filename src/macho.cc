@@ -106,7 +106,7 @@ void ParseMachOSegment(string_view command_data, string_view file_data,
 
   if (sink->data_source() == DataSource::kSegments) {
     sink->AddRange(
-        segname, segment->vmaddr, segment->vmsize,
+        "macho_segment", segname, segment->vmaddr, segment->vmsize,
         StrictSubstr(file_data, segment->fileoff, segment->filesize));
   } else if (sink->data_source() == DataSource::kSections) {
     uint32_t nsects = segment->nsects;
@@ -127,7 +127,7 @@ void ParseMachOSegment(string_view command_data, string_view file_data,
 
       std::string label = absl::StrJoin(
           std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
-      sink->AddRange(label, section->addr, section->size,
+      sink->AddRange("macho_section", label, section->addr, section->size,
                      StrictSubstr(file_data, section->offset, filesize));
     }
   } else {
@@ -139,18 +139,20 @@ static void ParseMachODyldInfo(string_view command_data, string_view file_data,
                                RangeSink* sink) {
   auto info = GetStructPointer<dyld_info_command>(command_data);
 
-  sink->AddFileRange("Rebase Info", StrictSubstr(file_data, info->rebase_off,
-                                                 info->rebase_size));
-  sink->AddFileRange("Binding Info",
+  sink->AddFileRange(
+      "macho_dyld", "Rebase Info",
+      StrictSubstr(file_data, info->rebase_off, info->rebase_size));
+  sink->AddFileRange("macho_dyld", "Binding Info",
                      StrictSubstr(file_data, info->bind_off, info->bind_size));
   sink->AddFileRange(
-      "Weak Binding Info",
+      "macho_dyld", "Weak Binding Info",
       StrictSubstr(file_data, info->weak_bind_off, info->weak_bind_size));
   sink->AddFileRange(
-      "Lazy Binding Info",
+      "macho_dyld", "Lazy Binding Info",
       StrictSubstr(file_data, info->lazy_bind_off, info->lazy_bind_size));
-  sink->AddFileRange("Export Info", StrictSubstr(file_data, info->export_off,
-                                                 info->export_size));
+  sink->AddFileRange(
+      "macho_dyld", "Export Info",
+      StrictSubstr(file_data, info->export_off, info->export_size));
 }
 
 static void ParseSymbolTable(string_view command_data, string_view file_data,
@@ -158,10 +160,10 @@ static void ParseSymbolTable(string_view command_data, string_view file_data,
   auto symtab = GetStructPointer<symtab_command>(command_data);
 
   // TODO(haberman): use 32-bit symbol size where appropriate.
-  sink->AddFileRange("Symbol Table",
+  sink->AddFileRange("macho_symtab", "Symbol Table",
                      StrictSubstr(file_data, symtab->symoff,
                                   symtab->nsyms * sizeof(nlist_64)));
-  sink->AddFileRange("String Table",
+  sink->AddFileRange("macho_symtab", "String Table",
                      StrictSubstr(file_data, symtab->stroff, symtab->strsize));
 }
 
@@ -170,24 +172,24 @@ static void ParseDynamicSymbolTable(string_view command_data,
   auto dysymtab = GetStructPointer<dysymtab_command>(command_data);
 
   sink->AddFileRange(
-      "Table of Contents",
+      "macho_dynsymtab", "Table of Contents",
       StrictSubstr(file_data, dysymtab->tocoff,
                    dysymtab->ntoc * sizeof(dylib_table_of_contents)));
-  sink->AddFileRange("Module Table",
+  sink->AddFileRange("macho_dynsymtab", "Module Table",
                      StrictSubstr(file_data, dysymtab->modtaboff,
                                   dysymtab->nmodtab * sizeof(dylib_module_64)));
   sink->AddFileRange(
-      "Referenced Symbol Table",
+      "macho_dynsymtab", "Referenced Symbol Table",
       StrictSubstr(file_data, dysymtab->extrefsymoff,
                    dysymtab->nextrefsyms * sizeof(dylib_reference)));
-  sink->AddFileRange("Indirect Symbol Table",
+  sink->AddFileRange("macho_dynsymtab", "Indirect Symbol Table",
                      StrictSubstr(file_data, dysymtab->indirectsymoff,
                                   dysymtab->nindirectsyms * sizeof(uint32_t)));
-  sink->AddFileRange("External Relocation Entries",
+  sink->AddFileRange("macho_dynsymtab", "External Relocation Entries",
                      StrictSubstr(file_data, dysymtab->extreloff,
                                   dysymtab->nextrel * sizeof(relocation_info)));
   sink->AddFileRange(
-      "Local Relocation Entries",
+      "macho_dynsymtab", "Local Relocation Entries",
       StrictSubstr(file_data, dysymtab->locreloff,
                    dysymtab->nlocrel * sizeof(struct relocation_info)));
 }
@@ -196,7 +198,8 @@ static void ParseLinkeditCommand(string_view label, string_view command_data,
                                  string_view file_data, RangeSink* sink) {
   auto linkedit = GetStructPointer<linkedit_data_command>(command_data);
   sink->AddFileRange(
-      label, StrictSubstr(file_data, linkedit->dataoff, linkedit->datasize));
+      "macho_linkedit", label,
+      StrictSubstr(file_data, linkedit->dataoff, linkedit->datasize));
 }
 
 void ParseMachOLoadCommand(uint32_t cmd, string_view command_data,
@@ -275,7 +278,8 @@ static void ParseMachOSymbols(string_view command_data, string_view file_data,
         continue;
       }
 
-      sink->AddVMRange(addr, size, ItaniumDemangle(name, sink->data_source()));
+      sink->AddVMRange("macho_syms", addr, size,
+                       ItaniumDemangle(name, sink->data_source()));
     }
   }
 }
@@ -378,7 +382,7 @@ static void ParseMachOFile(RangeSink* sink) {
 }
 
 static void AddMachOFallback(RangeSink* sink) {
-  sink->AddFileRange("[Unmapped]", sink->input_file().data());
+  sink->AddFileRange("macho_fallback", "[Unmapped]", sink->input_file().data());
 }
 
 class MachOObjectFile : public ObjectFile {

@@ -344,6 +344,13 @@ TEST_F(RangeMapTest, UnknownTranslation) {
   AssertMapEquals(map3_, {
     {125, UINT64_MAX, kNoTranslation, "translate me"}
   });
+
+  map2_.AddRange(20, 10, "fallback");
+
+  AssertRollupEquals({&map_, &map2_}, {
+    {{"foo", "fallback"}, 20, 25},
+    {{"foo", "translate me"}, 25, 30},
+  });
 }
 
 }  // namespace bloaty

@@ -146,26 +146,28 @@ class RangeSink {
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
-                uint64_t fileoff, uint64_t filesize);
+  void AddRange(const char* analyzer, absl::string_view name, uint64_t vmaddr,
+                uint64_t vmsize, uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
-                      absl::string_view file_range) {
-    AddRange(name, vmaddr, vmsize, file_range.data() - file_->data().data(),
-             file_range.size());
+  void AddRange(const char* analyzer, absl::string_view name, uint64_t vmaddr,
+                uint64_t vmsize, absl::string_view file_range) {
+    AddRange(analyzer, name, vmaddr, vmsize,
+             file_range.data() - file_->data().data(), file_range.size());
   }
 
-  void AddFileRange(absl::string_view name,
+  void AddFileRange(const char* analyzer, absl::string_view name,
                     uint64_t fileoff, uint64_t filesize);
 
   // Like AddFileRange(), but the label is whatever label was previously
   // assigned to VM address |label_from_vmaddr|.  If no existing label is
   // assigned to |label_from_vmaddr|, this function does nothing.
-  void AddFileRangeFor(uint64_t label_from_vmaddr,
+  void AddFileRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
                        absl::string_view file_range);
-  void AddVMRangeFor(uint64_t label_from_vmaddr, uint64_t addr, uint64_t size);
+  void AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
+                     uint64_t addr, uint64_t size);
 
-  void AddFileRange(absl::string_view name, absl::string_view file_range) {
+  void AddFileRange(const char* analyzer, absl::string_view name,
+                    absl::string_view file_range) {
     // When separate debug files are being used, the DWARF analyzer will try to
     // add sections of the debug file.  We want to prevent this because we only
     // want to profile the main file (not the debug file), so we filter these
@@ -173,7 +175,7 @@ class RangeSink {
     // useless work being done.  We may want to avoid doing this useless work in
     // the first place.
     if (FileContainsPointer(file_range.data())) {
-      AddFileRange(name, file_range.data() - file_->data().data(),
+      AddFileRange(analyzer, name, file_range.data() - file_->data().data(),
                    file_range.size());
     }
   }
@@ -182,7 +184,8 @@ class RangeSink {
 
   // Adds a region to the memory map.  It should not overlap any previous
   // region added with Add(), but it should overlap the base memory map.
-  void AddVMRange(uint64_t vmaddr, uint64_t vmsize, const std::string& name);
+  void AddVMRange(const char* analyzer, uint64_t vmaddr, uint64_t vmsize,
+                  const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
   // already under a different name.  If so, this name becomes an alias of the
@@ -190,8 +193,8 @@ class RangeSink {
   //
   // This is for things like symbol tables that sometimes map multiple names to
   // the same physical function.
-  void AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
-                            const std::string& name);
+  void AddVMRangeAllowAlias(const char* analyzer, uint64_t vmaddr,
+                            uint64_t size, const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
   // already under a different name.  If so, this add is simply ignored.
@@ -200,8 +203,8 @@ class RangeSink {
   // come from multiple source files.  But if it does, we don't want to alias
   // the entire source file to another, because it's probably only part of the
   // source file that overlaps.
-  void AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t size,
-                                 const std::string& name);
+  void AddVMRangeIgnoreDuplicate(const char* analyzer, uint64_t vmaddr,
+                                 uint64_t size, const std::string& name);
 
   const DualMap& MapAtIndex(size_t index) const {
     return *outputs_[index].first;

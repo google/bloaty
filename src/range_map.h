@@ -119,7 +119,8 @@ class RangeMap {
   template <class Func>
   void ForEachRangeWithStart(uint64_t start, Func func) const {
     for (auto iter = FindContaining(start); iter != mappings_.end(); ++iter) {
-      if (!func(iter->first, RangeEnd(iter) - iter->first)) {
+      if (!func(iter->second.label, iter->first,
+                RangeEnd(iter) - iter->first)) {
         return;
       }
     }

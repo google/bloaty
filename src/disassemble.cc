@@ -80,7 +80,8 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
           op->mem.index == X86_REG_INVALID) {
         uint64_t to_address = in->address + in->size + op->mem.disp;
         if (to_address) {
-          sink->AddVMRangeFor(in->address, to_address, RangeSink::kUnknownSize);
+          sink->AddVMRangeFor("x86_disassemble", in->address, to_address,
+                              RangeSink::kUnknownSize);
         }
       }
     }

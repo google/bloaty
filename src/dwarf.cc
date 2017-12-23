@@ -592,7 +592,7 @@ class DIEReader {
 
   void AddIndirectString(string_view range) const {
     if (strp_sink_) {
-      strp_sink_->AddFileRange(unit_name_, range);
+      strp_sink_->AddFileRange("dwarf_strp", unit_name_, range);
     }
   }
 
@@ -1851,8 +1851,8 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
     std::string filename = map.GetFilename(ranges.debug_info_offset());
 
     while (ranges.NextRange()) {
-      sink->AddVMRangeIgnoreDuplicate(ranges.address(), ranges.length(),
-                                      filename);
+      sink->AddVMRangeIgnoreDuplicate("dwarf_aranges", ranges.address(),
+                                      ranges.length(), filename);
     }
   }
 
@@ -1876,7 +1876,7 @@ void AddDIE(const dwarf::File& file, const std::string& name,
     if (high_pc > low_pc) {
       high_pc -= low_pc;
     }
-    sink->AddVMRangeIgnoreDuplicate(low_pc, high_pc, name);
+    sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, name);
   }
 
   // Sometimes a DIE has a linkage_name, which we can look up in the symbol
@@ -1884,8 +1884,8 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   if (attr.HasAttribute<1>()) {
     auto it = symtab.find(attr.GetAttribute<1>());
     if (it != symtab.end()) {
-      sink->AddVMRangeIgnoreDuplicate(it->second.first, it->second.second,
-                                      name);
+      sink->AddVMRangeIgnoreDuplicate("dwarf_linkagename", it->second.first,
+                                      it->second.second, name);
     }
   }
 
@@ -1910,7 +1910,7 @@ void AddDIE(const dwarf::File& file, const std::string& name,
       // up in the symbol map.
       uint64_t size;
       if (symbol_map.vm_map.TryGetSize(addr, &size)) {
-        sink->AddVMRangeIgnoreDuplicate(addr, size, name);
+        sink->AddVMRangeIgnoreDuplicate("dwarf_location", addr, size, name);
       } else {
         if (verbose_level > 0) {
           fprintf(stderr,
@@ -1925,7 +1925,7 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   if (attr.HasAttribute<5>()) {
     absl::string_view loc_range = file.debug_loc.substr(attr.GetAttribute<5>());
     loc_range = GetLocationListRange(sizes, loc_range);
-    sink->AddFileRange(name, loc_range);
+    sink->AddFileRange("dwarf_locrange", name, loc_range);
   }
 
   uint64_t ranges_offset = UINT64_MAX;
@@ -1939,7 +1939,7 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   if (ranges_offset != UINT64_MAX) {
     absl::string_view ranges_range = file.debug_ranges.substr(ranges_offset);
     ranges_range = GetRangeListRange(sizes, ranges_range);
-    sink->AddFileRange(name, ranges_range);
+    sink->AddFileRange("dwarf_debugrange", name, ranges_range);
   }
 }
 
@@ -1965,7 +1965,7 @@ static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
     attr_reader.ReadAttributes(&die_reader);
     std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
     if (!compileunit_name.empty()) {
-      sink->AddFileRange(compileunit_name, full_unit);
+      sink->AddFileRange("dwarf_pubnames", compileunit_name, full_unit);
     }
   }
 }
@@ -2078,6 +2078,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
     uint8_t fde_encoding = 0;
     uint8_t lsda_encoding = 0;
     bool is_signal_handler = false;
+    bool has_augmentation_length = false;
     uint64_t personality_function = 0;
     uint32_t return_address_reg = 0;
   };
@@ -2115,6 +2116,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
         switch (aug_string[0]) {
           case 'z':
             // Length until the end of augmentation data.
+            cie_info.has_augmentation_length = true;
             dwarf::ReadLEB128<uint32_t>(&entry);
             break;
           case 'L':
@@ -2148,9 +2150,23 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
                                             nullptr, sink);
       // TODO(haberman); Technically the FDE addresses could span a
       // function/compilation unit?  They can certainly span inlines.
-      // uint64_t length =
-      //   ReadEncodedPointer(cie_info.fde_encoding & 0xf, true, &entry, sink);
-      sink->AddFileRangeFor(address, full_entry);
+      /*
+      uint64_t length =
+        ReadEncodedPointer(cie_info.fde_encoding & 0xf, true, &entry, sink);
+      (void)length;
+
+      if (cie_info.has_augmentation_length) {
+        uint32_t augmentation_length = dwarf::ReadLEB128<uint32_t>(&entry);
+        (void)augmentation_length;
+      }
+
+      uint64_t lsda =
+          ReadEncodedPointer(cie_info.lsda_encoding, true, &entry, sink);
+      if (lsda) {
+      }
+      */
+
+      sink->AddFileRangeFor("dwarf_fde", address, full_entry);
     }
   }
 }
@@ -2181,7 +2197,7 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
         ReadEncodedPointer(table_enc, true, &data, base, sink);
     uint64_t fde_addr = ReadEncodedPointer(table_enc, true, &data, base, sink);
     entry_data.remove_suffix(data.size());
-    sink->AddFileRangeFor(initial_location, entry_data);
+    sink->AddFileRangeFor("dwarf_fde_table", initial_location, entry_data);
 
     // We could add fde_addr with an unknown length if we wanted to skip reading
     // eh_frame.  We can't count on this table being available though, so we
@@ -2199,7 +2215,7 @@ static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
   data = sizes.ReadInitialLength(&data);
   data = data_with_length.substr(
       0, data.size() + (data.data() - data_with_length.data()));
-  sink->AddFileRange(unit_name, data);
+  sink->AddFileRange("dwarf_stmtlistrange", unit_name, data);
 }
 
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
@@ -2243,7 +2259,8 @@ static void ReadDWARFDebugInfo(
     }
 
     die_reader.set_compileunit_name(compileunit_name);
-    sink->AddFileRange(compileunit_name, die_reader.unit_range());
+    sink->AddFileRange("dwarf_debuginfo", compileunit_name,
+                       die_reader.unit_range());
     AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
            die_reader.unit_sizes(), sink);
 
@@ -2256,7 +2273,7 @@ static void ReadDWARFDebugInfo(
     dwarf::SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
     dwarf::AbbrevTable unit_abbrev;
     abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
-    sink->AddFileRange(compileunit_name, abbrev_data);
+    sink->AddFileRange("dwarf_abbrev", compileunit_name, abbrev_data);
 
     while (die_reader.NextDIE()) {
       attr_reader.ReadAttributes(&die_reader);
@@ -2313,7 +2330,8 @@ static void ReadDWARFStmtList(bool include_line,
       span_startaddr = addr;
     } else if (line_info.end_sequence ||
         (!last_source.empty() && name != last_source)) {
-      sink->AddVMRange(span_startaddr, addr - span_startaddr, last_source);
+      sink->AddVMRange("dwarf_stmtlist", span_startaddr, addr - span_startaddr,
+                       last_source);
       if (line_info.end_sequence) {
         span_startaddr = 0;
       } else {
