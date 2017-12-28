@@ -63,7 +63,11 @@ class RangeMap {
   // to |other| (in domain D2), using |translator| (in domain D1) to translate
   // D1->D2.  The translation is performed using information from previous
   // AddDualRange() calls on |translator|.
-  void AddRangeWithTranslation(uint64_t addr, uint64_t size,
+  //
+  // Returns true if the entire range [addr, size] was present in the
+  // |translator| map.  (This does not necessarily mean that every part of the
+  // range was actually translated).
+  bool AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                const std::string& val,
                                const RangeMap& translator, RangeMap* other);
 
@@ -273,9 +277,24 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
       // Starting a new continuous range: all iterators must start at the same
       // place.
       current = iters[0]->first;
-      for (auto iter : iters) {
-        assert(iter->first == current);
-        keys.push_back(iter->second.label);
+      for (int i = 0; i < range_maps.size(); i++)  {
+        if (range_maps[i]->IterIsEnd(iters[i])) {
+          printf(
+              "Error, no more ranges for index %d but we need one "
+              "to match (%s)\n",
+              i, range_maps[0]->EntryDebugString(iters[0]).c_str());
+          assert(false);
+          throw std::runtime_error("No more ranges.");
+        } else if (iters[i]->first != current) {
+          printf(
+              "Error, range (%s) doesn't cover the beginning of base range "
+              "(%s)\n",
+              range_maps[i]->EntryDebugString(iters[i]).c_str(),
+              range_maps[0]->EntryDebugString(iters[0]).c_str());
+          assert(false);
+          throw std::runtime_error("No more ranges.");
+        }
+        keys.push_back(iters[i]->second.label);
       }
     }
 

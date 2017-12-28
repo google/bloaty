@@ -1205,7 +1205,11 @@ void AddCatchAll(RangeSink* sink) {
              });
 
   // The last-line fallback to make sure we cover the entire VM space.
-  DoReadELFSegments(sink, kReportByEscapedSegmentName);
+  if (IsObjectFile(sink->input_file().data())) {
+    DoReadELFSections(sink, kReportByEscapedSectionName);
+  } else {
+    DoReadELFSegments(sink, kReportByEscapedSegmentName);
+  }
 
   // The last-line fallback to make sure we cover the entire file.
   sink->AddFileRange("elf_catchall", "[Unmapped]", sink->input_file().data());
