@@ -71,6 +71,9 @@ class RangeMap {
                                const std::string& val,
                                const RangeMap& translator, RangeMap* other);
 
+  // Returns whether this RangeMap fully covers the given range.
+  bool CoversRange(uint64_t addr, uint64_t size) const;
+
   // Translates |addr| into the other domain, returning |true| if this was
   // successful.
   bool Translate(uint64_t addr, uint64_t *translated) const;
@@ -227,6 +230,21 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
                              Func func) {
   assert(range_maps.size() > 0);
   std::vector<Map::const_iterator> iters;
+
+  if (range_maps[0]->mappings_.empty()) {
+    for (int i = 0; i < range_maps.size(); i++) {
+      const RangeMap* range_map = range_maps[i];
+      if (!range_map->mappings_.empty()) {
+        printf(
+            "Error, range (%s) exists at index %d, but base map is empty\n",
+            range_map->EntryDebugString(range_map->mappings_.begin()).c_str(),
+            i);
+        assert(false);
+        throw std::runtime_error("Range extends beyond base map.");
+      }
+    }
+    return;
+  }
 
   for (auto range_map : range_maps) {
     iters.push_back(range_map->mappings_.begin());

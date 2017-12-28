@@ -987,6 +987,14 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
             GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
             name.data(), vmaddr, vmsize, fileoff, filesize);
   }
+
+  if (translator_) {
+    if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
+        !translator_->file_map.CoversRange(fileoff, filesize)) {
+      THROW("Tried to add range that is not covered by base map.");
+    }
+  }
+
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     uint64_t common = std::min(vmsize, filesize);
