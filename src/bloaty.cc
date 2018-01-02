@@ -878,8 +878,12 @@ void RangeSink::AddFileRange(const char* analyzer, string_view name,
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     if (translator_) {
-      pair.first->file_map.AddRangeWithTranslation(
+      bool ok = pair.first->file_map.AddRangeWithTranslation(
           fileoff, filesize, label, translator_->file_map, &pair.first->vm_map);
+      if (!ok) {
+        THROWF("File range ($0, $1) for label $2 extends beyond base map",
+               fileoff, filesize, name);
+      }
     } else {
       pair.first->file_map.AddRange(fileoff, filesize, label);
     }
@@ -902,9 +906,13 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
     std::string label;
     uint64_t offset;
     if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
-      pair.first->file_map.AddRangeWithTranslation(
+      bool ok = pair.first->file_map.AddRangeWithTranslation(
           file_offset, file_range.size(), label, translator_->file_map,
           &pair.first->vm_map);
+      if (!ok) {
+        THROWF("File range ($0, $1) for label $2 extends beyond base map",
+               offset, file_range.size(), label);
+      }
     } else if (verbose_level > 2) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
@@ -924,8 +932,12 @@ void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
     std::string label;
     uint64_t offset;
     if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
-      pair.first->vm_map.AddRangeWithTranslation(
+      bool ok = pair.first->vm_map.AddRangeWithTranslation(
           addr, size, label, translator_->vm_map, &pair.first->file_map);
+      if (!ok) {
+        THROWF("VM range ($0, $1) for label $2 extends beyond base map", addr,
+               size, label);
+      }
     } else if (verbose_level > 2) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
@@ -942,8 +954,12 @@ void RangeSink::AddVMRange(const char* analyzer, uint64_t vmaddr,
   assert(translator_);
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
-    pair.first->vm_map.AddRangeWithTranslation(
+    bool ok = pair.first->vm_map.AddRangeWithTranslation(
         vmaddr, vmsize, label, translator_->vm_map, &pair.first->file_map);
+    if (!ok) {
+      THROWF("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
+             vmsize, name);
+    }
   }
 }
 

@@ -29,9 +29,6 @@ template <class T>
 bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
                                               uint64_t size, uint64_t* out_addr,
                                               uint64_t* out_size) const {
-  if (!iter->second.HasTranslation()) {
-    return false;
-  }
 
   addr = std::max(addr, iter->first);
 
@@ -40,9 +37,14 @@ bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
   } else {
     uint64_t end = std::min(addr + size, iter->first + iter->second.size);
     if (addr >= end) {
+      *out_size = 0;
       return false;
     }
     *out_size = end - addr;
+  }
+
+  if (!iter->second.HasTranslation()) {
+    return false;
   }
 
   *out_addr = TranslateWithEntry(iter, addr);
@@ -226,7 +228,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
 // span several section mappings.  If we really wanted to get particular here,
 // we could pass a parameter indicating whether such spanning is expected, and
 // warn if not.
-void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
+bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                        const std::string& val,
                                        const RangeMap& translator,
                                        RangeMap* other) {
@@ -240,6 +242,7 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
     end = addr + size;
     assert(end >= addr);
   }
+  uint64_t total_size = 0;
 
   // TODO: optionally warn about when we span ranges of the translator.  In some
   // cases this would be a bug (ie. symbols VM->file).  In other cases it's
@@ -255,8 +258,11 @@ void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
       }
       other->AddRange(this_addr, this_size, val);
     }
+    total_size += this_size;
     ++it;
   }
+
+  return total_size == size;
 }
 
 }  // namespace bloaty
