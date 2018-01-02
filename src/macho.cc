@@ -220,7 +220,30 @@ void AddSegmentAsFallback(string_view command_data, string_view file_data,
 
   string_view segname = ArrayToStr(segment->segname, 16);
 
-  sink->AddRange("macho_segment", "[" + std::string(segname) + "]",
+  uint32_t nsects = segment->nsects;
+  for (uint32_t j = 0; j < nsects; j++) {
+    auto section = GetStructPointerAndAdvance<Section>(&command_data);
+
+    // filesize equals vmsize unless the section is zerofill
+    uint64_t filesize = section->size;
+    switch (section->flags & SECTION_TYPE) {
+      case S_ZEROFILL:
+      case S_GB_ZEROFILL:
+      case S_THREAD_LOCAL_ZEROFILL:
+        filesize = 0;
+        break;
+      default:
+        break;
+    }
+
+    std::string label = absl::StrJoin(
+        std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
+    label = "[" + label + "]";
+    sink->AddRange("macho_fallback", label, section->addr, section->size,
+                   StrictSubstr(file_data, section->offset, filesize));
+  }
+
+  sink->AddRange("macho_fallback", "[" + std::string(segname) + "]",
                  segment->vmaddr, segment->vmsize,
                  StrictSubstr(file_data, segment->fileoff, segment->filesize));
 }
