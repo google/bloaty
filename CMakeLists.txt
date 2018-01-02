@@ -40,10 +40,14 @@ include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 
 # Baseline build flags.
 set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
-set(CMAKE_EXE_LINKER_FLAGS "-Wl,--build-id")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+
+if(APPLE)
+elseif(UNIX)
+  set(CMAKE_EXE_LINKER_FLAGS "-Wl,--build-id")
+endif()
 
 # When using Ninja, compiler output won't be colorized without this.
 include(CheckCXXCompilerFlag)

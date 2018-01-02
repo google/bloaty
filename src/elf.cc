@@ -41,6 +41,8 @@ static void Throw(const char *str, int line) {
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 #define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
+namespace bloaty {
+
 namespace {
 
 uint64_t CheckedAdd(uint64_t a, uint64_t b) {
@@ -60,12 +62,6 @@ uint64_t CheckedMul(uint64_t a, uint64_t b) {
   }
   return static_cast<uint64_t>(c);
 }
-
-}
-
-namespace bloaty {
-
-namespace {
 
 struct ByteSwapFunc {
   template <class T>
@@ -1211,8 +1207,6 @@ void AddCatchAll(RangeSink* sink) {
   sink->AddFileRange("elf_catchall", "[Unmapped]", sink->input_file().data());
 }
 
-}  // namespace
-
 class ElfObjectFile : public ObjectFile {
  public:
   ElfObjectFile(std::unique_ptr<InputFile> file)
@@ -1366,6 +1360,8 @@ class ElfObjectFile : public ObjectFile {
     return true;
   }
 };
+
+}  // namespace
 
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file) {
   ElfFile elf(file->data());

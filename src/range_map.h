@@ -184,9 +184,6 @@ class RangeMap {
       }
     } else {
       uint64_t ret = iter->first + iter->second.size;
-      if (ret <= iter->first) {
-        printf("%lx %lx %lx\n", iter->first, iter->second.size, ret);
-      }
       assert(ret > iter->first);
       return ret;
     }
