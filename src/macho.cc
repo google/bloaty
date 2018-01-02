@@ -38,6 +38,9 @@ using absl::string_view;
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 #define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
+namespace bloaty {
+namespace macho {
+
 // segname (& sectname) may NOT be NULL-terminated,
 //   i.e. can use up all 16 chars, e.g. '__gcc_except_tab' (no '\0'!)
 //   hence specifying size when constructing std::string
@@ -62,8 +65,6 @@ static string_view StrictSubstr(string_view data, size_t off, size_t n) {
   return data.substr(off, n);
 }
 
-namespace bloaty {
-
 uint32_t ReadMagic(string_view data) {
   if (data.size() < sizeof(uint32_t)) {
     THROW("Malformed Mach-O file");
@@ -86,6 +87,19 @@ void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
 }
 
+string_view ReadNullTerminated(string_view data) {
+  const char* nullz =
+      static_cast<const char*>(memchr(data.data(), '\0', data.size()));
+
+  // Return false if not NULL-terminated.
+  if (nullz == NULL) {
+    THROW("DWARF string was not NULL-terminated");
+  }
+
+  size_t len = nullz - data.data();
+  return data.substr(0, len);
+}
+
 template <class T>
 const T* GetStructPointerAndAdvance(string_view* data) {
   const T* ret = GetStructPointer<T>(*data);
@@ -93,9 +107,150 @@ const T* GetStructPointerAndAdvance(string_view* data) {
   return ret;
 }
 
+void MaybeAddOverhead(RangeSink* sink, const char* label, string_view data) {
+  if (sink) {
+    sink->AddFileRange("macho_overhead", label, data);
+  }
+}
+
+template <class Struct, class Func>
+void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
+                          Func&& loadcmd_func) {
+  string_view header_data = macho_data;
+  auto header = GetStructPointerAndAdvance<Struct>(&header_data);
+  MaybeAddOverhead(overhead_sink,
+                   "[Mach-O Headers]",
+                   macho_data.substr(0, sizeof(Struct)));
+  uint32_t ncmds = header->ncmds;
+
+  for (uint32_t i = 0; i < ncmds; i++) {
+    auto command = GetStructPointer<load_command>(header_data);
+    string_view command_data = StrictSubstr(header_data, 0, command->cmdsize);
+    std::forward<Func>(loadcmd_func)(command->cmd, command_data, macho_data);
+    MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", command_data);
+    header_data = header_data.substr(command->cmdsize);
+  }
+}
+
+template <class Func>
+void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
+                      Func&& loadcmd_func) {
+  uint32_t magic = ReadMagic(macho_file);
+  switch (magic) {
+    case MH_MAGIC:
+      // We don't expect to see many 32-bit binaries out in the wild.
+      // Apple is aggressively phasing out support for 32-bit binaries:
+      //   https://www.macrumors.com/2017/06/06/apple-to-phase-out-32-bit-mac-apps/
+      //
+      // Still, you can build 32-bit binaries as of this writing, and
+      // there are existing 32-bit binaries floating around, so we might
+      // as well support them.
+      ParseMachOHeaderImpl<mach_header>(macho_file, overhead_sink,
+                                        std::forward<Func>(loadcmd_func));
+      break;
+    case MH_MAGIC_64:
+      ParseMachOHeaderImpl<mach_header_64>(
+          macho_file, overhead_sink, std::forward<Func>(loadcmd_func));
+      break;
+    case MH_CIGAM:
+    case MH_CIGAM_64:
+      // OS X and Darwin currently only run on x86/x86-64 (little-endian
+      // platforms), so we expect basically all Mach-O files to be
+      // little-endian.  Additionally, pretty much all CPU architectures
+      // are little-endian these days.  ARM has the option to be
+      // big-endian, but I can't find any OS that is actually compiled to
+      // use big-endian mode.  debian-mips is the only big-endian OS I can
+      // find (and maybe SPARC).
+      //
+      // All of this is to say, this case should only happen if you are
+      // running Bloaty on debian-mips.  I consider that uncommon enough
+      // (and hard enough to test) that we don't support this until there
+      // is a demonstrated need.
+      THROW("We don't support cross-endian Mach-O files.");
+    default:
+      THROW("Corrupt Mach-O file");
+  }
+}
+
+template <class Func>
+void ParseFatHeader(string_view fat_file, RangeSink* overhead_sink,
+                    Func&& loadcmd_func) {
+  string_view header_data = fat_file;
+  auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+  MaybeAddOverhead(overhead_sink, "[Mach-O Headers]",
+                   fat_file.substr(0, sizeof(fat_header)));
+  assert(ByteSwap(header->magic) == FAT_MAGIC);
+  uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+  for (uint32_t i = 0; i < nfat_arch; i++) {
+    auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+    string_view macho_data = StrictSubstr(
+        fat_file, ByteSwap(arch->offset), ByteSwap(arch->size));
+    ParseMachOHeader(macho_data, overhead_sink,
+                     std::forward<Func>(loadcmd_func));
+  }
+}
+
+template <class Func>
+void ForEachLoadCommand(string_view maybe_fat_file, RangeSink* overhead_sink,
+                        Func&& loadcmd_func) {
+  uint32_t magic = ReadMagic(maybe_fat_file);
+  switch (magic) {
+    case MH_MAGIC:
+    case MH_MAGIC_64:
+    case MH_CIGAM:
+    case MH_CIGAM_64:
+      ParseMachOHeader(maybe_fat_file, overhead_sink,
+                       std::forward<Func>(loadcmd_func));
+      break;
+    case FAT_CIGAM:
+      ParseFatHeader(maybe_fat_file, overhead_sink,
+                     std::forward<Func>(loadcmd_func));
+      break;
+  }
+}
+
 template <class Segment, class Section>
-void ParseMachOSegment(string_view command_data, string_view file_data,
-                       RangeSink* sink) {
+void AddSegmentAsFallback(string_view command_data, string_view file_data,
+                          RangeSink* sink) {
+  auto segment = GetStructPointerAndAdvance<Segment>(&command_data);
+
+  if (segment->maxprot == VM_PROT_NONE) {
+    return;
+  }
+
+  string_view segname = ArrayToStr(segment->segname, 16);
+
+  uint32_t nsects = segment->nsects;
+  for (uint32_t j = 0; j < nsects; j++) {
+    auto section = GetStructPointerAndAdvance<Section>(&command_data);
+
+    // filesize equals vmsize unless the section is zerofill
+    uint64_t filesize = section->size;
+    switch (section->flags & SECTION_TYPE) {
+      case S_ZEROFILL:
+      case S_GB_ZEROFILL:
+      case S_THREAD_LOCAL_ZEROFILL:
+        filesize = 0;
+        break;
+      default:
+        break;
+    }
+
+    std::string label = absl::StrJoin(
+        std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
+    label = "[" + label + "]";
+    sink->AddRange("macho_fallback", label, section->addr, section->size,
+                   StrictSubstr(file_data, section->offset, filesize));
+  }
+
+  sink->AddRange("macho_fallback", "[" + std::string(segname) + "]",
+                 segment->vmaddr, segment->vmsize,
+                 StrictSubstr(file_data, segment->fileoff, segment->filesize));
+}
+
+template <class Segment, class Section>
+void ParseSegment(string_view command_data, string_view file_data,
+                  RangeSink* sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&command_data);
 
   if (segment->maxprot == VM_PROT_NONE) {
@@ -135,8 +290,8 @@ void ParseMachOSegment(string_view command_data, string_view file_data,
   }
 }
 
-static void ParseMachODyldInfo(string_view command_data, string_view file_data,
-                               RangeSink* sink) {
+static void ParseDyldInfo(string_view command_data, string_view file_data,
+                          RangeSink* sink) {
   auto info = GetStructPointer<dyld_info_command>(command_data);
 
   sink->AddFileRange(
@@ -202,20 +357,19 @@ static void ParseLinkeditCommand(string_view label, string_view command_data,
       StrictSubstr(file_data, linkedit->dataoff, linkedit->datasize));
 }
 
-void ParseMachOLoadCommand(uint32_t cmd, string_view command_data,
-                           string_view file_data, RangeSink* sink) {
+void ParseLoadCommand(uint32_t cmd, string_view command_data,
+                      string_view file_data, RangeSink* sink) {
   switch (cmd) {
     case LC_SEGMENT_64:
-      ParseMachOSegment<segment_command_64, section_64>(command_data, file_data,
-                                                        sink);
+      ParseSegment<segment_command_64, section_64>(command_data, file_data,
+                                                   sink);
       break;
     case LC_SEGMENT:
-      ParseMachOSegment<segment_command, section>(command_data, file_data,
-                                                  sink);
+      ParseSegment<segment_command, section>(command_data, file_data, sink);
       break;
     case LC_DYLD_INFO:
     case LC_DYLD_INFO_ONLY:
-      ParseMachODyldInfo(command_data, file_data, sink);
+      ParseDyldInfo(command_data, file_data, sink);
       break;
     case LC_SYMTAB:
       ParseSymbolTable(command_data, file_data, sink);
@@ -246,142 +400,67 @@ void ParseMachOLoadCommand(uint32_t cmd, string_view command_data,
   }
 }
 
-static void ParseMachOSymbols(string_view command_data, string_view file_data,
-                              RangeSink* sink) {
-  (void)command_data;
-  (void)file_data;
-#if 0
-  auto symtab = GetStructPointer<symtab_command>(command_data);
+void ParseLoadCommands(RangeSink* sink) {
+  ForEachLoadCommand(
+      sink->input_file().data(), sink,
+      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
+        ParseLoadCommand(cmd, command_data, file_data, sink);
+      });
+}
+
+void ParseSymbolsFromSymbolTable(string_view command_data, string_view file_data, RangeSink* sink) {
+  auto symtab_cmd = GetStructPointer<symtab_command>(command_data);
 
   // TODO(haberman): use 32-bit symbol size where appropriate.
-  sink->AddFileRange("Symbol Table", symtab->symoff,
-                     symtab->nsyms * sizeof(nlist_64));
-  sink->AddFileRange("String Table", symtab->stroff, symtab->strsize);
-#endif
+  string_view symtab = StrictSubstr(file_data, symtab_cmd->symoff,
+                                    symtab_cmd->nsyms * sizeof(nlist_64));
+  string_view strtab =
+      StrictSubstr(file_data, symtab_cmd->stroff, symtab_cmd->strsize);
 
-  std::string cmd = std::string("symbols -noSources -noDemangling ") +
-                    sink->input_file().filename();
+  uint32_t nsyms = symtab_cmd->nsyms;
+  for (uint32_t i = 0; i < nsyms; i++) {
+    auto sym = GetStructPointerAndAdvance<nlist_64>(&symtab);
 
-  // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
-  // [16 spaces]0x00000001000015a0 (     0x9) __ZN10LineReader5beginEv [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
-  // [16 spaces]0x0000000100038468 (     0x8) __ZN3re2L12empty_stringE [NameNList, MangledNameNList, NList]
-  RE2 pattern(R"(^\s{16}0x([0-9a-f]+) \(\s*0x([0-9a-f]+)\) (.+) \[((?:FUNC)?))");
-
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-    std::string name;
-    std::string maybe_func;
-    size_t addr, size;
-
-    if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size),
-                          &name, &maybe_func)) {
-      if (absl::StartsWith(name, "DYLD-STUB")) {
-        continue;
-      }
-
-      sink->AddVMRange("macho_syms", addr, size,
-                       ItaniumDemangle(name, sink->data_source()));
+    if (sym->n_type & N_STAB || sym->n_value == 0) {
+      continue;
     }
+
+    string_view name = ReadNullTerminated(strtab.substr(sym->n_un.n_strx));
+    sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
+                     ItaniumDemangle(name, sink->data_source()));
   }
 }
 
-
-template <class Struct>
-void ParseMachOHeaderImpl(string_view file_data, RangeSink* sink) {
-  string_view header_data = file_data;
-  auto header = GetStructPointerAndAdvance<Struct>(&header_data);
-  uint32_t ncmds = header->ncmds;
-
-  for (uint32_t i = 0; i < ncmds; i++) {
-    auto command = GetStructPointer<load_command>(header_data);
-    string_view command_data = StrictSubstr(header_data, 0, command->cmdsize);
-    switch (sink->data_source()) {
-      case DataSource::kSegments:
-      case DataSource::kSections:
-        ParseMachOLoadCommand(command->cmd, command_data, file_data, sink);
-        break;
-      case DataSource::kSymbols:
-      case DataSource::kRawSymbols:
-      case DataSource::kShortSymbols:
-      case DataSource::kFullSymbols:
-        if (command->cmd == LC_SYMTAB) {
-          ParseMachOSymbols(command_data, file_data, sink);
+void ParseSymbols(RangeSink* sink) {
+  ForEachLoadCommand(
+      sink->input_file().data(), sink,
+      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
+        switch (cmd) {
+          case LC_SYMTAB:
+            ParseSymbolsFromSymbolTable(command_data, file_data, sink);
+            break;
+          case LC_DYSYMTAB:
+            //ParseSymbolsFromDynamicSymbolTable(command_data, file_data, sink);
+            break;
         }
-        break;
-      default:
-        THROW("Unexpected data source");
-    }
-    header_data = header_data.substr(command->cmdsize);
-  }
-}
-
-static void ParseMachOHeader(string_view file_data, RangeSink* sink) {
-  uint32_t magic = ReadMagic(file_data);
-  switch (magic) {
-    case MH_MAGIC:
-      // We don't expect to see many 32-bit binaries out in the wild.  Apple is
-      // aggressively phasing out support for 32-bit binaries:
-      //   https://www.macrumors.com/2017/06/06/apple-to-phase-out-32-bit-mac-apps/
-      //
-      // Still, you can build 32-bit binaries as of this writing, and there are
-      // existing 32-bit binaries floating around, so we might as well support
-      // them.
-      ParseMachOHeaderImpl<mach_header>(file_data, sink);
-      break;
-    case MH_MAGIC_64:
-      ParseMachOHeaderImpl<mach_header_64>(file_data, sink);
-      break;
-    case MH_CIGAM:
-    case MH_CIGAM_64:
-      // OS X and Darwin currently only run on x86/x86-64 (little-endian
-      // platforms), so we expect basically all Mach-O files to be
-      // little-endian.  Additionally, pretty much all CPU architectures are
-      // little-endian these days.  ARM has the option to be big-endian, but I
-      // can't find any OS that is actually compiled to use big-endian mode.
-      // debian-mips is the only big-endian OS I can find (and maybe SPARC).
-      //
-      // All of this is to say, this case should only happen if you are running
-      // Bloaty on debian-mips.  I consider that uncommon enough (and hard
-      // enough to test) that we don't support this until there is a
-      // demonstrated need.
-      THROW("We don't support cross-endian Mach-O files.");
-    default:
-      THROW("Corrupt Mach-O file");
-  }
-}
-
-static void ParseMachOFatHeader(string_view file_data, RangeSink* sink) {
-  string_view header_data = file_data;
-  auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
-  assert(ByteSwap(header->magic) == FAT_MAGIC);
-  uint32_t nfat_arch = ByteSwap(header->nfat_arch);
-  for (uint32_t i = 0; i < nfat_arch; i++) {
-    auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
-    string_view arch_data =
-        StrictSubstr(file_data, ByteSwap(arch->offset), ByteSwap(arch->size));
-    ParseMachOHeader(arch_data, sink);
-  }
-}
-
-static void ParseMachOFile(RangeSink* sink) {
-  string_view file_data = sink->input_file().data();
-  uint32_t magic = ReadMagic(file_data);
-  switch (magic) {
-    case MH_MAGIC:
-    case MH_MAGIC_64:
-    case MH_CIGAM:
-    case MH_CIGAM_64:
-      ParseMachOHeader(file_data, sink);
-      break;
-    case FAT_CIGAM:
-      ParseMachOFatHeader(file_data, sink);
-      break;
-    default:
-      // TODO: .a file (AR).
-      THROWF("Unrecognized Mach-O file, magic: $0", magic);
-  }
+      });
 }
 
 static void AddMachOFallback(RangeSink* sink) {
+  ForEachLoadCommand(
+      sink->input_file().data(), sink,
+      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
+        switch (cmd) {
+          case LC_SEGMENT_64:
+            AddSegmentAsFallback<segment_command_64, section_64>(
+                command_data, file_data, sink);
+            break;
+          case LC_SEGMENT:
+            AddSegmentAsFallback<segment_command, section>(command_data,
+                                                           file_data, sink);
+            break;
+        }
+      });
   sink->AddFileRange("macho_fallback", "[Unmapped]", sink->input_file().data());
 }
 
@@ -400,11 +479,13 @@ class MachOObjectFile : public ObjectFile {
       switch (sink->data_source()) {
         case DataSource::kSegments:
         case DataSource::kSections:
+          ParseLoadCommands(sink);
+          break;
         case DataSource::kSymbols:
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ParseMachOFile(sink);
+          ParseSymbols(sink);
           break;
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
@@ -424,14 +505,17 @@ class MachOObjectFile : public ObjectFile {
   }
 };
 
+}  // namespace macho
+
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
-  uint32_t magic = ReadMagic(file->data());
+  uint32_t magic = macho::ReadMagic(file->data());
 
   // We only support little-endian host and little endian binaries (see
   // ParseMachOHeader() for more rationale).  Fat headers are always on disk as
   // big-endian.
   if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {
-    return std::unique_ptr<ObjectFile>(new MachOObjectFile(std::move(file)));
+    return std::unique_ptr<ObjectFile>(
+        new macho::MachOObjectFile(std::move(file)));
   }
 
   return nullptr;
