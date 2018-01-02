@@ -87,6 +87,19 @@ void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
 }
 
+string_view ReadNullTerminated(string_view data) {
+  const char* nullz =
+      static_cast<const char*>(memchr(data.data(), '\0', data.size()));
+
+  // Return false if not NULL-terminated.
+  if (nullz == NULL) {
+    THROW("DWARF string was not NULL-terminated");
+  }
+
+  size_t len = nullz - data.data();
+  return data.substr(0, len);
+}
+
 template <class T>
 const T* GetStructPointerAndAdvance(string_view* data) {
   const T* ret = GetStructPointer<T>(*data);
@@ -372,41 +385,43 @@ void ParseLoadCommands(RangeSink* sink) {
       });
 }
 
-static void ParseSymbols(RangeSink* sink) {
-#if 0
-  auto symtab = GetStructPointer<symtab_command>(command_data);
+void ParseSymbolsFromSymbolTable(string_view command_data, string_view file_data, RangeSink* sink) {
+  auto symtab_cmd = GetStructPointer<symtab_command>(command_data);
 
   // TODO(haberman): use 32-bit symbol size where appropriate.
-  sink->AddFileRange("Symbol Table", symtab->symoff,
-                     symtab->nsyms * sizeof(nlist_64));
-  sink->AddFileRange("String Table", symtab->stroff, symtab->strsize);
-#endif
+  string_view symtab = StrictSubstr(file_data, symtab_cmd->symoff,
+                                    symtab_cmd->nsyms * sizeof(nlist_64));
+  string_view strtab =
+      StrictSubstr(file_data, symtab_cmd->stroff, symtab_cmd->strsize);
 
-  std::string cmd = std::string("symbols -noSources -noDemangling ") +
-                    sink->input_file().filename();
+  uint32_t nsyms = symtab_cmd->nsyms;
+  for (uint32_t i = 0; i < nsyms; i++) {
+    auto sym = GetStructPointerAndAdvance<nlist_64>(&symtab);
 
-  // [16 spaces]0x00000001000009e0 (  0x3297) run_tests [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
-  // [16 spaces]0x00000001000015a0 (     0x9) __ZN10LineReader5beginEv [FUNC, EXT, LENGTH, NameNList, MangledNameNList, Merged, NList, Dwarf, FunctionStarts]
-  // [16 spaces]0x0000000100038468 (     0x8) __ZN3re2L12empty_stringE [NameNList, MangledNameNList, NList]
-  RE2 pattern(R"(^\s{16}0x([0-9a-f]+) \(\s*0x([0-9a-f]+)\) (.+) \[((?:FUNC)?))");
-
-  for ( auto& line : ReadLinesFromPipe(cmd) ) {
-    std::string name;
-    std::string maybe_func;
-    size_t addr, size;
-
-    if (RE2::PartialMatch(line, pattern, RE2::Hex(&addr), RE2::Hex(&size),
-                          &name, &maybe_func)) {
-      if (absl::StartsWith(name, "DYLD-STUB")) {
-        continue;
-      }
-
-      sink->AddVMRange("macho_syms", addr, size,
-                       ItaniumDemangle(name, sink->data_source()));
+    if (sym->n_type & N_STAB || sym->n_value == 0) {
+      continue;
     }
+
+    string_view name = ReadNullTerminated(strtab.substr(sym->n_un.n_strx));
+    sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
+                     ItaniumDemangle(name, sink->data_source()));
   }
 }
 
+void ParseSymbols(RangeSink* sink) {
+  ForEachLoadCommand(
+      sink->input_file().data(), sink,
+      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
+        switch (cmd) {
+          case LC_SYMTAB:
+            ParseSymbolsFromSymbolTable(command_data, file_data, sink);
+            break;
+          case LC_DYSYMTAB:
+            //ParseSymbolsFromDynamicSymbolTable(command_data, file_data, sink);
+            break;
+        }
+      });
+}
 
 static void AddMachOFallback(RangeSink* sink) {
   ForEachLoadCommand(
