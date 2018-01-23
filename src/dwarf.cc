@@ -534,12 +534,8 @@ class DIEReader {
   // Seek() methods below.
   DIEReader(const File& file) : dwarf_(file) {}
 
-  // Returns true if we are at the end of DIEs for the current depth and no
-  // error occurred.
+  // Returns true if we are at the end of DIEs for this compilation unit.
   bool IsEof() const { return state_ == State::kEof; }
-
-  // Returns true if an error has occurred in reading.
-  bool IsError() const { return state_ == State::kError; }
 
   // DIEs exist in both .debug_info and .debug_types.
   enum class Section {
@@ -560,6 +556,10 @@ class DIEReader {
   // Advances to the next overall DIE, ignoring whether it happens to be a
   // child, a sibling, or an uncle/aunt.  Returns false at error or EOF.
   bool NextDIE();
+
+  // Skips children of the current DIE, so that the next call to NextDIE()
+  // will read the next sibling (or parent, if no sibling exists).
+  bool SkipChildren();
 
   const AbbrevTable::Abbrev& GetAbbrev() const {
     assert(!IsEof());
@@ -613,8 +613,7 @@ class DIEReader {
   bool ReadAttributesEnd(string_view remaining, uint64_t sibling) {
     assert(state_ == State::kReadyToReadAttributes);
     if (remaining.data() == nullptr) {
-      state_ = State::kError;
-      return false;
+      THROW("premature EOF reading DWARF attributes");
     } else {
       remaining_ = remaining;
       sibling_offset_ = sibling;
@@ -632,7 +631,6 @@ class DIEReader {
     kReadyToReadAttributes,
     kReadyToNext,
     kEof,
-    kError
   } state_;
 
   std::string error_;
@@ -646,11 +644,9 @@ class DIEReader {
   // Our current read position.
   string_view remaining_;
   uint64_t sibling_offset_;
+  int depth_ = 0;
 
-  // The read position of the next entry at each level, or size()==0 for levels
-  // where we don't know (because we're not at the top-level and the previous
-  // DIE didn't include DW_AT_sibling).  Length of this array indicates the
-  // current depth.
+  // Data for the next compilation unit.
   string_view next_unit_;
 
   // All of the AbbrevTables we've read from .debug_abbrev, indexed by their
@@ -683,19 +679,28 @@ class DIEReader {
 
 bool DIEReader::ReadCode() {
   uint32_t code;
-  do {
-    if (remaining_.empty()) {
-      state_ = State::kEof;
-      return false;
-    }
-    code = ReadLEB128<uint32_t>(&remaining_);
-  } while (code == 0);  // DWARF allows "null entries" for padding.
+again:
+  if (remaining_.empty()) {
+    state_ = State::kEof;
+    return false;
+  }
+  code = ReadLEB128<uint32_t>(&remaining_);
+  if (code == 0) {
+    // null entry terminates a chain of sibling entries.
+    depth_--;
+    goto again;
+  }
 
   if (!unit_abbrev_->GetAbbrev(code, &current_abbrev_)) {
     THROW("couldn't find abbreviation for code");
   }
   state_ = State::kReadyToReadAttributes;
   sibling_offset_ = 0;
+
+  if (HasChild()) {
+    depth_++;
+  }
+
   return true;
 }
 
@@ -704,6 +709,10 @@ bool DIEReader::NextCompilationUnit() {
 }
 
 bool DIEReader::NextDIE() {
+  if (state_ == State::kEof) {
+    return false;
+  }
+
   assert(state_ == State::kReadyToNext);
   return ReadCode();
 }
@@ -1375,6 +1384,7 @@ class FixedAttrReader {
     memset(&has_attr_, 0, sizeof...(Args));
 
     // Parse all attributes.
+    sibling_ = 0;
     data = GetActionBuf(*reader).ReadAttributes(*reader, data);
     reader->ReadAttributesEnd(data, sibling_);
   }
@@ -1470,6 +1480,26 @@ const ActionBuf& FixedAttrReader<Args...>::BuildActionBuf(
   // Must have inserted.
   assert(pair.second);
   return pair.first->second;
+}
+
+// From DIEReader, defined here because it depends on FixedAttrReader.
+bool DIEReader::SkipChildren() {
+  assert(state_ == State::kReadyToNext);
+  if (!HasChild()) {
+    return true;
+  }
+
+  int target_depth = depth_ - 1;
+  dwarf::FixedAttrReader<uint64_t> attr_reader(this, {DW_AT_sibling});
+  while (depth_ > target_depth) {
+    // TODO(haberman): use DW_AT_sibling to optimize skipping when it is
+    // available.
+    if (!NextDIE()) {
+      return false;
+    }
+    attr_reader.ReadAttributes(this);
+  }
+  return true;
 }
 
 
@@ -1851,8 +1881,10 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
     std::string filename = map.GetFilename(ranges.debug_info_offset());
 
     while (ranges.NextRange()) {
-      sink->AddVMRangeIgnoreDuplicate("dwarf_aranges", ranges.address(),
-                                      ranges.length(), filename);
+      if (ranges.address() != 0) {
+        sink->AddVMRangeIgnoreDuplicate("dwarf_aranges", ranges.address(),
+                                        ranges.length(), filename);
+      }
     }
   }
 
@@ -1870,10 +1902,10 @@ void AddDIE(const dwarf::File& file, const std::string& name,
 
   // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
   // functions).
-  if (attr.HasAttribute<2>() && attr.HasAttribute<3>()) {
+  if (attr.HasAttribute<2>() && attr.HasAttribute<3>() && low_pc != 0) {
     // It appears that some compilers make high_pc a size, and others make it an
     // address.
-    if (high_pc > low_pc) {
+    if (high_pc >= low_pc) {
       high_pc -= low_pc;
     }
     sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, name);
@@ -2275,10 +2307,18 @@ static void ReadDWARFDebugInfo(
     abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
     sink->AddFileRange("dwarf_abbrev", compileunit_name, abbrev_data);
 
+
     while (die_reader.NextDIE()) {
       attr_reader.ReadAttributes(&die_reader);
-      AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
-             die_reader.unit_sizes(), sink);
+
+      // low_pc == 0 is a signal that this routine was stripped out of the
+      // final binary.  Skip this DIE and all of its children.
+      if (attr_reader.HasAttribute<2>() && attr_reader.GetAttribute<2>() == 0) {
+        die_reader.SkipChildren();
+      } else {
+        AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
+               die_reader.unit_sizes(), sink);
+      }
     }
   } while (die_reader.NextCompilationUnit());
 }

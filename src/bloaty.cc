@@ -896,8 +896,8 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
   uint64_t file_offset = file_range.data() - file_->data().data();
   if (verbose_level > 2) {
     fprintf(stdout,
-            "[%s, %s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64
-            "])\n",
+            "[%s, %s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64
+            ", %zx])\n",
             GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr,
             file_offset, file_range.size());
   }
