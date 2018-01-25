@@ -244,17 +244,21 @@ class BloatyTest : public ::testing::Test {
       if (expected_vm == kUnknown) {
         // Always pass.
       } else if (expected_vm > 0) {
-        EXPECT_EQ(expected_vm, child.vmsize);
+        EXPECT_GE(child.vmsize, expected_vm);
+        // Allow some overhead.
+        EXPECT_LE(child.vmsize, (expected_vm * 1.1) + 40);
       } else {
         ASSERT_TRUE(false);
       }
 
-      if (expected_file == kUnknown) {
-        // Always pass.
-      } else if (expected_file == kSameAsVM) {
-        EXPECT_EQ(child.vmsize, child.filesize);
-      } else {
-        EXPECT_EQ(expected_file, child.filesize);
+      if (expected_file == kSameAsVM) {
+        expected_file = child.vmsize;
+      }
+
+      if (expected_file != kUnknown) {
+        EXPECT_GE(child.filesize, expected_file);
+        // Allow some overhead.
+        EXPECT_LE(child.filesize, (expected_file * 1.2) + 70);
       }
 
       if (++i == children.size()) {

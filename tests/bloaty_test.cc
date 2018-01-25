@@ -68,7 +68,7 @@ TEST_F(BloatyTest, SimpleObjectFile) {
   });
 
   // For symbols we should get entries for all our expected symbols.
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
   AssertChildren(*top_row_, {
     std::make_tuple("func1", kUnknown, kSameAsVM),
     std::make_tuple("func2", kUnknown, kSameAsVM),
@@ -120,7 +120,7 @@ TEST_F(BloatyTest, SimpleArchiveFile) {
   EXPECT_LT(top_row_->vmsize, 12000);
   //EXPECT_EQ(top_row_->filesize, size);
 
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
     std::make_tuple("foo_x", 4000, 0),
@@ -183,7 +183,7 @@ TEST_F(BloatyTest, SimpleSharedObjectFile) {
   EXPECT_LT(top_row_->vmsize, 12000);
   EXPECT_EQ(top_row_->filesize, size);
 
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "50", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
     std::make_tuple("foo_x", 4000, 0),
@@ -211,7 +211,7 @@ TEST_F(BloatyTest, SimpleBinary) {
   EXPECT_LT(top_row_->vmsize, 12000);
   EXPECT_EQ(top_row_->filesize, size);
 
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "50", "-s", "vm", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
     std::make_tuple("foo_x", 4000, 0),
@@ -223,28 +223,29 @@ TEST_F(BloatyTest, SimpleBinary) {
     std::make_tuple("foo_y", 4, 0)
   });
 
-  // This is currently broken for the 32-bit x86 binary.
-  // TODO(haberman): fix this.
-  if (GetTestDirectory() != "linux-x86") {
-    RunBloaty({"bloaty", "-d", "compileunits,symbols", file});
-    auto row = FindRow("bar.o.c");
-    ASSERT_TRUE(row != nullptr);
+  RunBloaty({"bloaty", "-d", "compileunits,symbols", file});
+  auto row = FindRow("bar.o.c");
+  ASSERT_TRUE(row != nullptr);
 
-    // This only includes functions (not data) for now.
-    AssertChildren(*row, {
-      std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    });
+  // This only includes functions (not data) for now.
+  AssertChildren(*row, {
+    std::make_tuple("bar_x", 4000, kSameAsVM),
+    std::make_tuple("bar_func", kUnknown, kSameAsVM),
+    std::make_tuple("bar_y", kUnknown, kSameAsVM),
+    std::make_tuple("bar_z", kUnknown, kSameAsVM),
+  });
 
-    row = FindRow("foo.o.c");
-    ASSERT_TRUE(row != nullptr);
+  row = FindRow("foo.o.c");
+  ASSERT_TRUE(row != nullptr);
 
-    // This only includes functions (not data) for now.
-    AssertChildren(*row, {
-      std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    });
+  // This only includes functions (not data) for now.
+  AssertChildren(*row, {
+    std::make_tuple("foo_x", 4000, 0),
+    std::make_tuple("foo_func", kUnknown, kSameAsVM),
+    std::make_tuple("foo_y", kUnknown, kSameAsVM),
+  });
 
-    RunBloaty({"bloaty", "-d", "sections,inlines", file});
-  }
+  RunBloaty({"bloaty", "-d", "sections,inlines", file});
 }
 
 TEST_F(BloatyTest, InputFiles) {
