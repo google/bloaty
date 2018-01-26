@@ -40,9 +40,14 @@ include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 
 # Baseline build flags.
 set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_DEBUG "-g1")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1")
+
+if(APPLE)
+elseif(UNIX)
+  set(CMAKE_EXE_LINKER_FLAGS "-Wl,--build-id")
+endif()
 
 # When using Ninja, compiler output won't be colorized without this.
 include(CheckCXXCompilerFlag)
@@ -83,6 +88,7 @@ add_library(libbloaty
     src/dwarf.cc
     src/elf.cc
     src/macho.cc
+    src/range_map.cc
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
     third_party/abseil-cpp/absl/base/internal/throw_delegate.cc

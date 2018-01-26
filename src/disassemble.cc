@@ -15,17 +15,21 @@
 #include <string>
 
 #include "bloaty.h"
-#include "capstone.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
+#include "capstone.h"
 
 static void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }
 
 #define THROW(msg) Throw(msg, __LINE__)
+#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
+
+using absl::string_view;
 
 namespace bloaty {
 
@@ -40,6 +44,53 @@ static std::string RightPad(const std::string& input, size_t size) {
 }
 
 }  // anonymous namespace
+
+void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
+  csh handle;
+  if (cs_open(info.arch, info.mode, &handle) != CS_ERR_OK ||
+      cs_option(handle, CS_OPT_DETAIL, CS_OPT_ON) != CS_ERR_OK) {
+    THROW("Couldn't initialize Capstone");
+  }
+
+  if (info.text.size() == 0) {
+    THROW("Tried to disassemble empty function.");
+  }
+
+  cs_insn *in = cs_malloc(handle);
+  uint64_t address = info.start_address;
+  const uint8_t* ptr = reinterpret_cast<const uint8_t*>(info.text.data());
+  size_t size = info.text.size();
+
+  while (size > 0) {
+    if (!cs_disasm_iter(handle, &ptr, &size, &address, in)) {
+      // Some symbols that end up in the .text section aren't really functions
+      // but data.  Not sure why this happens.
+      if (verbose_level > 1) {
+        printf("Error disassembling function at address: %" PRIx64 "\n",
+               address);
+      }
+      goto cleanup;
+    }
+
+    size_t count = in->detail->x86.op_count;
+    for (size_t i = 0; i < count; i++) {
+      cs_x86_op* op = &in->detail->x86.operands[i];
+      if (op->type == X86_OP_MEM && op->mem.base == X86_REG_RIP &&
+          op->mem.segment == X86_REG_INVALID &&
+          op->mem.index == X86_REG_INVALID) {
+        uint64_t to_address = in->address + in->size + op->mem.disp;
+        if (to_address) {
+          sink->AddVMRangeFor("x86_disassemble", in->address, to_address,
+                              RangeSink::kUnknownSize);
+        }
+      }
+    }
+  }
+
+cleanup:
+  cs_free(in, 1);
+  cs_close(&handle);
+}
 
 bool TryGetJumpTarget(cs_arch arch, cs_insn *in, uint64_t* target) {
   switch (arch) {
@@ -122,8 +173,8 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
   for (size_t i = 0; i < count; i++) {
     cs_insn *in = insn + i;
     std::string bytes = absl::BytesToHexString(
-        absl::string_view(reinterpret_cast<const char *>(in->bytes), in->size));
-    absl::string_view mnemonic(in->mnemonic);
+        string_view(reinterpret_cast<const char*>(in->bytes), in->size));
+    string_view mnemonic(in->mnemonic);
     std::string op_str(in->op_str);
     std::string match;
     std::string label;

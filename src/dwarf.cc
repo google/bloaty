@@ -254,7 +254,7 @@ struct CompilationUnitSizes {
 class AbbrevTable {
  public:
   // Reads abbreviations until a terminating abbreviation is seen.
-  void ReadAbbrevs(string_view data);
+  string_view ReadAbbrevs(string_view data);
 
   // In a DWARF abbreviation, each attribute has a name and a form.
   struct Attribute {
@@ -291,12 +291,12 @@ class AbbrevTable {
   std::unordered_map<uint32_t, Abbrev> abbrev_;
 };
 
-void AbbrevTable::ReadAbbrevs(string_view data) {
+string_view AbbrevTable::ReadAbbrevs(string_view data) {
   while (true) {
     uint32_t code = ReadLEB128<uint32_t>(&data);
 
     if (code == 0) {
-      return;  // Terminator entry.
+      return data;  // Terminator entry.
     }
 
     Abbrev& abbrev = abbrev_[code];
@@ -436,6 +436,87 @@ bool AddressRanges::NextUnit() {
 }
 
 
+// LocationList ////////////////////////////////////////////////////////////////
+
+// Code for reading entries out of a location list.
+// For the moment we only care about finding the bounds of a list given its
+// offset, so we don't actually vend any of the data.
+
+class LocationList {
+ public:
+  LocationList(CompilationUnitSizes sizes, string_view data)
+      : sizes_(sizes), remaining_(data) {}
+
+  const char* read_offset() const { return remaining_.data(); }
+  bool NextEntry();
+
+ private:
+  CompilationUnitSizes sizes_;
+  string_view remaining_;
+};
+
+bool LocationList::NextEntry() {
+  uint64_t start, end;
+  start = sizes_.ReadAddress(&remaining_);
+  end = sizes_.ReadAddress(&remaining_);
+  if (start == 0 && end == 0) {
+    return false;
+  } else if (start == UINT64_MAX ||
+             (start == UINT32_MAX && sizes_.address_size == 4)) {
+    // Base address selection, nothing more to do.
+  } else {
+    // Need to skip the location description.
+    uint16_t length = ReadMemcpy<uint16_t>(&remaining_);
+    SkipBytes(length, &remaining_);
+  }
+  return true;
+}
+
+string_view GetLocationListRange(CompilationUnitSizes sizes,
+                                 string_view available) {
+  LocationList list(sizes, available);
+  while (list.NextEntry()) {}
+  return available.substr(0, list.read_offset() - available.data());
+}
+
+
+// RangeList ///////////////////////////////////////////////////////////////////
+
+// Code for reading entries out of a range list.
+// For the moment we only care about finding the bounds of a list given its
+// offset, so we don't actually vend any of the data.
+
+class RangeList {
+ public:
+  RangeList(CompilationUnitSizes sizes, string_view data)
+      : sizes_(sizes), remaining_(data) {}
+
+  const char* read_offset() const { return remaining_.data(); }
+  bool NextEntry();
+
+ private:
+  CompilationUnitSizes sizes_;
+  string_view remaining_;
+};
+
+bool RangeList::NextEntry() {
+  uint64_t start, end;
+  start = sizes_.ReadAddress(&remaining_);
+  end = sizes_.ReadAddress(&remaining_);
+  if (start == 0 && end == 0) {
+    return false;
+  }
+  return true;
+}
+
+string_view GetRangeListRange(CompilationUnitSizes sizes,
+                              string_view available) {
+  RangeList list(sizes, available);
+  while (list.NextEntry()) {
+  }
+  return available.substr(0, list.read_offset() - available.data());
+}
+
 // DIEReader ///////////////////////////////////////////////////////////////////
 
 // Reads a sequence of DWARF DIE's (Debugging Information Entries) from the
@@ -453,12 +534,8 @@ class DIEReader {
   // Seek() methods below.
   DIEReader(const File& file) : dwarf_(file) {}
 
-  // Returns true if we are at the end of DIEs for the current depth and no
-  // error occurred.
+  // Returns true if we are at the end of DIEs for this compilation unit.
   bool IsEof() const { return state_ == State::kEof; }
-
-  // Returns true if an error has occurred in reading.
-  bool IsError() const { return state_ == State::kError; }
 
   // DIEs exist in both .debug_info and .debug_types.
   enum class Section {
@@ -480,6 +557,10 @@ class DIEReader {
   // child, a sibling, or an uncle/aunt.  Returns false at error or EOF.
   bool NextDIE();
 
+  // Skips children of the current DIE, so that the next call to NextDIE()
+  // will read the next sibling (or parent, if no sibling exists).
+  bool SkipChildren();
+
   const AbbrevTable::Abbrev& GetAbbrev() const {
     assert(!IsEof());
     return *current_abbrev_;
@@ -495,8 +576,25 @@ class DIEReader {
 
   const File& dwarf() const { return dwarf_; }
 
+  string_view unit_range() const { return unit_range_; }
   CompilationUnitSizes unit_sizes() const { return unit_sizes_; }
   uint32_t abbrev_version() const { return abbrev_version_; }
+  uint64_t debug_abbrev_offset() const { return debug_abbrev_offset_; }
+
+  // If both compileunit_name and strp_sink are set, this will automatically
+  // call strp_sink->AddFileRange(compileunit_name, <string range>) for every
+  // DW_FORM_strp attribute encountered.  These strings occur in the .debug_str
+  // section.
+  void set_compileunit_name(absl::string_view name) {
+    unit_name_ = std::string(name);
+  }
+  void set_strp_sink(RangeSink* sink) { strp_sink_ = sink; }
+
+  void AddIndirectString(string_view range) const {
+    if (strp_sink_) {
+      strp_sink_->AddFileRange("dwarf_strp", unit_name_, range);
+    }
+  }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(DIEReader);
@@ -515,8 +613,7 @@ class DIEReader {
   bool ReadAttributesEnd(string_view remaining, uint64_t sibling) {
     assert(state_ == State::kReadyToReadAttributes);
     if (remaining.data() == nullptr) {
-      state_ = State::kError;
-      return false;
+      THROW("premature EOF reading DWARF attributes");
     } else {
       remaining_ = remaining;
       sibling_offset_ = sibling;
@@ -534,12 +631,12 @@ class DIEReader {
     kReadyToReadAttributes,
     kReadyToNext,
     kEof,
-    kError
   } state_;
 
   std::string error_;
 
   const File& dwarf_;
+  RangeSink* strp_sink_ = nullptr;
 
   // Abbreviation for the current entry.
   const AbbrevTable::Abbrev* current_abbrev_;
@@ -547,11 +644,9 @@ class DIEReader {
   // Our current read position.
   string_view remaining_;
   uint64_t sibling_offset_;
+  int depth_ = 0;
 
-  // The read position of the next entry at each level, or size()==0 for levels
-  // where we don't know (because we're not at the top-level and the previous
-  // DIE didn't include DW_AT_sibling).  Length of this array indicates the
-  // current depth.
+  // Data for the next compilation unit.
   string_view next_unit_;
 
   // All of the AbbrevTables we've read from .debug_abbrev, indexed by their
@@ -562,6 +657,9 @@ class DIEReader {
   Section section_;
 
   // Information about the current compilation unit.
+  uint64_t debug_abbrev_offset_;
+  std::string unit_name_;
+  string_view unit_range_;
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
 
@@ -581,19 +679,28 @@ class DIEReader {
 
 bool DIEReader::ReadCode() {
   uint32_t code;
-  do {
-    if (remaining_.empty()) {
-      state_ = State::kEof;
-      return false;
-    }
-    code = ReadLEB128<uint32_t>(&remaining_);
-  } while (code == 0);  // DWARF allows "null entries" for padding.
+again:
+  if (remaining_.empty()) {
+    state_ = State::kEof;
+    return false;
+  }
+  code = ReadLEB128<uint32_t>(&remaining_);
+  if (code == 0) {
+    // null entry terminates a chain of sibling entries.
+    depth_--;
+    goto again;
+  }
 
   if (!unit_abbrev_->GetAbbrev(code, &current_abbrev_)) {
     THROW("couldn't find abbreviation for code");
   }
   state_ = State::kReadyToReadAttributes;
   sibling_offset_ = 0;
+
+  if (HasChild()) {
+    depth_++;
+  }
+
   return true;
 }
 
@@ -602,6 +709,10 @@ bool DIEReader::NextCompilationUnit() {
 }
 
 bool DIEReader::NextDIE() {
+  if (state_ == State::kEof) {
+    return false;
+  }
+
   assert(state_ == State::kReadyToNext);
   return ReadCode();
 }
@@ -625,7 +736,10 @@ bool DIEReader::ReadCompilationUnitHeader() {
     return false;
   }
 
+  unit_range_ = next_unit_;
   remaining_ = unit_sizes_.ReadInitialLength(&next_unit_);
+  unit_range_ = unit_range_.substr(
+      0, remaining_.size() + (remaining_.data() - unit_range_.data()));
 
   uint16_t version = ReadMemcpy<uint16_t>(&remaining_);
 
@@ -633,14 +747,14 @@ bool DIEReader::ReadCompilationUnitHeader() {
     THROW("Data is in new DWARF format we don't understand");
   }
 
-  uint64_t debug_abbrev_offset = unit_sizes_.ReadDWARFOffset(&remaining_);
-  unit_abbrev_ = &abbrev_tables_[debug_abbrev_offset];
+  debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+  unit_abbrev_ = &abbrev_tables_[debug_abbrev_offset_];
 
-  // If we haven't already read abbreviations for this debug_abbrev_offset, we
+  // If we haven't already read abbreviations for this debug_abbrev_offset_, we
   // need to do so now.
   if (unit_abbrev_->IsEmpty()) {
     string_view abbrev_data = dwarf_.debug_abbrev;
-    SkipBytes(debug_abbrev_offset, &abbrev_data);
+    SkipBytes(debug_abbrev_offset_, &abbrev_data);
     unit_abbrev_->ReadAbbrevs(abbrev_data);
   }
 
@@ -733,6 +847,132 @@ class FormReaderBase {
   }
 };
 
+// FormReader for void.  For skipping the data instead of reading it somewhere.
+template <>
+class FormReader<void> : public FormReaderBase<FormReader<void>> {
+ public:
+  typedef FormReader ME;
+  typedef FormReaderBase<ME> Base;
+  typedef void type;
+  using Base::data_;
+
+  FormReader(const DIEReader& reader, string_view data, void* /*val*/)
+      : Base(reader, data) {}
+
+  template <class Func>
+  static void GetFunctionForForm(CompilationUnitSizes sizes, uint8_t form,
+                                 Func func) {
+    switch (form) {
+      case DW_FORM_flag_present:
+        func(&Base::template ReadAttr<&ME::DoNothing>);
+        return;
+      case DW_FORM_data1:
+      case DW_FORM_ref1:
+      case DW_FORM_flag:
+        func(&Base::template ReadAttr<&ME::SkipFixed<1>>);
+        return;
+      case DW_FORM_data2:
+      case DW_FORM_ref2:
+        func(&Base::template ReadAttr<&ME::SkipFixed<2>>);
+        return;
+      case DW_FORM_data4:
+      case DW_FORM_ref4:
+        func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        return;
+      case DW_FORM_data8:
+      case DW_FORM_ref8:
+      case DW_FORM_ref_sig8:
+        func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
+        return;
+      case DW_FORM_addr:
+      case DW_FORM_ref_addr:
+        if (sizes.address_size == 8) {
+          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
+        } else if (sizes.address_size == 4) {
+          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        } else {
+          THROWF("don't know how to skip address size $0", sizes.address_size);
+        }
+        return;
+      case DW_FORM_sec_offset:
+        if (sizes.dwarf64) {
+          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
+        } else {
+          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
+        }
+        return;
+      case DW_FORM_strp:
+        if (sizes.dwarf64) {
+          func(&Base::template ReadAttr<&ME::SkipIndirectString<uint64_t>>);
+        } else {
+          func(&Base::template ReadAttr<&ME::SkipIndirectString<uint32_t>>);
+        }
+        return;
+      case DW_FORM_sdata:
+      case DW_FORM_udata:
+      case DW_FORM_ref_udata:
+        func(&Base::template ReadAttr<&ME::SkipVariable>);
+        return;
+      case DW_FORM_block1:
+        func(&Base::template ReadAttr<&ME::SkipBlock<uint8_t>>);
+        return;
+      case DW_FORM_block2:
+        func(&Base::template ReadAttr<&ME::SkipBlock<uint16_t>>);
+        return;
+      case DW_FORM_block4:
+        func(&Base::template ReadAttr<&ME::SkipBlock<uint32_t>>);
+        return;
+      case DW_FORM_block:
+      case DW_FORM_exprloc:
+        func(&Base::template ReadAttr<&ME::SkipVariableBlock>);
+        return;
+      case DW_FORM_string:
+        func(&Base::template ReadAttr<&ME::SkipString>);
+        return;
+      case DW_FORM_indirect:
+        func(&ME::ReadIndirect);
+        return;
+      default:
+        THROWF("don't know how to skip DWARF form $0", form);
+    }
+  }
+
+ private:
+  void DoNothing() {}
+
+  template <size_t N>
+  void SkipFixed() {
+    SkipBytes(N, &data_);
+  }
+
+  void SkipVariable() {
+    SkipLEB128(&data_);
+  }
+
+  template <class D>
+  void SkipBlock() {
+    D len = ReadMemcpy<D>(&data_);
+    SkipBytes(len, &data_);
+  }
+
+  void SkipVariableBlock() {
+    uint64_t len = ReadLEB128<uint64_t>(&data_);
+    SkipBytes(len, &data_);
+  }
+
+  void SkipString() {
+    SkipNullTerminated(&data_);
+  }
+
+  template <class D>
+  void SkipIndirectString() {
+    D ofs = ReadMemcpy<D>(&data_);
+    StringTable table(reader_.dwarf().debug_str);
+    string_view str = table.ReadEntry(ofs);
+    reader_.AddIndirectString(str);
+  }
+};
+
 // FormReader for string_view.  We accept the true string forms (DW_FORM_string
 // and DW_FORM_strp) as well as a number of other forms that contain delimited
 // string data.  We also accept the generic/opaque DW_FORM_data* types; the
@@ -792,7 +1032,9 @@ class FormReader<string_view> : public FormReaderBase<FormReader<string_view>> {
         func(&FormReader::ReadIndirect);
         return;
       default:
-        THROWF("don't know how to translate form $0 to string_view", form);
+        // Skip it.
+        FormReader<void>::GetFunctionForForm(sizes, form, func);
+        return;
     }
   }
 
@@ -824,6 +1066,7 @@ class FormReader<string_view> : public FormReaderBase<FormReader<string_view>> {
     D ofs = ReadMemcpy<D>(&data_);
     StringTable table(reader_.dwarf().debug_str);
     *val_ = table.ReadEntry(ofs);
+    reader_.AddIndirectString(*val_);
   }
 };
 
@@ -915,7 +1158,9 @@ class FormReader<T, typename std::enable_if<std::is_integral<T>::value>::type>
         func(&Base::ReadIndirect);
         return;
       default:
-        THROWF("don't know how to translate form $0 to integer", form);
+        // Skip it.
+        FormReader<void>::GetFunctionForForm(sizes, form, func);
+        return;
     }
   }
 
@@ -982,118 +1227,6 @@ class FormReader<bool> : public FormReaderBase<FormReader<bool>> {
   }
 };
 
-// FormReader for void.  For skipping the data instead of reading it somewhere.
-template <>
-class FormReader<void> : public FormReaderBase<FormReader<void>> {
- public:
-  typedef FormReader ME;
-  typedef FormReaderBase<ME> Base;
-  typedef void type;
-  using Base::data_;
-
-  FormReader(const DIEReader& reader, string_view data, void* /*val*/)
-      : Base(reader, data) {}
-
-  template <class Func>
-  static void GetFunctionForForm(CompilationUnitSizes sizes, uint8_t form,
-                                 Func func) {
-    switch (form) {
-      case DW_FORM_flag_present:
-        func(&Base::template ReadAttr<&ME::DoNothing>);
-        return;
-      case DW_FORM_data1:
-      case DW_FORM_ref1:
-      case DW_FORM_flag:
-        func(&Base::template ReadAttr<&ME::SkipFixed<1>>);
-        return;
-      case DW_FORM_data2:
-      case DW_FORM_ref2:
-        func(&Base::template ReadAttr<&ME::SkipFixed<2>>);
-        return;
-      case DW_FORM_data4:
-      case DW_FORM_ref4:
-        func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
-        return;
-      case DW_FORM_data8:
-      case DW_FORM_ref8:
-      case DW_FORM_ref_sig8:
-        func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
-        return;
-      case DW_FORM_addr:
-      case DW_FORM_ref_addr:
-        if (sizes.address_size == 8) {
-          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
-        } else if (sizes.address_size == 4) {
-          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
-        } else {
-          THROWF("don't know how to skip address size $0", sizes.address_size);
-        }
-        return;
-      case DW_FORM_sec_offset:
-      case DW_FORM_strp:
-        if (sizes.dwarf64) {
-          func(&Base::template ReadAttr<&ME::SkipFixed<8>>);
-        } else {
-          func(&Base::template ReadAttr<&ME::SkipFixed<4>>);
-        }
-        return;
-      case DW_FORM_sdata:
-      case DW_FORM_udata:
-      case DW_FORM_ref_udata:
-        func(&Base::template ReadAttr<&ME::SkipVariable>);
-        return;
-      case DW_FORM_block1:
-        func(&Base::template ReadAttr<&ME::SkipBlock<uint8_t>>);
-        return;
-      case DW_FORM_block2:
-        func(&Base::template ReadAttr<&ME::SkipBlock<uint16_t>>);
-        return;
-      case DW_FORM_block4:
-        func(&Base::template ReadAttr<&ME::SkipBlock<uint32_t>>);
-        return;
-      case DW_FORM_block:
-      case DW_FORM_exprloc:
-        func(&Base::template ReadAttr<&ME::SkipVariableBlock>);
-        return;
-      case DW_FORM_string:
-        func(&Base::template ReadAttr<&ME::SkipString>);
-        return;
-      case DW_FORM_indirect:
-        func(&ME::ReadIndirect);
-        return;
-      default:
-        THROWF("don't know how to skip DWARF form $0", form);
-    }
-  }
-
- private:
-  void DoNothing() {}
-
-  template <size_t N>
-  void SkipFixed() {
-    SkipBytes(N, &data_);
-  }
-
-  void SkipVariable() {
-    SkipLEB128(&data_);
-  }
-
-  template <class D>
-  void SkipBlock() {
-    D len = ReadMemcpy<D>(&data_);
-    SkipBytes(len, &data_);
-  }
-
-  void SkipVariableBlock() {
-    uint64_t len = ReadLEB128<uint64_t>(&data_);
-    SkipBytes(len, &data_);
-  }
-
-  void SkipString() {
-    SkipNullTerminated(&data_);
-  }
-};
-
 
 // ActionBuf ///////////////////////////////////////////////////////////////////
 
@@ -1157,7 +1290,9 @@ ActionBuf::ActionBuf(const AbbrevTable::Abbrev& abbrev,
 
   // Overwrite any entries for attributes we actually want to store somewhere.
   for (const auto& action : indexed_actions) {
-    if (action.action.func) {
+    const auto& attr = abbrev.attr[action.index];
+    if (action.action.func &&
+        action.action.func != GetFormDecodeFunc<void>(attr.form, sizes)) {
       assert(action.index < action_list_.size());
       if (action_list_[action.index].data) {
         THROW(
@@ -1249,6 +1384,7 @@ class FixedAttrReader {
     memset(&has_attr_, 0, sizeof...(Args));
 
     // Parse all attributes.
+    sibling_ = 0;
     data = GetActionBuf(*reader).ReadAttributes(*reader, data);
     reader->ReadAttributesEnd(data, sibling_);
   }
@@ -1344,6 +1480,26 @@ const ActionBuf& FixedAttrReader<Args...>::BuildActionBuf(
   // Must have inserted.
   assert(pair.second);
   return pair.first->second;
+}
+
+// From DIEReader, defined here because it depends on FixedAttrReader.
+bool DIEReader::SkipChildren() {
+  assert(state_ == State::kReadyToNext);
+  if (!HasChild()) {
+    return true;
+  }
+
+  int target_depth = depth_ - 1;
+  dwarf::FixedAttrReader<uint64_t> attr_reader(this, {DW_AT_sibling});
+  while (depth_ > target_depth) {
+    // TODO(haberman): use DW_AT_sibling to optimize skipping when it is
+    // available.
+    if (!NextDIE()) {
+      return false;
+    }
+    attr_reader.ReadAttributes(this);
+  }
+  return true;
 }
 
 
@@ -1725,64 +1881,450 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
     std::string filename = map.GetFilename(ranges.debug_info_offset());
 
     while (ranges.NextRange()) {
-      sink->AddVMRangeIgnoreDuplicate(ranges.address(), ranges.length(),
-                                      filename);
+      if (ranges.address() != 0) {
+        sink->AddVMRangeIgnoreDuplicate("dwarf_aranges", ranges.address(),
+                                        ranges.length(), filename);
+      }
     }
   }
 
   return true;
 }
 
-void AddDIE(const std::string& name,
+void AddDIE(const dwarf::File& file, const std::string& name,
             const dwarf::FixedAttrReader<string_view, string_view, uint64_t,
-                                         uint64_t>& attr,
-            const SymbolTable& symtab, RangeSink* sink) {
+                                         uint64_t, string_view, uint64_t,
+                                         uint64_t, uint64_t, uint64_t>& attr,
+            const SymbolTable& symtab, const DualMap& symbol_map,
+            const dwarf::CompilationUnitSizes& sizes, RangeSink* sink) {
   uint64_t low_pc = attr.GetAttribute<2>();
   uint64_t high_pc = attr.GetAttribute<3>();
 
-  if (attr.HasAttribute<2>() && attr.HasAttribute<3>()) {
-    sink->AddVMRangeIgnoreDuplicate(low_pc, high_pc - low_pc, name);
+  // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
+  // functions).
+  if (attr.HasAttribute<2>() && attr.HasAttribute<3>() && low_pc != 0) {
+    // It appears that some compilers make high_pc a size, and others make it an
+    // address.
+    if (high_pc >= low_pc) {
+      high_pc -= low_pc;
+    }
+    sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, name);
   }
 
+  // Sometimes a DIE has a linkage_name, which we can look up in the symbol
+  // table.
   if (attr.HasAttribute<1>()) {
     auto it = symtab.find(attr.GetAttribute<1>());
     if (it != symtab.end()) {
-      sink->AddVMRangeIgnoreDuplicate(it->second.first, it->second.second,
-                                      name);
+      sink->AddVMRangeIgnoreDuplicate("dwarf_linkagename", it->second.first,
+                                      it->second.second, name);
     }
   }
+
+  // Sometimes the DIE has a "location", which gives the location as an address.
+  // This parses a very small subset of the overall DWARF expression grammar.
+  if (attr.HasAttribute<4>()) {
+    string_view location = attr.GetAttribute<4>();
+    if (location.size() == sizes.address_size + 1 &&
+        location[0] == DW_OP_addr) {
+      location.remove_prefix(1);
+      uint64_t addr;
+      // TODO(haberman): endian?
+      if (sizes.address_size == 4) {
+        addr = dwarf::ReadMemcpy<uint32_t>(&location);
+      } else if (sizes.address_size == 8) {
+        addr = dwarf::ReadMemcpy<uint64_t>(&location);
+      } else {
+        THROW("Unexpected address size");
+      }
+
+      // Unfortunately the location doesn't include a size, so we look that part
+      // up in the symbol map.
+      uint64_t size;
+      if (symbol_map.vm_map.TryGetSize(addr, &size)) {
+        sink->AddVMRangeIgnoreDuplicate("dwarf_location", addr, size, name);
+      } else {
+        if (verbose_level > 0) {
+          fprintf(stderr,
+                  "bloaty: warning: couldn't find DWARF location in symbol "
+                  "table, address: %" PRIx64 "\n",
+                  addr);
+        }
+      }
+    }
+  }
+
+  if (attr.HasAttribute<5>()) {
+    absl::string_view loc_range = file.debug_loc.substr(attr.GetAttribute<5>());
+    loc_range = GetLocationListRange(sizes, loc_range);
+    sink->AddFileRange("dwarf_locrange", name, loc_range);
+  }
+
+  uint64_t ranges_offset = UINT64_MAX;
+
+  if (attr.HasAttribute<7>()) {
+    ranges_offset = attr.GetAttribute<7>();
+  } else if (attr.HasAttribute<8>()) {
+    ranges_offset = attr.GetAttribute<8>();
+  }
+
+  if (ranges_offset != UINT64_MAX) {
+    absl::string_view ranges_range = file.debug_ranges.substr(ranges_offset);
+    ranges_range = GetRangeListRange(sizes, ranges_range);
+    sink->AddFileRange("dwarf_debugrange", name, ranges_range);
+  }
+}
+
+static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
+                              RangeSink* sink) {
+  dwarf::DIEReader die_reader(file);
+  dwarf::FixedAttrReader<string_view> attr_reader(&die_reader, {DW_AT_name});
+  string_view remaining = section;
+
+  while (remaining.size() > 0) {
+    dwarf::CompilationUnitSizes sizes;
+    string_view full_unit = remaining;
+    string_view unit = sizes.ReadInitialLength(&remaining);
+    full_unit =
+        full_unit.substr(0, unit.size() + (unit.data() - full_unit.data()));
+    dwarf::SkipBytes(2, &unit);
+    uint64_t debug_info_offset = sizes.ReadDWARFOffset(&unit);
+    bool ok = die_reader.SeekToCompilationUnit(
+        dwarf::DIEReader::Section::kDebugInfo, debug_info_offset);
+    if (!ok) {
+      THROW("Couldn't seek to debug_info section");
+    }
+    attr_reader.ReadAttributes(&die_reader);
+    std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
+    if (!compileunit_name.empty()) {
+      sink->AddFileRange("dwarf_pubnames", compileunit_name, full_unit);
+    }
+  }
+}
+
+uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
+                            const char* data_base, RangeSink* sink) {
+  uint64_t value;
+  const char *ptr = data->data();
+  uint8_t format = encoding & DW_EH_PE_FORMAT_MASK;
+
+  switch (format) {
+    case DW_EH_PE_omit:
+      return 0;
+    case DW_EH_PE_absptr:
+      if (is_64bit) {
+        value = dwarf::ReadMemcpy<uint64_t>(data);
+      } else {
+        value = dwarf::ReadMemcpy<uint32_t>(data);
+      }
+      break;
+    case DW_EH_PE_uleb128:
+      value = dwarf::ReadLEB128<uint64_t>(data);
+      break;
+    case DW_EH_PE_udata2:
+      value = dwarf::ReadMemcpy<uint16_t>(data);
+      break;
+    case DW_EH_PE_udata4:
+      value = dwarf::ReadMemcpy<uint32_t>(data);
+      break;
+    case DW_EH_PE_udata8:
+      value = dwarf::ReadMemcpy<uint64_t>(data);
+      break;
+    case DW_EH_PE_sleb128:
+      value = dwarf::ReadLEB128<int64_t>(data);
+      break;
+    case DW_EH_PE_sdata2:
+      value = dwarf::ReadMemcpy<int16_t>(data);
+      break;
+    case DW_EH_PE_sdata4:
+      value = dwarf::ReadMemcpy<int32_t>(data);
+      break;
+    case DW_EH_PE_sdata8:
+      value = dwarf::ReadMemcpy<int64_t>(data);
+      break;
+    default:
+      THROWF("Unexpected eh_frame format value: $0", format);
+  }
+
+  uint8_t application = encoding & DW_EH_PE_APPLICATION_MASK;
+
+  switch(application) {
+    case 0:
+      break;
+    case DW_EH_PE_pcrel:
+      value += sink->TranslateFileToVM(ptr);
+      break;
+    case DW_EH_PE_datarel:
+      if (data_base == nullptr) {
+        THROW("datarel requested but no data_base provided");
+      }
+      value += sink->TranslateFileToVM(data_base);
+      break;
+    case DW_EH_PE_textrel:
+    case DW_EH_PE_funcrel:
+    case DW_EH_PE_aligned:
+      THROWF("Unimplemented eh_frame application value: $0", application);
+  }
+
+  if (encoding & DW_EH_PE_indirect) {
+    string_view location = sink->TranslateVMToFile(value);
+    if (is_64bit) {
+      value = dwarf::ReadMemcpy<uint64_t>(&location);
+    } else {
+      value = dwarf::ReadMemcpy<uint32_t>(&location);
+    }
+  }
+
+  return value;
+}
+
+// Code to read the .eh_frame section.  This is not technically DWARF, but it
+// is similar to .debug_frame (which is DWARF) so it's convenient to put it
+// here.
+//
+// The best documentation I can find for this format comes from:
+//
+// * http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html
+// * https://www.airs.com/blog/archives/460
+//
+// However these are both under-specified.  Some details are not mentioned in
+// either of these (for example, the fact that the function length uses the FDE
+// encoding, but always absolute).  libdwarf's implementation contains a comment
+// saying "It is not clear if this is entirely correct".  Basically the only
+// thing you can trust for some of these details is the code that actually
+// implements unwinding in production:
+//
+// * libunwind http://www.nongnu.org/libunwind/
+//   https://github.com/pathscale/libunwind/blob/master/src/dwarf/Gfde.c
+// * LLVM libunwind (a different project!!)
+//   https://github.com/llvm-mirror/libunwind/blob/master/src/DwarfParser.hpp
+// * libgcc
+//   https://github.com/gcc-mirror/gcc/blob/master/libgcc/unwind-dw2-fde.c
+void ReadEhFrame(string_view data, RangeSink* sink) {
+  string_view remaining = data;
+
+  struct CIEInfo {
+    int version = 0;
+    uint32_t code_align = 0;
+    int32_t data_align = 0;
+    uint8_t fde_encoding = 0;
+    uint8_t lsda_encoding = 0;
+    bool is_signal_handler = false;
+    bool has_augmentation_length = false;
+    uint64_t personality_function = 0;
+    uint32_t return_address_reg = 0;
+  };
+
+  std::unordered_map<const char*, CIEInfo> cie_map;
+
+  while (remaining.size() > 0) {
+    dwarf::CompilationUnitSizes sizes;
+    string_view full_entry = remaining;
+    string_view entry = sizes.ReadInitialLength(&remaining);
+    if (entry.size() == 0 && remaining.size() == 0) {
+      return;
+    }
+    full_entry =
+        full_entry.substr(0, entry.size() + (entry.data() - full_entry.data()));
+    uint32_t id = dwarf::ReadMemcpy<uint32_t>(&entry);
+    if (id == 0) {
+      // CIE, we don't attribute this yet.
+      CIEInfo& cie_info = cie_map[full_entry.data()];
+      cie_info.version = dwarf::ReadMemcpy<uint8_t>(&entry);
+      string_view aug_string = dwarf::ReadNullTerminated(&entry);
+      cie_info.code_align = dwarf::ReadLEB128<uint32_t>(&entry);
+      cie_info.data_align = dwarf::ReadLEB128<int32_t>(&entry);
+      switch (cie_info.version) {
+        case 1:
+          cie_info.return_address_reg = dwarf::ReadMemcpy<uint8_t>(&entry);
+          break;
+        case 3:
+          cie_info.return_address_reg = dwarf::ReadLEB128<uint32_t>(&entry);
+          break;
+        default:
+          THROW("Unexpected eh_frame CIE version");
+      }
+      while (aug_string.size() > 0) {
+        switch (aug_string[0]) {
+          case 'z':
+            // Length until the end of augmentation data.
+            cie_info.has_augmentation_length = true;
+            dwarf::ReadLEB128<uint32_t>(&entry);
+            break;
+          case 'L':
+            cie_info.lsda_encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            break;
+          case 'R':
+            cie_info.fde_encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            break;
+          case 'S':
+            cie_info.is_signal_handler = true;
+            break;
+          case 'P': {
+            uint8_t encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            cie_info.personality_function =
+                ReadEncodedPointer(encoding, true, &entry, nullptr, sink);
+            break;
+          }
+          default:
+            THROW("Unexepcted augmentation character");
+        }
+        aug_string.remove_prefix(1);
+      }
+    } else {
+      auto iter = cie_map.find(entry.data() - id - 4);
+      if (iter == cie_map.end()) {
+        THROW("Couldn't find CIE for FDE");
+      }
+      const CIEInfo& cie_info = iter->second;
+      // TODO(haberman): don't hard-code 64-bit.
+      uint64_t address = ReadEncodedPointer(cie_info.fde_encoding, true, &entry,
+                                            nullptr, sink);
+      // TODO(haberman); Technically the FDE addresses could span a
+      // function/compilation unit?  They can certainly span inlines.
+      /*
+      uint64_t length =
+        ReadEncodedPointer(cie_info.fde_encoding & 0xf, true, &entry, sink);
+      (void)length;
+
+      if (cie_info.has_augmentation_length) {
+        uint32_t augmentation_length = dwarf::ReadLEB128<uint32_t>(&entry);
+        (void)augmentation_length;
+      }
+
+      uint64_t lsda =
+          ReadEncodedPointer(cie_info.lsda_encoding, true, &entry, sink);
+      if (lsda) {
+      }
+      */
+
+      sink->AddFileRangeFor("dwarf_fde", address, full_entry);
+    }
+  }
+}
+
+// See documentation here:
+//   http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html#EHFRAME
+void ReadEhFrameHdr(string_view data, RangeSink* sink) {
+  const char* base = data.data();
+  uint8_t version = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t eh_frame_ptr_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t fde_count_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t table_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+
+  if (version != 1) {
+    THROWF("Unknown eh_frame_hdr version: $0", version);
+  }
+
+  // TODO(haberman): don't hard-code 64-bit.
+  uint64_t eh_frame_ptr =
+      ReadEncodedPointer(eh_frame_ptr_enc, true, &data, base, sink);
+  (void)eh_frame_ptr;
+  uint64_t fde_count =
+      ReadEncodedPointer(fde_count_enc, true, &data, base, sink);
+
+  for (uint64_t i = 0; i < fde_count; i++) {
+    string_view entry_data = data;
+    uint64_t initial_location =
+        ReadEncodedPointer(table_enc, true, &data, base, sink);
+    uint64_t fde_addr = ReadEncodedPointer(table_enc, true, &data, base, sink);
+    entry_data.remove_suffix(data.size());
+    sink->AddFileRangeFor("dwarf_fde_table", initial_location, entry_data);
+
+    // We could add fde_addr with an unknown length if we wanted to skip reading
+    // eh_frame.  We can't count on this table being available though, so we
+    // don't want to remove the eh_frame reading code altogether.
+    (void)fde_addr;
+  }
+}
+
+static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
+                                   string_view unit_name, RangeSink* sink) {
+  string_view data = file.debug_line;
+  dwarf::SkipBytes(offset, &data);
+  string_view data_with_length = data;
+  dwarf::CompilationUnitSizes sizes;
+  data = sizes.ReadInitialLength(&data);
+  data = data_with_length.substr(
+      0, data.size() + (data.data() - data_with_length.data()));
+  sink->AddFileRange("dwarf_stmtlistrange", unit_name, data);
 }
 
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
-static void ReadDWARFDebugInfo(const dwarf::File& file,
-                               const SymbolTable& symtab, RangeSink* sink) {
+static void ReadDWARFDebugInfo(
+    const dwarf::File& file, dwarf::DIEReader::Section section,
+    const SymbolTable& symtab, const DualMap& symbol_map, RangeSink* sink,
+    std::unordered_map<uint64_t, std::string>* stmt_list_map) {
   dwarf::DIEReader die_reader(file);
-  dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t>
-      attr_reader(&die_reader, {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc,
-                                 DW_AT_high_pc});
+  die_reader.set_strp_sink(sink);
+  dwarf::FixedAttrReader<string_view, string_view, uint64_t, uint64_t,
+                         string_view, uint64_t, uint64_t, uint64_t, uint64_t>
+      attr_reader(&die_reader,
+                  {DW_AT_name, DW_AT_linkage_name, DW_AT_low_pc, DW_AT_high_pc,
+                   DW_AT_location, DW_AT_location, DW_AT_stmt_list,
+                   DW_AT_ranges, DW_AT_start_scope});
 
-  if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
-    THROW("debug info is present, but empty");
+  if (!die_reader.SeekToStart(section)) {
+    return;
   }
 
   do {
     attr_reader.ReadAttributes(&die_reader);
     std::string compileunit_name = std::string(attr_reader.GetAttribute<0>());
-    if (!compileunit_name.empty()) {
-      AddDIE(compileunit_name, attr_reader, symtab, sink);
 
-      while (die_reader.NextDIE()) {
-        attr_reader.ReadAttributes(&die_reader);
-        AddDIE(compileunit_name, attr_reader, symtab, sink);
+    if (attr_reader.HasAttribute<6>()) {
+      uint64_t stmt_list = attr_reader.GetAttribute<6>();
+      if (compileunit_name.empty()) {
+        auto iter = stmt_list_map->find(stmt_list);
+        if (iter != stmt_list_map->end()) {
+          compileunit_name = iter->second;
+        }
+      } else {
+        (*stmt_list_map)[stmt_list] = compileunit_name;
+      }
+    }
+
+    if (compileunit_name.empty()) {
+      continue;
+    }
+
+    die_reader.set_compileunit_name(compileunit_name);
+    sink->AddFileRange("dwarf_debuginfo", compileunit_name,
+                       die_reader.unit_range());
+    AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
+           die_reader.unit_sizes(), sink);
+
+    if (attr_reader.HasAttribute<6>()) {
+      uint64_t offset = attr_reader.GetAttribute<6>();
+      ReadDWARFStmtListRange(file, offset, compileunit_name, sink);
+    }
+
+    string_view abbrev_data = file.debug_abbrev;
+    dwarf::SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
+    dwarf::AbbrevTable unit_abbrev;
+    abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
+    sink->AddFileRange("dwarf_abbrev", compileunit_name, abbrev_data);
+
+
+    while (die_reader.NextDIE()) {
+      attr_reader.ReadAttributes(&die_reader);
+
+      // low_pc == 0 is a signal that this routine was stripped out of the
+      // final binary.  Skip this DIE and all of its children.
+      if (attr_reader.HasAttribute<2>() && attr_reader.GetAttribute<2>() == 0) {
+        die_reader.SkipChildren();
+      } else {
+        AddDIE(file, compileunit_name, attr_reader, symtab, symbol_map,
+               die_reader.unit_sizes(), sink);
       }
     }
   } while (die_reader.NextCompilationUnit());
 }
 
 void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
-                           RangeSink* sink) {
+                           const DualMap& symbol_map, RangeSink* sink) {
   if (!file.debug_info.size()) {
     THROW("missing debug info");
   }
@@ -1791,7 +2333,13 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
     ReadDWARFAddressRanges(file, sink);
   }
 
-  ReadDWARFDebugInfo(file, symtab, sink);
+  std::unordered_map<uint64_t, std::string> stmt_list_map;
+  ReadDWARFDebugInfo(file, dwarf::DIEReader::Section::kDebugInfo, symtab,
+                     symbol_map, sink, &stmt_list_map);
+  ReadDWARFDebugInfo(file, dwarf::DIEReader::Section::kDebugTypes, symtab,
+                     symbol_map, sink, &stmt_list_map);
+  ReadDWARFPubNames(file, file.debug_pubnames, sink);
+  ReadDWARFPubNames(file, file.debug_pubtypes, sink);
 }
 
 static std::string LineInfoKey(const std::string& file, uint32_t line,
@@ -1822,7 +2370,8 @@ static void ReadDWARFStmtList(bool include_line,
       span_startaddr = addr;
     } else if (line_info.end_sequence ||
         (!last_source.empty() && name != last_source)) {
-      sink->AddVMRange(span_startaddr, addr - span_startaddr, last_source);
+      sink->AddVMRange("dwarf_stmtlist", span_startaddr, addr - span_startaddr,
+                       last_source);
       if (line_info.end_sequence) {
         span_startaddr = 0;
       } else {

@@ -33,6 +33,7 @@
 #include "absl/strings/strip.h"
 #include "capstone.h"
 #include "re2/re2.h"
+#include "range_map.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
   class_name(const class_name&) = delete; \
@@ -52,6 +53,8 @@
 
 namespace bloaty {
 
+extern int verbose_level;
+
 class NameMunger;
 class Options;
 struct DualMap;
@@ -61,6 +64,8 @@ enum class DataSource {
   kArchiveMembers,
   kCompileUnits,
   kInlines,
+  kInputFiles,
+  kRawRanges,
   kSections,
   kSegments,
 
@@ -141,28 +146,46 @@ class RangeSink {
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
-                uint64_t fileoff, uint64_t filesize);
+  void AddRange(const char* analyzer, absl::string_view name, uint64_t vmaddr,
+                uint64_t vmsize, uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(absl::string_view name, uint64_t vmaddr, uint64_t vmsize,
-                      absl::string_view file_range) {
-    AddRange(name, vmaddr, vmsize, file_range.data() - file_->data().data(),
-             file_range.size());
+  void AddRange(const char* analyzer, absl::string_view name, uint64_t vmaddr,
+                uint64_t vmsize, absl::string_view file_range) {
+    AddRange(analyzer, name, vmaddr, vmsize,
+             file_range.data() - file_->data().data(), file_range.size());
   }
 
-  void AddFileRange(absl::string_view name,
+  void AddFileRange(const char* analyzer, absl::string_view name,
                     uint64_t fileoff, uint64_t filesize);
 
-  void AddFileRange(absl::string_view name, absl::string_view file_range) {
-    AddFileRange(name, file_range.data() - file_->data().data(),
-                 file_range.size());
+  // Like AddFileRange(), but the label is whatever label was previously
+  // assigned to VM address |label_from_vmaddr|.  If no existing label is
+  // assigned to |label_from_vmaddr|, this function does nothing.
+  void AddFileRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
+                       absl::string_view file_range);
+  void AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
+                     uint64_t addr, uint64_t size);
+
+  void AddFileRange(const char* analyzer, absl::string_view name,
+                    absl::string_view file_range) {
+    // When separate debug files are being used, the DWARF analyzer will try to
+    // add sections of the debug file.  We want to prevent this because we only
+    // want to profile the main file (not the debug file), so we filter these
+    // out.  This approach is simple to implement, but does result in some
+    // useless work being done.  We may want to avoid doing this useless work in
+    // the first place.
+    if (FileContainsPointer(file_range.data())) {
+      AddFileRange(analyzer, name, file_range.data() - file_->data().data(),
+                   file_range.size());
+    }
   }
 
   // The VM-only functions below may not be used to populate the base map!
 
   // Adds a region to the memory map.  It should not overlap any previous
   // region added with Add(), but it should overlap the base memory map.
-  void AddVMRange(uint64_t vmaddr, uint64_t vmsize, const std::string& name);
+  void AddVMRange(const char* analyzer, uint64_t vmaddr, uint64_t vmsize,
+                  const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
   // already under a different name.  If so, this name becomes an alias of the
@@ -170,8 +193,8 @@ class RangeSink {
   //
   // This is for things like symbol tables that sometimes map multiple names to
   // the same physical function.
-  void AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
-                            const std::string& name);
+  void AddVMRangeAllowAlias(const char* analyzer, uint64_t vmaddr,
+                            uint64_t size, const std::string& name);
 
   // Like Add(), but allows that this addr/size might have previously been added
   // already under a different name.  If so, this add is simply ignored.
@@ -180,11 +203,27 @@ class RangeSink {
   // come from multiple source files.  But if it does, we don't want to alias
   // the entire source file to another, because it's probably only part of the
   // source file that overlaps.
-  void AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t size,
-                                 const std::string& name);
+  void AddVMRangeIgnoreDuplicate(const char* analyzer, uint64_t vmaddr,
+                                 uint64_t size, const std::string& name);
+
+  const DualMap& MapAtIndex(size_t index) const {
+    return *outputs_[index].first;
+  }
+
+  // Translates the given pointer (which must be within the range of
+  // input_file().data()) to a VM address.
+  uint64_t TranslateFileToVM(const char* ptr);
+  absl::string_view TranslateVMToFile(uint64_t address);
+
+  static const uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeSink);
+
+  bool FileContainsPointer(const void* ptr) const {
+    absl::string_view file_data = file_->data();
+    return ptr >= file_data.data() && ptr < file_data.data() + file_data.size();
+  }
 
   const InputFile* file_;
   DataSource data_source_;
@@ -262,6 +301,10 @@ struct File {
   absl::string_view debug_abbrev;
   absl::string_view debug_aranges;
   absl::string_view debug_line;
+  absl::string_view debug_loc;
+  absl::string_view debug_pubnames;
+  absl::string_view debug_pubtypes;
+  absl::string_view debug_ranges;
 };
 
 }  // namespace dwarf
@@ -269,9 +312,11 @@ struct File {
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
 void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
-                           RangeSink* sink);
+                           const DualMap& map, RangeSink* sink);
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
+void ReadEhFrame(absl::string_view contents, RangeSink* sink);
+void ReadEhFrameHdr(absl::string_view contents, RangeSink* sink);
 
 
 // LineReader //////////////////////////////////////////////////////////////////
@@ -335,108 +380,6 @@ LineReader ReadLinesFromPipe(const std::string& cmd);
 std::string ItaniumDemangle(absl::string_view symbol, DataSource source);
 
 
-// RangeMap ////////////////////////////////////////////////////////////////////
-
-// Maps
-//
-//   [uint64_t, uint64_t) -> std::string, [optional other range base]
-//
-// where ranges must be non-overlapping.
-//
-// This is used to map the address space (either pointer offsets or file
-// offsets).
-//
-// The other range base allows us to use this RangeMap to translate addresses
-// from this domain to another one (like vm_addr -> file_addr or vice versa).
-//
-// This type is only exposed in the .h file for unit testing purposes.
-
-class RangeMapTest;
-
-class RangeMap {
- public:
-  RangeMap() = default;
-  RangeMap(RangeMap&& other) = default;
-  RangeMap& operator=(RangeMap&& other) = default;
-
-  // Adds a range to this map.
-  void AddRange(uint64_t addr, uint64_t size, const std::string& val);
-
-  // Adds a range to this map (in domain D1) that also corresponds to a
-  // different range in a different map (in domain D2).  The correspondance will
-  // be noted to allow us to translate into the other domain later.
-  void AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
-                    const std::string& val);
-
-  // Adds a range to this map (in domain D1), and also adds corresponding ranges
-  // to |other| (in domain D2), using |translator| (in domain D1) to translate
-  // D1->D2.  The translation is performed using information from previous
-  // AddDualRange() calls on |translator|.
-  void AddRangeWithTranslation(uint64_t addr, uint64_t size,
-                               const std::string& val,
-                               const RangeMap& translator, RangeMap* other);
-
-  // Translates |addr| into the other domain, returning |true| if this was
-  // successful.
-  bool Translate(uint64_t addr, uint64_t *translated) const;
-
-  // Looks for a range within this map that contains |addr|.  If found, returns
-  // true and sets |label| to the corresponding label, and |offset| to the
-  // offset from the beginning of this range.
-  bool TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const;
-
-  template <class Func>
-  static void ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                            const std::string& filename, int filename_position,
-                            Func func);
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeMap);
-
-  friend class RangeMapTest;
-
-  struct Entry {
-    Entry(const std::string& label_, uint64_t end_, uint64_t other_)
-        : label(label_), end(end_), other_start(other_) {}
-    std::string label;
-    uint64_t end;
-    uint64_t other_start;  // UINT64_MAX if there is no mapping.
-
-    bool HasTranslation() const { return other_start != UINT64_MAX; }
-  };
-
-  typedef std::map<uint64_t, Entry> Map;
-  Map mappings_;
-
-  template <class T>
-  static bool EntryContains(T iter, uint64_t addr) {
-    return addr >= iter->first && addr < iter->second.end;
-  }
-
-  static uint64_t RangeEnd(Map::const_iterator iter) {
-    return iter->second.end;
-  }
-
-  bool IterIsEnd(Map::const_iterator iter) const {
-    return iter == mappings_.end();
-  }
-
-  template <class T>
-  static uint64_t TranslateWithEntry(T iter, uint64_t addr);
-
-  template <class T>
-  static bool TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
-                                             uint64_t end, uint64_t* out_addr,
-                                             uint64_t* out_end);
-
-  // Finds the entry that contains |addr|.  If no such mapping exists, returns
-  // mappings_.end().
-  Map::iterator FindContaining(uint64_t addr);
-  Map::const_iterator FindContaining(uint64_t addr) const;
-  Map::const_iterator FindContainingOrAfter(uint64_t addr) const;
-};
-
-
 // DualMap /////////////////////////////////////////////////////////////////////
 
 // Contains a RangeMap for VM space and file space for a given file.
@@ -455,6 +398,7 @@ struct DisassemblyInfo {
 };
 
 std::string DisassembleFunction(const DisassemblyInfo& info);
+void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink);
 
 // Top-level API ///////////////////////////////////////////////////////////////
 

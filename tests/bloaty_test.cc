@@ -68,7 +68,7 @@ TEST_F(BloatyTest, SimpleObjectFile) {
   });
 
   // For symbols we should get entries for all our expected symbols.
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
   AssertChildren(*top_row_, {
     std::make_tuple("func1", kUnknown, kSameAsVM),
     std::make_tuple("func2", kUnknown, kSameAsVM),
@@ -120,7 +120,7 @@ TEST_F(BloatyTest, SimpleArchiveFile) {
   EXPECT_LT(top_row_->vmsize, 12000);
   //EXPECT_EQ(top_row_->filesize, size);
 
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
     std::make_tuple("foo_x", 4000, 0),
@@ -183,7 +183,7 @@ TEST_F(BloatyTest, SimpleSharedObjectFile) {
   EXPECT_LT(top_row_->vmsize, 12000);
   EXPECT_EQ(top_row_->filesize, size);
 
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "50", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
     std::make_tuple("foo_x", 4000, 0),
@@ -211,7 +211,7 @@ TEST_F(BloatyTest, SimpleBinary) {
   EXPECT_LT(top_row_->vmsize, 12000);
   EXPECT_EQ(top_row_->filesize, size);
 
-  RunBloaty({"bloaty", "-d", "symbols", file});
+  RunBloaty({"bloaty", "-d", "symbols", "-n", "50", "-s", "vm", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
     std::make_tuple("foo_x", 4000, 0),
@@ -223,28 +223,60 @@ TEST_F(BloatyTest, SimpleBinary) {
     std::make_tuple("foo_y", 4, 0)
   });
 
-  // This is currently broken for the 32-bit x86 binary.
-  // TODO(haberman): fix this.
-  if (GetTestDirectory() != "linux-x86") {
-    RunBloaty({"bloaty", "-d", "compileunits,symbols", file});
-    auto row = FindRow("bar.o.c");
-    ASSERT_TRUE(row != nullptr);
+  RunBloaty({"bloaty", "-d", "compileunits,symbols", file});
+  auto row = FindRow("bar.o.c");
+  ASSERT_TRUE(row != nullptr);
 
-    // This only includes functions (not data) for now.
-    AssertChildren(*row, {
-      std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    });
+  // This only includes functions (not data) for now.
+  AssertChildren(*row, {
+    std::make_tuple("bar_x", 4000, kSameAsVM),
+    std::make_tuple("bar_func", kUnknown, kSameAsVM),
+    std::make_tuple("bar_y", kUnknown, kSameAsVM),
+    std::make_tuple("bar_z", kUnknown, kSameAsVM),
+  });
 
-    row = FindRow("foo.o.c");
-    ASSERT_TRUE(row != nullptr);
+  row = FindRow("foo.o.c");
+  ASSERT_TRUE(row != nullptr);
 
-    // This only includes functions (not data) for now.
-    AssertChildren(*row, {
-      std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    });
+  // This only includes functions (not data) for now.
+  AssertChildren(*row, {
+    std::make_tuple("foo_x", 4000, 0),
+    std::make_tuple("foo_func", kUnknown, kSameAsVM),
+    std::make_tuple("foo_y", kUnknown, kSameAsVM),
+  });
 
-    RunBloaty({"bloaty", "-d", "sections,inlines", file});
-  }
+  RunBloaty({"bloaty", "-d", "sections,inlines", file});
+}
+
+TEST_F(BloatyTest, InputFiles) {
+  std::string file1 = "05-binary.bin";
+  std::string file2 = "07-binary-stripped.bin";
+  uint64_t size1, size2;
+  ASSERT_TRUE(GetFileSize(file1, &size1));
+  ASSERT_TRUE(GetFileSize(file2, &size2));
+  RunBloaty({"bloaty", file1, file2, "-d", "inputfiles"});
+  AssertChildren(*top_row_, {std::make_tuple(file1, kUnknown, size1),
+                             std::make_tuple(file2, kUnknown, size2)});
+
+  // Should work with custom data sources.
+  bloaty::Options options;
+  google::protobuf::TextFormat::ParseFromString(R"(
+    filename: "05-binary.bin"
+    filename: "07-binary-stripped.bin"
+    custom_data_source {
+      name: "rewritten_inputfiles"
+      base_data_source: "inputfiles"
+      rewrite: {
+        pattern: "binary"
+        replacement: "binary"
+      }
+    }
+    data_source: "rewritten_inputfiles"
+  )", &options);
+
+  RunBloatyWithOptions(options, bloaty::OutputOptions());
+  AssertChildren(*top_row_,
+                 {std::make_tuple("binary", kUnknown, size1 + size2)});
 }
 
 TEST_F(BloatyTest, DiffMode) {

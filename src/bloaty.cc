@@ -84,11 +84,12 @@ constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
-    // Not a real data source, so we give it a junk DataSource::kInlines value
-    {DataSource::kInlines, "inputfiles",
+    {DataSource::kInputFiles, "inputfiles",
      "the filename specified on the Bloaty command-line"},
     {DataSource::kInlines, "inlines",
      "source line/file where inlined code came from.  requires debug info."},
+    {DataSource::kRawRanges, "rawranges",
+     "raw ranges of previous data source."},
     {DataSource::kSections, "sections", "object file section"},
     {DataSource::kSegments, "segments", "load commands in the binary"},
     {DataSource::kSymbols, "symbols",
@@ -257,6 +258,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
       return std::string(symbol);
     }
   } else {
+    printf("Unexpected source: %d\n", (int)source);
     BLOATY_UNREACHABLE();
   }
 }
@@ -270,21 +272,16 @@ void NameMunger::AddRegex(const std::string& regex, const std::string& replaceme
 }
 
 std::string NameMunger::Munge(string_view name) const {
-  re2::StringPiece piece(name.data(), name.size());
-  std::string ret;
-
-  if (!name.empty() && name[0] == '[') {
-    // This is a special symbol, don't mangle.
-    return std::string(name);
-  }
+  std::string name_str(name);
+  std::string ret(name);
 
   for (const auto& pair : regexes_) {
-    if (RE2::Extract(piece, *pair.first, pair.second, &ret)) {
+    if (RE2::Extract(name_str, *pair.first, pair.second, &ret)) {
       return ret;
     }
   }
 
-  return std::string(name);
+  return name_str;
 }
 
 
@@ -792,258 +789,6 @@ void RollupOutput::PrintToCSV(std::ostream* out) const {
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
-template <class T>
-uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) {
-  assert(EntryContains(iter, addr));
-  assert(iter->second.HasTranslation());
-  return addr - iter->first + iter->second.other_start;
-}
-
-template <class T>
-bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
-                                              uint64_t end, uint64_t* out_addr,
-                                              uint64_t* out_size) {
-  addr = std::max(addr, iter->first);
-  end = std::min(end, iter->second.end);
-
-  if (addr >= end || !iter->second.HasTranslation()) return false;
-
-  *out_addr = TranslateWithEntry(iter, addr);
-  *out_size = end - addr;
-  return true;
-}
-
-RangeMap::Map::iterator RangeMap::FindContaining(uint64_t addr) {
-  auto it = mappings_.upper_bound(addr);  // Entry directly after.
-  if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {
-    return mappings_.end();
-  } else {
-    return it;
-  }
-}
-
-RangeMap::Map::const_iterator RangeMap::FindContaining(uint64_t addr) const {
-  auto it = mappings_.upper_bound(addr);  // Entry directly after.
-  if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {
-    return mappings_.end();
-  } else {
-    return it;
-  }
-}
-
-RangeMap::Map::const_iterator RangeMap::FindContainingOrAfter(
-    uint64_t addr) const {
-  auto after = mappings_.upper_bound(addr);
-  auto it = after;
-  if (it != mappings_.begin() && (--it, EntryContains(it, addr))) {
-    return it;  // Containing
-  } else {
-    return after;  // May be end().
-  }
-}
-
-bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
-  auto iter = FindContaining(addr);
-  if (iter == mappings_.end() || !iter->second.HasTranslation()) {
-    return false;
-  } else {
-    *translated = TranslateWithEntry(iter, addr);
-    return true;
-  }
-}
-
-bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const {
-  auto iter = FindContaining(addr);
-  if (iter == mappings_.end()) {
-    return false;
-  } else {
-    *label = iter->second.label;
-    *offset = addr - iter->first;
-    return true;
-  }
-}
-
-void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
-  AddDualRange(addr, size, UINT64_MAX, val);
-}
-
-void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
-                            const std::string& val) {
-  if (size == 0) return;
-
-  const uint64_t base = addr;
-  uint64_t end = addr + size;
-  auto it = FindContainingOrAfter(addr);
-
-
-  while (1) {
-    while (it != mappings_.end() && EntryContains(it, addr)) {
-      if (verbose_level > 1) {
-        fprintf(stderr,
-                "WARN: adding mapping [%" PRIx64 "x, %" PRIx64 "x] for label"
-                "%s, this conflicts with existing mapping [%" PRIx64 ", %"
-                PRIx64 "] for label %s\n",
-                addr, end, val.c_str(), it->first, it->second.end,
-                it->second.label.c_str());
-      }
-      addr = it->second.end;
-      ++it;
-    }
-
-    if (addr >= end) {
-      return;
-    }
-
-    uint64_t this_end = end;
-    if (it != mappings_.end() && end > it->first) {
-      this_end = std::min(end, it->first);
-      if (verbose_level > 1) {
-        fprintf(stderr,
-                "WARN(2): adding mapping [%" PRIx64 ", %" PRIx64 "] for label "
-                "%s, this conflicts with existing mapping [%" PRIx64 ", %"
-                PRIx64 "] for label %s\n",
-                addr, end, val.c_str(), it->first, it->second.end,
-                it->second.label.c_str());
-      }
-    }
-
-    uint64_t other =
-        (otheraddr == UINT64_MAX) ? UINT64_MAX : addr - base + otheraddr;
-    mappings_.insert(it, std::make_pair(addr, Entry(val, this_end, other)));
-    addr = this_end;
-  }
-}
-
-// In most cases we don't expect the range we're translating to span mappings
-// in the translator.  For example, we would never expect a symbol to span
-// sections.
-//
-// However there are some examples.  An archive member (in the file domain) can
-// span several section mappings.  If we really wanted to get particular here,
-// we could pass a parameter indicating whether such spanning is expected, and
-// warn if not.
-void RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
-                                       const std::string& val,
-                                       const RangeMap& translator,
-                                       RangeMap* other) {
-  AddRange(addr, size, val);
-
-  auto it = translator.FindContainingOrAfter(addr);
-  uint64_t end = addr + size;
-
-  // TODO: optionally warn about when we span ranges of the translator.  In some
-  // cases this would be a bug (ie. symbols VM->file).  In other cases it's
-  // totally normal (ie. archive members file->VM).
-  while (it != translator.mappings_.end() && it->first < end) {
-    uint64_t this_addr;
-    uint64_t this_size;
-    if (translator.TranslateAndTrimRangeWithEntry(it, addr, end, &this_addr,
-                                                  &this_size)) {
-      if (verbose_level > 2) {
-        fprintf(stderr, "  -> translates to: [%" PRIx64 " %" PRIx64 "]\n",
-                this_addr, this_size);
-      }
-      other->AddRange(this_addr, this_size, val);
-    }
-    ++it;
-  }
-}
-
-template <class Func>
-void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
-                             const std::string& filename,
-                             int filename_position, Func func) {
-  assert(range_maps.size() > 0);
-
-  std::vector<Map::const_iterator> iters;
-  std::vector<std::string> keys;
-  uint64_t current = UINTPTR_MAX;
-
-  for (auto range_map : range_maps) {
-    iters.push_back(range_map->mappings_.begin());
-    if (!range_map->IterIsEnd(iters.back())) {
-      current = std::min(current, iters.back()->first);
-    }
-  }
-
-  // Iterate over all ranges in parallel to perform this transformation:
-  //
-  //   -----  -----  -----             ---------------
-  //     |      |      1                    A,X,1
-  //     |      X    -----             ---------------
-  //     |      |      |                    A,X,2
-  //     A    -----    |               ---------------
-  //     |      |      |                      |
-  //     |      |      2      ----->          |
-  //     |      Y      |                    A,Y,2
-  //     |      |      |                      |
-  //   -----    |      |               ---------------
-  //     B      |      |                    B,Y,2
-  //   -----    |    -----             ---------------
-  //            |                      [None],Y,[None]
-  //          -----
-  while (true) {
-    uint64_t next_break = UINTPTR_MAX;
-    bool have_data = false;
-    keys.clear();
-    size_t i;
-
-    for (i = 0; i < iters.size(); i++) {
-      auto& iter = iters[i];
-
-      if (filename_position >= 0 &&
-          static_cast<unsigned>(filename_position) == i) {
-        keys.push_back(filename);
-      }
-
-      // Advance the iterators if its range is behind the current point.
-      while (!range_maps[i]->IterIsEnd(iter) && RangeEnd(iter) <= current) {
-        ++iter;
-        //assert(range_maps[i]->IterIsEnd(iter) || RangeEnd(iter) > current);
-      }
-
-      // Push a label and help calculate the next break.
-      bool is_end = range_maps[i]->IterIsEnd(iter);
-      if (is_end || iter->first > current) {
-        keys.push_back("[None]");
-        if (!is_end) {
-          next_break = std::min(next_break, iter->first);
-        }
-      } else {
-        have_data = true;
-        keys.push_back(iter->second.label);
-        next_break = std::min(next_break, RangeEnd(iter));
-      }
-    }
-
-    if (filename_position >= 0 &&
-        static_cast<unsigned>(filename_position) == i) {
-      keys.push_back(filename);
-    }
-
-    if (next_break == UINTPTR_MAX) {
-      break;
-    }
-
-    if (false) {
-      for (auto& key : keys) {
-        if (key == "[None]") {
-          std::stringstream stream;
-          stream << " [0x" << std::hex << current << ", 0x" << std::hex
-                 << next_break << "]";
-          key += stream.str();
-        }
-      }
-    }
-
-    if (have_data) {
-      func(keys, current, next_break);
-    }
-
-    current = next_break;
-  }
-}
-
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
@@ -1123,61 +868,133 @@ void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
   outputs_.push_back(std::make_pair(map, munger));
 }
 
-void RangeSink::AddFileRange(string_view name, uint64_t fileoff,
-                             uint64_t filesize) {
+void RangeSink::AddFileRange(const char* analyzer, string_view name,
+                             uint64_t fileoff, uint64_t filesize) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
-            GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
-            fileoff, filesize);
+    fprintf(stdout, "[%s, %s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+            name.data(), fileoff, filesize);
   }
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     if (translator_) {
-      pair.first->file_map.AddRangeWithTranslation(fileoff, filesize, label,
-                                                    translator_->file_map,
-                                                    &pair.first->vm_map);
+      bool ok = pair.first->file_map.AddRangeWithTranslation(
+          fileoff, filesize, label, translator_->file_map, &pair.first->vm_map);
+      if (!ok) {
+        THROWF("File range ($0, $1) for label $2 extends beyond base map",
+               fileoff, filesize, name);
+      }
     } else {
       pair.first->file_map.AddRange(fileoff, filesize, label);
     }
   }
 }
 
-void RangeSink::AddVMRange(uint64_t vmaddr, uint64_t vmsize,
-                           const std::string& name) {
+void RangeSink::AddFileRangeFor(const char* analyzer,
+                                uint64_t label_from_vmaddr,
+                                string_view file_range) {
+  uint64_t file_offset = file_range.data() - file_->data().data();
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
-            GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
-            vmaddr, vmsize);
+    fprintf(stdout,
+            "[%s, %s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64
+            ", %zx])\n",
+            GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr,
+            file_offset, file_range.size());
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label;
+    uint64_t offset;
+    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
+      bool ok = pair.first->file_map.AddRangeWithTranslation(
+          file_offset, file_range.size(), label, translator_->file_map,
+          &pair.first->vm_map);
+      if (!ok) {
+        THROWF("File range ($0, $1) for label $2 extends beyond base map",
+               offset, file_range.size(), label);
+      }
+    } else if (verbose_level > 2) {
+      printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
+    }
+  }
+}
+
+void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
+                              uint64_t addr, uint64_t size) {
+  if (verbose_level > 2) {
+    fprintf(stdout,
+            "[%s, %s] AddVMRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
+            GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr, addr,
+            size);
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label;
+    uint64_t offset;
+    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
+      bool ok = pair.first->vm_map.AddRangeWithTranslation(
+          addr, size, label, translator_->vm_map, &pair.first->file_map);
+      if (!ok) {
+        THROWF("VM range ($0, $1) for label $2 extends beyond base map", addr,
+               size, label);
+      }
+    } else if (verbose_level > 2) {
+      printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
+    }
+  }
+}
+
+void RangeSink::AddVMRange(const char* analyzer, uint64_t vmaddr,
+                           uint64_t vmsize, const std::string& name) {
+  if (verbose_level > 2) {
+    fprintf(stdout, "[%s, %s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+            name.data(), vmaddr, vmsize);
   }
   assert(translator_);
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
-    pair.first->vm_map.AddRangeWithTranslation(
+    bool ok = pair.first->vm_map.AddRangeWithTranslation(
         vmaddr, vmsize, label, translator_->vm_map, &pair.first->file_map);
+    if (!ok) {
+      THROWF("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
+             vmsize, name);
+    }
   }
 }
 
-void RangeSink::AddVMRangeAllowAlias(uint64_t vmaddr, uint64_t size,
-                                     const std::string& name) {
+void RangeSink::AddVMRangeAllowAlias(const char* analyzer, uint64_t vmaddr,
+                                     uint64_t size, const std::string& name) {
   // TODO: maybe track alias (but what would we use it for?)
   // TODO: verify that it is in fact an alias.
-  AddVMRange(vmaddr, size, name);
+  AddVMRange(analyzer, vmaddr, size, name);
 }
 
-void RangeSink::AddVMRangeIgnoreDuplicate(uint64_t vmaddr, uint64_t vmsize,
+void RangeSink::AddVMRangeIgnoreDuplicate(const char* analyzer, uint64_t vmaddr,
+                                          uint64_t vmsize,
                                           const std::string& name) {
   // TODO suppress warning that AddVMRange alone might trigger.
-  AddVMRange(vmaddr, vmsize, name);
+  AddVMRange(analyzer, vmaddr, vmsize, name);
 }
 
-void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
-                         uint64_t fileoff, uint64_t filesize) {
+void RangeSink::AddRange(const char* analyzer, string_view name,
+                         uint64_t vmaddr, uint64_t vmsize, uint64_t fileoff,
+                         uint64_t filesize) {
   if (verbose_level > 2) {
-    fprintf(stderr, "[%s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
+    fprintf(stdout,
+            "[%s, %s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
             ", %" PRIx64 ")\n",
-            GetDataSourceLabel(data_source_), (int)name.size(), name.data(),
-            vmaddr, vmsize, fileoff, filesize);
+            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+            name.data(), vmaddr, vmsize, fileoff, filesize);
   }
+
+  if (translator_) {
+    if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
+        !translator_->file_map.CoversRange(fileoff, filesize)) {
+      THROW("Tried to add range that is not covered by base map.");
+    }
+  }
+
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     uint64_t common = std::min(vmsize, filesize);
@@ -1190,6 +1007,28 @@ void RangeSink::AddRange(string_view name, uint64_t vmaddr, uint64_t vmsize,
   }
 }
 
+uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
+  assert(translator_);
+  uint64_t offset = ptr - file_->data().data();
+  uint64_t translated;
+  if (!FileContainsPointer(ptr) ||
+      !translator_->file_map.Translate(offset, &translated)) {
+    THROWF("Can't translate file offset ($0) to VM, contains: $1, map:\n$2",
+           offset, FileContainsPointer(ptr),
+           translator_->file_map.DebugString().c_str());
+  }
+  return translated;
+}
+
+absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
+  assert(translator_);
+  uint64_t translated;
+  if (!translator_->vm_map.Translate(address, &translated) ||
+      translated > file_->data().size()) {
+    THROW("Can't translate VM pointer to file");
+  }
+  return file_->data().substr(translated);
+}
 
 // ThreadSafeIterIndex /////////////////////////////////////////////////////////
 
@@ -1255,9 +1094,7 @@ class Bloaty {
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
 
-  size_t GetSourceCount() const {
-    return sources_.size() + (filename_position_ >= 0 ? 1 : 0);
-  }
+  size_t GetSourceCount() const { return sources_.size(); }
 
   void DefineCustomDataSource(const CustomDataSource& source);
 
@@ -1298,6 +1135,7 @@ class Bloaty {
   }
 
   void ScanAndRollupFiles(const std::vector<std::unique_ptr<ObjectFile>>& files,
+                          std::vector<std::string>* build_ids,
                           Rollup* rollup) const;
   void ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
                          std::string* out_build_id) const;
@@ -1317,11 +1155,10 @@ class Bloaty {
   std::vector<std::unique_ptr<ObjectFile>> input_files_;
   std::vector<std::unique_ptr<ObjectFile>> base_files_;
   std::map<std::string, std::unique_ptr<ObjectFile>> debug_files_;
-  int filename_position_;
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
-    : file_factory_(factory), filename_position_(-1) {
+    : file_factory_(factory) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -1392,12 +1229,6 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
 
 void Bloaty::AddDataSource(const std::string& name) {
   source_names_.emplace_back(name);
-
-  if (name == "inputfiles") {
-    filename_position_ = sources_.size() + 1;
-    return;
-  }
-
   auto it = all_known_sources_.find(name);
   if (it == all_known_sources_.end()) {
     THROWF("no such data source: $0", name);
@@ -1419,42 +1250,32 @@ struct DualMaps {
     return maps_.back().get();
   }
 
-  void ComputeRollup(const std::string& filename, int filename_position,
-                     Rollup* rollup) {
-    RangeMap::ComputeRollup(VmMaps(), filename, filename_position,
-                            [=](const std::vector<std::string>& keys,
-                                uint64_t addr, uint64_t end) {
-                              return rollup->AddSizes(keys, end - addr, true);
-                            });
-    RangeMap::ComputeRollup(FileMaps(), filename, filename_position,
-                            [=](const std::vector<std::string>& keys,
-                                uint64_t addr, uint64_t end) {
-                              return rollup->AddSizes(keys, end - addr,
-                                                      false);
-                            });
+  void ComputeRollup(Rollup* rollup) {
+    RangeMap::ComputeRollup(VmMaps(), [=](const std::vector<std::string>& keys,
+                                          uint64_t addr, uint64_t end) {
+      return rollup->AddSizes(keys, end - addr, true);
+    });
+    RangeMap::ComputeRollup(
+        FileMaps(),
+        [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+          return rollup->AddSizes(keys, end - addr, false);
+        });
   }
 
-  void PrintMaps(const std::vector<const RangeMap*> maps,
-                 const std::string& filename, int filename_position) {
+  void PrintMaps(const std::vector<const RangeMap*> maps) {
     uint64_t last = 0;
-    RangeMap::ComputeRollup(maps, filename, filename_position,
-                            [&](const std::vector<std::string>& keys,
-                                uint64_t addr, uint64_t end) {
-                              if (addr > last) {
-                                PrintMapRow("NO ENTRY", last, addr);
-                              }
-                              PrintMapRow(KeysToString(keys), addr, end);
-                              last = end;
-                            });
+    RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
+                                      uint64_t addr, uint64_t end) {
+      if (addr > last) {
+        PrintMapRow("NO ENTRY", last, addr);
+      }
+      PrintMapRow(KeysToString(keys), addr, end);
+      last = end;
+    });
   }
 
-  void PrintFileMaps(const std::string& filename, int filename_position) {
-    PrintMaps(FileMaps(), filename, filename_position);
-  }
-
-  void PrintVMMaps(const std::string& filename, int filename_position) {
-    PrintMaps(VmMaps(), filename, filename_position);
-  }
+  void PrintFileMaps() { PrintMaps(FileMaps()); }
+  void PrintVMMaps() { PrintMaps(VmMaps()); }
 
   std::string KeysToString(const std::vector<std::string>& keys) {
     std::string ret;
@@ -1498,10 +1319,10 @@ struct DualMaps {
 
 void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
                                std::string* out_build_id) const {
-  const std::string& filename = file->file_data().filename();
   DualMaps maps;
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
+  std::vector<RangeSink*> filename_sink_ptrs;
 
   // Base map always goes first.
   sinks.push_back(absl::make_unique<RangeSink>(
@@ -1514,7 +1335,16 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     sinks.push_back(absl::make_unique<RangeSink>(
         &file->file_data(), source->effective_source, maps.base_map()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
-    sink_ptrs.push_back(sinks.back().get());
+    // We handle the kInputFiles data source internally, without handing it off
+    // to the file format implementation.  This seems slightly simpler, since
+    // the file format has to deal with armembers too.
+    if (source->effective_source == DataSource::kRawRanges) {
+      // Do nothing, we'll fill this in later.
+    } else if (source->effective_source == DataSource::kInputFiles) {
+      filename_sink_ptrs.push_back(sinks.back().get());
+    } else {
+      sink_ptrs.push_back(sinks.back().get());
+    }
   }
 
   std::string build_id = file->GetBuildId();
@@ -1528,7 +1358,45 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
 
   int64_t filesize_before = rollup->file_total();
   file->ProcessFile(sink_ptrs);
-  maps.ComputeRollup(filename, filename_position_, rollup);
+
+  // kInputFile source: Copy the base map to the filename sink(s).
+  for (auto sink : filename_sink_ptrs) {
+    maps.base_map()->vm_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddVMRange("inputfile_vmcopier", start, length,
+                           sink->input_file().filename());
+        });
+    maps.base_map()->file_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddFileRange("inputfile_filecopier",
+                             sink->input_file().filename(), start, length);
+        });
+  }
+
+  // kRawRange source: add the directly preceding map's ranges, with labels
+  // indicating the range.
+  for (size_t i = 1; i < sinks.size(); i++) {
+    if (sinks[i]->data_source() == DataSource::kRawRanges) {
+      RangeSink* ranges_sink = sinks[i].get();
+      RangeSink* from = sinks[i - 1].get();
+      from->MapAtIndex(0).vm_map.ForEachRange([ranges_sink](uint64_t start,
+                                                            uint64_t length) {
+        ranges_sink->AddVMRange("rawrange_vmcopier", start, length,
+                                absl::StrCat("vm: [", absl::Hex(start), ", ",
+                                             absl::Hex(start + length), "]"));
+      });
+      from->MapAtIndex(0).file_map.ForEachRange(
+          [ranges_sink](uint64_t start, uint64_t length) {
+            ranges_sink->AddFileRange(
+                "rawrange_filecopier",
+                absl::StrCat("file: [", absl::Hex(start), ", ",
+                             absl::Hex(start + length), "]"),
+                start, length);
+          });
+    }
+  }
+
+  maps.ComputeRollup(rollup);
 
   // The ObjectFile implementation must guarantee this.
   int64_t filesize = rollup->file_total() - filesize_before;
@@ -1536,16 +1404,17 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
   assert(filesize == file->file_data().data().size());
 
   if (verbose_level > 0) {
-    fprintf(stderr, "FILE MAP:\n");
-    maps.PrintFileMaps(filename, filename_position_);
-    fprintf(stderr, "VM MAP:\n");
-    maps.PrintVMMaps(filename, filename_position_);
+    fprintf(stdout, "FILE MAP:\n");
+    maps.PrintFileMaps();
+    fprintf(stdout, "VM MAP:\n");
+    maps.PrintVMMaps();
   }
 }
 
 void Bloaty::ScanAndRollupFiles(
     const std::vector<std::unique_ptr<ObjectFile>>& files,
-    Rollup* rollup) const {
+    std::vector<std::string>* build_ids,
+    Rollup * rollup) const {
   int num_cpus = std::thread::hardware_concurrency();
   int num_threads = std::min(num_cpus, static_cast<int>(files.size()));
 
@@ -1571,14 +1440,6 @@ void Bloaty::ScanAndRollupFiles(
     }, &thread_data[i]);
   }
 
-  // Create a copy of the debug_files_ member, so we can determine which (if
-  // any) debug files weren't used.  We copy it because we are in a const method
-  // so can't mutate debug_files_ directly.
-  std::map<std::string, const ObjectFile*> debug_files;
-  for (const auto& pair : debug_files_) {
-    debug_files[pair.first] = pair.second.get();
-  }
-
   for (int i = 0; i < num_threads; i++) {
     threads[i].join();
     PerThreadData* data = &thread_data[i];
@@ -1589,33 +1450,13 @@ void Bloaty::ScanAndRollupFiles(
     }
 
     if (!data->build_id.empty()) {
-      debug_files.erase(data->build_id);
+      build_ids->push_back(data->build_id);
     }
   }
 
   std::string error;
   if (index.TryGetError(&error)) {
     THROW(error.c_str());
-  }
-
-  if (!debug_files.empty()) {
-    std::string unused_debug;
-    for (const auto& pair : debug_files) {
-      unused_debug += absl::Substitute(
-          "$0   $1\n",
-          absl::BytesToHexString(pair.second->GetBuildId()).c_str(),
-          pair.second->file_data().filename().c_str());
-    }
-
-    std::string input_files;
-    for (const auto& file : files) {
-      input_files += absl::Substitute(
-          "$0   $1\n", absl::BytesToHexString(file->GetBuildId()).c_str(),
-          file->file_data().filename().c_str());
-    }
-    THROWF(
-        "Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
-        unused_debug.c_str(), input_files.c_str());
   }
 }
 
@@ -1629,15 +1470,46 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   }
 
   Rollup rollup;
-  ScanAndRollupFiles(input_files_, &rollup);
+  std::vector<std::string> build_ids;
+  ScanAndRollupFiles(input_files_, &build_ids, &rollup);
 
   if (!base_files_.empty()) {
     Rollup base;
-    ScanAndRollupFiles(base_files_, &base);
+    ScanAndRollupFiles(base_files_, &build_ids, &base);
     rollup.Subtract(base);
     rollup.CreateDiffModeRollupOutput(&base, options, output);
   } else {
     rollup.CreateRollupOutput(options, output);
+  }
+
+  for (const auto& build_id : build_ids) {
+    debug_files_.erase(build_id);
+  }
+
+  // Error out if some --debug-files were not used.
+  if (!debug_files_.empty()) {
+    std::string input_files;
+    std::string unused_debug;
+    for (const auto& pair : debug_files_) {
+      unused_debug += absl::Substitute(
+          "$0   $1\n",
+          absl::BytesToHexString(pair.second->GetBuildId()).c_str(),
+          pair.second->file_data().filename().c_str());
+    }
+
+    for (const auto& file : input_files_) {
+      input_files += absl::Substitute(
+          "$0   $1\n", absl::BytesToHexString(file->GetBuildId()).c_str(),
+          file->file_data().filename().c_str());
+    }
+    for (const auto& file : base_files_) {
+      input_files += absl::Substitute(
+          "$0   $1\n", absl::BytesToHexString(file->GetBuildId()).c_str(),
+          file->file_data().filename().c_str());
+    }
+    THROWF(
+        "Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
+        unused_debug.c_str(), input_files.c_str());
   }
 }
 
