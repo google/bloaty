@@ -1682,7 +1682,11 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
     } else if (args.TryParseOption("--disassemble", &option)) {
       options->mutable_disassemble_function()->assign(std::string(option));
     } else if (args.TryParseIntegerOption("-n", &int_option)) {
-      options->set_max_rows_per_level(int_option);
+      if (int_option == 0) {
+        options->set_max_rows_per_level(INT64_MAX);
+      } else {
+        options->set_max_rows_per_level(int_option);
+      }
     } else if (args.TryParseOption("-s", &option)) {
       if (option == "vm") {
         options->set_sort_by(Options::SORTBY_VMSIZE);
