@@ -48,7 +48,8 @@ TEST_F(BloatyTest, SimpleObjectFile) {
   uint64_t size;
   ASSERT_TRUE(GetFileSize(file, &size));
 
-  RunBloaty({"bloaty", file});
+  // Test "-n 0" which should return an unlimited number of rows.
+  RunBloaty({"bloaty", "-n", "0", file});
   EXPECT_GT(top_row_->vmsize, 64);
   EXPECT_LT(top_row_->vmsize, 300);
   EXPECT_EQ(top_row_->filesize, size);

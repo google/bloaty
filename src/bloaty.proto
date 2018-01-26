@@ -38,7 +38,7 @@ message Options {
 
   // The maximum number of rows to show at each level before collapsing the rest
   // into '[Other]'.
-  optional int32 max_rows_per_level = 4 [default = 20];
+  optional int64 max_rows_per_level = 4 [default = 20];
 
   enum Demangle {
     DEMANGLE_SHORT = 0;
