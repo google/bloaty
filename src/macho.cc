@@ -50,11 +50,11 @@ static string_view ArrayToStr(const char* s, size_t maxlen) {
 
 static uint64_t CheckedAdd(uint64_t a, uint64_t b) {
   absl::uint128 a_128(a), b_128(b);
-  absl::uint128 c = a + b;
-  if (c > UINT64_MAX) {
+  absl::uint128 c_128 = a_128 + b_128;
+  if (c_128 > absl::uint128(UINT64_MAX)) {
     THROW("integer overflow in addition");
   }
-  return static_cast<uint64_t>(c);
+  return static_cast<uint64_t>(c_128);
 }
 
 static string_view StrictSubstr(string_view data, size_t off, size_t n) {
