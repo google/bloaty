@@ -46,6 +46,11 @@ static std::string RightPad(const std::string& input, size_t size) {
 }  // anonymous namespace
 
 void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
+  if (info.arch != CS_ARCH_X86) {
+    // x86 only for now.
+    return;
+  }
+
   csh handle;
   if (cs_open(info.arch, info.mode, &handle) != CS_ERR_OK ||
       cs_option(handle, CS_OPT_DETAIL, CS_OPT_ON) != CS_ERR_OK) {
