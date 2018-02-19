@@ -1090,6 +1090,10 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   params_.minimum_instruction_length = ReadMemcpy<uint8_t>(&data);
   if (version == 4) {
     params_.maximum_operations_per_instruction = ReadMemcpy<uint8_t>(&data);
+
+    if (params_.maximum_operations_per_instruction == 0) {
+      THROW("DWARF line info had maximum_operations_per_instruction=0");
+    }
   } else {
     params_.maximum_operations_per_instruction = 1;
   }
