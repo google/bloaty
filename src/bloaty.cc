@@ -60,6 +60,7 @@ using absl::string_view;
     exit(1); \
   }
 
+ABSL_ATTRIBUTE_NORETURN
 static void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }

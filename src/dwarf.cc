@@ -1683,7 +1683,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
     uint32_t return_address_reg = 0;
   };
 
-  std::unordered_map<const char*, CIEInfo> cie_map;
+  std::unordered_map<const void*, CIEInfo> cie_map;
 
   while (remaining.size() > 0) {
     dwarf::CompilationUnitSizes sizes;
