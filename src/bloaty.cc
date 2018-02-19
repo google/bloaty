@@ -996,6 +996,15 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
     }
   }
 
+  if (vmaddr + vmsize < vmaddr) {
+    THROWF("Overflow in vm range, vmaddr=$0, vmsize=$1", vmaddr, vmsize);
+  }
+
+  if (fileoff + filesize < fileoff) {
+    THROWF("Overflow in file range, fileoff=$0, filesize=$1", fileoff,
+           filesize);
+  }
+
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     uint64_t common = std::min(vmsize, filesize);

@@ -178,23 +178,31 @@ void SkipLEB128(string_view* data) {
 // Some size information attached to each compilation unit.  The size of an
 // address or offset in the DWARF data depends on this state which is parsed
 // from the header.
-struct CompilationUnitSizes {
+class CompilationUnitSizes {
+ public:
   // When true, DWARF offsets are 64 bits, otherwise they are 32 bit.
-  bool dwarf64;
+  bool dwarf64() const { return dwarf64_; }
 
-  // The size of addresses.
-  uint8_t address_size;
+  // The size of addresses.  Guaranteed to be either 4 or 8.
+  uint8_t address_size() const { return address_size_; }
+
+  void SetAddressSize(uint8_t address_size) {
+    if (address_size != 4 && address_size != 8) {
+      THROWF("Unexpected address size: $0", address_size);
+    }
+    address_size_ = address_size;
+  }
 
   // To allow this as the key in a map.
   bool operator<(const CompilationUnitSizes& rhs) const {
-    return std::tie(dwarf64, address_size) <
-           std::tie(rhs.dwarf64, rhs.address_size);
+    return std::tie(dwarf64_, address_size_) <
+           std::tie(rhs.dwarf64_, rhs.address_size_);
   }
 
   // Reads a DWARF offset based on whether we are reading dwarf32 or dwarf64
   // format.
   uint64_t ReadDWARFOffset(string_view* data) const {
-    if (dwarf64) {
+    if (dwarf64_) {
       return ReadMemcpy<uint64_t>(data);
     } else {
       return ReadMemcpy<uint32_t>(data);
@@ -203,12 +211,12 @@ struct CompilationUnitSizes {
 
   // Reads an address according to the expected address_size.
   uint64_t ReadAddress(string_view* data) const {
-    if (address_size == 8) {
+    if (address_size_ == 8) {
       return ReadMemcpy<uint64_t>(data);
-    } else if (address_size == 4) {
+    } else if (address_size_ == 4) {
       return ReadMemcpy<uint32_t>(data);
     } else {
-      THROWF("unexpected address size: $0", address_size);
+      BLOATY_UNREACHABLE();
     }
   }
 
@@ -222,10 +230,10 @@ struct CompilationUnitSizes {
     uint64_t len = ReadMemcpy<uint32_t>(remaining);
 
     if (len == 0xffffffff) {
-      dwarf64 = true;
+      dwarf64_ = true;
       len = ReadMemcpy<uint64_t>(remaining);
     } else {
-      dwarf64 = false;
+      dwarf64_ = false;
     }
 
     if (remaining->size() < len) {
@@ -237,6 +245,10 @@ struct CompilationUnitSizes {
     *remaining = remaining->substr(len);
     return unit;
   }
+
+ private:
+  bool dwarf64_;
+  uint8_t address_size_;
 };
 
 
@@ -423,7 +435,7 @@ bool AddressRanges::NextUnit() {
 
   uint8_t segment_size;
 
-  sizes_.address_size = ReadMemcpy<uint8_t>(&unit_remaining_);
+  sizes_.SetAddressSize(ReadMemcpy<uint8_t>(&unit_remaining_));
   segment_size = ReadMemcpy<uint8_t>(&unit_remaining_);
 
   if (segment_size) {
@@ -431,7 +443,7 @@ bool AddressRanges::NextUnit() {
   }
 
   size_t ofs = unit_remaining_.data() - section_.data();
-  size_t aligned_ofs = AlignUpTo(ofs, sizes_.address_size * 2);
+  size_t aligned_ofs = AlignUpTo(ofs, sizes_.address_size() * 2);
   SkipBytes(aligned_ofs - ofs, &unit_remaining_);
   return true;
 }
@@ -463,7 +475,7 @@ bool LocationList::NextEntry() {
   if (start == 0 && end == 0) {
     return false;
   } else if (start == UINT64_MAX ||
-             (start == UINT32_MAX && sizes_.address_size == 4)) {
+             (start == UINT32_MAX && sizes_.address_size() == 4)) {
     // Base address selection, nothing more to do.
   } else {
     // Need to skip the location description.
@@ -756,7 +768,7 @@ bool DIEReader::ReadCompilationUnitHeader() {
     unit_abbrev_->ReadAbbrevs(abbrev_data);
   }
 
-  unit_sizes_.address_size = ReadMemcpy<uint8_t>(&remaining_);
+  unit_sizes_.SetAddressSize(ReadMemcpy<uint8_t>(&remaining_));
 
   if (section_ == Section::kDebugTypes) {
     unit_type_signature_ = ReadMemcpy<uint64_t>(&remaining_);
@@ -849,7 +861,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       return AttrValue(ReadMemcpy<uint64_t>(data));
     case DW_FORM_addr:
     case DW_FORM_ref_addr:
-      switch (reader.unit_sizes().address_size) {
+      switch (reader.unit_sizes().address_size()) {
         case 4:
           return AttrValue(ReadMemcpy<uint32_t>(data));
         case 8:
@@ -858,7 +870,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
           BLOATY_UNREACHABLE();
       }
     case DW_FORM_sec_offset:
-      if (reader.unit_sizes().dwarf64) {
+      if (reader.unit_sizes().dwarf64()) {
         return AttrValue(ReadMemcpy<uint64_t>(data));
       } else {
         return AttrValue(ReadMemcpy<uint32_t>(data));
@@ -877,7 +889,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
     case DW_FORM_string:
       return AttrValue(ReadNullTerminated(data));
     case DW_FORM_strp:
-      if (reader.unit_sizes().dwarf64) {
+      if (reader.unit_sizes().dwarf64()) {
         return AttrValue(ReadIndirectString<uint64_t>(reader, data));
       } else {
         return AttrValue(ReadIndirectString<uint32_t>(reader, data));
@@ -1080,7 +1092,7 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   string_view data = file_.debug_line;
   SkipBytes(offset, &data);
 
-  sizes_.address_size = address_size;
+  sizes_.SetAddressSize(address_size);
   data = sizes_.ReadInitialLength(&data);
   uint16_t version = ReadMemcpy<uint16_t>(&data);
   uint64_t header_length = sizes_.ReadDWARFOffset(&data);
@@ -1090,6 +1102,10 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   params_.minimum_instruction_length = ReadMemcpy<uint8_t>(&data);
   if (version == 4) {
     params_.maximum_operations_per_instruction = ReadMemcpy<uint8_t>(&data);
+
+    if (params_.maximum_operations_per_instruction == 0) {
+      THROW("DWARF line info had maximum_operations_per_instruction=0");
+    }
   } else {
     params_.maximum_operations_per_instruction = 1;
   }
@@ -1482,17 +1498,17 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   // This parses a very small subset of the overall DWARF expression grammar.
   if (die.has_location_string()) {
     string_view location = die.location_string();
-    if (location.size() == sizes.address_size + 1 &&
+    if (location.size() == sizes.address_size() + 1 &&
         location[0] == DW_OP_addr) {
       location.remove_prefix(1);
       uint64_t addr;
       // TODO(haberman): endian?
-      if (sizes.address_size == 4) {
+      if (sizes.address_size() == 4) {
         addr = dwarf::ReadMemcpy<uint32_t>(&location);
-      } else if (sizes.address_size == 8) {
+      } else if (sizes.address_size() == 8) {
         addr = dwarf::ReadMemcpy<uint64_t>(&location);
       } else {
-        THROW("Unexpected address size");
+        BLOATY_UNREACHABLE();
       }
 
       // Unfortunately the location doesn't include a size, so we look that part
@@ -2017,7 +2033,7 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
     if (die.has_stmt_list()) {
       uint64_t offset = die.stmt_list();
       line_info_reader.SeekToOffset(offset,
-                                    die_reader.unit_sizes().address_size);
+                                    die_reader.unit_sizes().address_size());
       ReadDWARFStmtList(include_line, &line_info_reader, sink);
     }
 

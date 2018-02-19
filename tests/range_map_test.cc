@@ -284,25 +284,40 @@ TEST_F(RangeMapTest, Translation) {
     {20, 25, 120, "foo"}
   });
 
-  map2_.AddRangeWithTranslation(15, 15, "translate me", map_, &map3_);
+  ASSERT_TRUE(
+      map2_.AddRangeWithTranslation(20, 5, "translate me", map_, &map3_));
+
   CheckConsistency();
   AssertMapEquals(map2_, {
-    {15, 30, kNoTranslation, "translate me"}
+    {20, 25, kNoTranslation, "translate me"}
   });
   AssertMapEquals(map3_, {
     {120, 125, kNoTranslation, "translate me"}
   });
 
   map_.AddDualRange(1000, 30, 1100, "bar");
-  map2_.AddRangeWithTranslation(1000, 5, "translate me2", map_, &map3_);
+  ASSERT_TRUE(
+      map2_.AddRangeWithTranslation(1000, 5, "translate me2", map_, &map3_));
   AssertMapEquals(map2_, {
-    {15, 30, kNoTranslation, "translate me"},
+    {20, 25, kNoTranslation, "translate me"},
     {1000, 1005, kNoTranslation, "translate me2"}
   });
   AssertMapEquals(map3_, {
     {120, 125, kNoTranslation, "translate me"},
     {1100, 1105, kNoTranslation, "translate me2"}
   });
+
+  // Starts before base map.
+  ASSERT_FALSE(
+      map2_.AddRangeWithTranslation(15, 8, "translate me", map_, &map3_));
+
+  // Extends past base map.
+  ASSERT_FALSE(
+      map2_.AddRangeWithTranslation(22, 15, "translate me", map_, &map3_));
+
+  // Starts and ends in base map, but skips range in the middle.
+  ASSERT_FALSE(
+      map2_.AddRangeWithTranslation(20, 1000, "translate me", map_, &map3_));
 }
 
 TEST_F(RangeMapTest, Translation2) {
@@ -318,10 +333,11 @@ TEST_F(RangeMapTest, Translation2) {
     {30, 35, 130, "quux"}
   });
 
-  map2_.AddRangeWithTranslation(0, 50, "translate me", map_, &map3_);
+  ASSERT_TRUE(
+      map2_.AddRangeWithTranslation(20, 15, "translate me", map_, &map3_));
   CheckConsistency();
   AssertMapEquals(map2_, {
-    {0, 50, kNoTranslation, "translate me"}
+    {20, 35, kNoTranslation, "translate me"}
   });
   AssertMapEquals(map3_, {
     {120, 125, kNoTranslation, "translate me"},
