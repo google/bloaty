@@ -66,7 +66,9 @@ class RangeMap {
   //
   // Returns true if the entire range [addr, size] was present in the
   // |translator| map.  (This does not necessarily mean that every part of the
-  // range was actually translated).
+  // range was actually translated).  If the return value is false, then the
+  // contents of |this| and |other| are undefined (Bloaty will bail in this
+  // case).
   bool AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                const std::string& val,
                                const RangeMap& translator, RangeMap* other);
@@ -302,7 +304,7 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
           throw std::runtime_error("No more ranges.");
         } else if (iters[i]->first != current) {
           printf(
-              "Error, range (%s) doesn't cover the beginning of base range "
+              "Error, range (%s) doesn't match the beginning of base range "
               "(%s)\n",
               range_maps[i]->EntryDebugString(iters[i]).c_str(),
               range_maps[0]->EntryDebugString(iters[0]).c_str());

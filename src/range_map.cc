@@ -234,7 +234,7 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                        RangeMap* other) {
   AddRange(addr, size, val);
 
-  auto it = translator.FindContainingOrAfter(addr);
+  auto it = translator.FindContaining(addr);
   uint64_t end;
   if (size == kUnknownSize) {
     end = addr + 1;
@@ -268,6 +268,7 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
 bool RangeMap::CoversRange(uint64_t addr, uint64_t size) const {
   auto it = FindContaining(addr);
   uint64_t end = addr + size;
+  assert(end >= addr);
 
   while (true) {
     if (addr >= end) {
