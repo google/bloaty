@@ -125,6 +125,14 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
 
   for (uint32_t i = 0; i < ncmds; i++) {
     auto command = GetStructPointer<load_command>(header_data);
+
+    // We test for this because otherwise a large ncmds can make bloaty hang for
+    // a while, even on a small file.  Hopefully there are no real cases where a
+    // zero-size loadcmd exists.
+    if (command->cmdsize == 0) {
+      THROW("Mach-O load command had zero size.");
+    }
+
     string_view command_data = StrictSubstr(header_data, 0, command->cmdsize);
     std::forward<Func>(loadcmd_func)(command->cmd, command_data, macho_data);
     MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", command_data);
