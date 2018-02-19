@@ -208,8 +208,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
 
     uint64_t other = (otheraddr == kNoTranslation) ? kNoTranslation
                                                    : addr - base + otheraddr;
-    uint64_t this_size = this_end - addr;
-    assert(addr + this_size >= addr);
+    assert(this_end >= addr);
     auto iter = mappings_.emplace_hint(
         it, std::make_pair(addr, Entry(label, this_end - addr, other)));
     if (verbose_level > 2) {
