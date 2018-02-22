@@ -803,6 +803,28 @@ class AttrValue {
   bool IsUint() const { return type_ == Type::kUint; }
   bool IsString() const { return type_ == Type::kString; }
 
+  bool CoerceToUint() {
+    string_view str = string_;
+    if (IsUint()) return true;
+    type_ = Type::kUint;
+    switch (str.size()) {
+      case 1:
+        uint_ = ReadMemcpy<uint8_t>(&str);
+        return true;
+      case 2:
+        uint_ = ReadMemcpy<uint8_t>(&str);
+        return true;
+      case 4:
+        uint_ = ReadMemcpy<uint32_t>(&str);
+        return true;
+      case 8:
+        uint_ = ReadMemcpy<uint64_t>(&str);
+        return true;
+    }
+    type_ = Type::kString;
+    return false;
+  }
+
   uint64_t GetUint() const {
     assert(type_ == Type::kUint);
     return uint_;
@@ -857,6 +879,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       return AttrValue(ReadMemcpy<uint16_t>(data));
     case DW_FORM_ref4:
       return AttrValue(ReadMemcpy<uint32_t>(data));
+    case DW_FORM_ref_sig8:
     case DW_FORM_ref8:
       return AttrValue(ReadMemcpy<uint64_t>(data));
     case DW_FORM_addr:
@@ -1381,6 +1404,38 @@ class GeneralDIE {
   bool has_ranges() const { return has_ranges_; }
   bool has_start_scope() const { return has_start_scope_; }
 
+  std::string DebugString() {
+    std::string ret;
+    if (has_name()) {
+      ret += absl::Substitute("name: $0\n", name());
+    }
+    if (has_linkage_name()) {
+      ret += absl::Substitute("linkage_name: $0\n", linkage_name());
+    }
+    if (has_location_string()) {
+      ret += absl::Substitute("location_string: $0\n", location_string());
+    }
+    if (has_low_pc()) {
+      ret += absl::Substitute("low_pc: $0\n", low_pc());
+    }
+    if (has_high_pc()) {
+      ret += absl::Substitute("high_pc: $0\n", high_pc());
+    }
+    if (has_location_uint64()) {
+      ret += absl::Substitute("location_uint64: $0\n", location_uint64());
+    }
+    if (has_stmt_list()) {
+      ret += absl::Substitute("stmt_list: $0\n", stmt_list());
+    }
+    if (has_ranges()) {
+      ret += absl::Substitute("ranges: $0\n", ranges());
+    }
+    if (has_start_scope()) {
+      ret += absl::Substitute("start_scope: $0\n", start_scope());
+    }
+    return ret;
+  }
+
   string_view name() const { return name_; }
   string_view linkage_name() const { return linkage_name_; }
   string_view location_string() const { return location_string_; }
@@ -1865,27 +1920,27 @@ static void ReadDWARFDebugInfo(
                           });
   attr_reader.OnAttribute(DW_AT_low_pc,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.IsUint()) return;
+                            if (!val.CoerceToUint()) return;
                             die->set_low_pc(val.GetUint());
                           });
   attr_reader.OnAttribute(DW_AT_high_pc,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.IsUint()) return;
+                            if (!val.CoerceToUint()) return;
                             die->set_high_pc(val.GetUint());
                           });
   attr_reader.OnAttribute(DW_AT_stmt_list,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.IsUint()) return;
+                            if (!val.CoerceToUint()) return;
                             die->set_stmt_list(val.GetUint());
                           });
   attr_reader.OnAttribute(DW_AT_ranges,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.IsUint()) return;
+                            if (!val.CoerceToUint()) return;
                             die->set_ranges(val.GetUint());
                           });
   attr_reader.OnAttribute(DW_AT_start_scope,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.IsUint()) return;
+                            if (!val.CoerceToUint()) return;
                             die->set_start_scope(val.GetUint());
                           });
 
@@ -2018,7 +2073,7 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
 
   attr_reader.OnAttribute(
       DW_AT_stmt_list, [](InlinesDIE* die, dwarf::AttrValue data) {
-        if (!data.IsUint()) return;
+        if (!data.CoerceToUint()) return;
         die->set_stmt_list(data.GetUint());
       });
 
