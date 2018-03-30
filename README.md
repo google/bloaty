@@ -150,12 +150,19 @@ Options:
                        -s vm
                        -s file
                        -s both (the default: sorts by max(vm, file)).
-  -v                 Verbose output.  Dumps warnings encountered during
-                     processing and full VM/file maps at the end.
-                     Add more v's (-vv, -vvv) for even more.
   -w                 Wide output; don't truncate long labels.
   --help             Display this message and exit.
   --list-sources     Show a list of available sources and exit.
+
+Options for debugging Bloaty:
+
+  --debug-vmaddr=ADDR
+  --debug-fileoff=OFF
+                     Print extended debugging information for the given
+                     VM address and/or file offset.
+  -v                 Verbose output.  Dumps warnings encountered during
+                     processing and full VM/file maps at the end.
+                     Add more v's (-vv, -vvv) for even more.
 ```
 
 # Size Diffs

@@ -71,7 +71,8 @@ class RangeMap {
   // case).
   bool AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                const std::string& val,
-                               const RangeMap& translator, RangeMap* other);
+                               const RangeMap& translator, bool verbose,
+                               RangeMap* other);
 
   // Returns whether this RangeMap fully covers the given range.
   bool CoversRange(uint64_t addr, uint64_t size) const;
