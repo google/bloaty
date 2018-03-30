@@ -1265,6 +1265,7 @@ class ElfObjectFile : public ObjectFile {
           DualMap symbol_map;
           NameMunger empty_munger;
           RangeSink symbol_sink(&debug_file().file_data(),
+                                sink->options(),
                                 DataSource::kRawSymbols,
                                 &sinks[0]->MapAtIndex(0));
           symbol_sink.AddOutput(&symbol_map, &empty_munger);
@@ -1325,14 +1326,16 @@ class ElfObjectFile : public ObjectFile {
     // build the entire map.
     DualMap base_map;
     NameMunger empty_munger;
-    RangeSink base_sink(&file_data(), DataSource::kSegments, nullptr);
+    RangeSink base_sink(&file_data(), bloaty::Options(), DataSource::kSegments,
+                        nullptr);
     base_sink.AddOutput(&base_map, &empty_munger);
     std::vector<RangeSink*> sink_ptrs{&base_sink};
     ProcessFile(sink_ptrs);
 
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;
-    RangeSink symbol_sink(&file_data(), symbol_source, &base_map);
+    RangeSink symbol_sink(&file_data(), bloaty::Options(), symbol_source,
+                          &base_map);
     symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
     ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symbol_table,
                    false);

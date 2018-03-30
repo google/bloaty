@@ -33,6 +33,8 @@
 #include "absl/strings/strip.h"
 #include "capstone.h"
 #include "re2/re2.h"
+
+#include "bloaty.pb.h"
 #include "range_map.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
@@ -134,9 +136,11 @@ class MmapInputFileFactory : public InputFileFactory {
 // space and/or file offsets.
 class RangeSink {
  public:
-  RangeSink(const InputFile* file, DataSource data_source,
-            const DualMap* translator);
+  RangeSink(const InputFile* file, const Options& options,
+            DataSource data_source, const DualMap* translator);
   ~RangeSink();
+
+  const Options& options() const { return options_; }
 
   void AddOutput(DualMap* map, const NameMunger* munger);
 
@@ -225,7 +229,13 @@ class RangeSink {
     return ptr >= file_data.data() && ptr < file_data.data() + file_data.size();
   }
 
+  bool ContainsVerboseVMAddr(uint64_t vmstart, uint64_t vmsize);
+  bool ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize);
+  bool IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize);
+  bool IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize);
+
   const InputFile* file_;
+  const Options options_;
   DataSource data_source_;
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;

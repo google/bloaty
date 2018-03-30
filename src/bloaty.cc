@@ -39,6 +39,7 @@
 #include <unistd.h>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/substitute.h"
@@ -857,13 +858,74 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 
-RangeSink::RangeSink(const InputFile* file, DataSource data_source,
-                     const DualMap* translator)
+RangeSink::RangeSink(const InputFile* file, const Options& options,
+                     DataSource data_source, const DualMap* translator)
     : file_(file),
+      options_(options),
       data_source_(data_source),
       translator_(translator) {}
 
 RangeSink::~RangeSink() {}
+
+uint64_t debug_vmaddr = -1;
+uint64_t debug_fileoff = -1;
+
+bool RangeSink::ContainsVerboseVMAddr(uint64_t vmstart, uint64_t vmsize) {
+  return options_.verbose_level() > 2 ||
+         (options_.has_debug_vmaddr() && options_.debug_vmaddr() >= vmstart &&
+          options_.debug_vmaddr() < (vmstart + vmsize));
+}
+
+bool RangeSink::ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize) {
+  return options_.verbose_level() > 2 ||
+         (options_.has_debug_fileoff() && options_.debug_fileoff() >= fileoff &&
+          options_.debug_fileoff() < (fileoff + filesize));
+}
+
+bool RangeSink::IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize) {
+  if (ContainsVerboseVMAddr(vmstart, vmsize)) {
+    return true;
+  }
+
+  if (translator_ && options_.has_debug_fileoff()) {
+    RangeMap vm_map;
+    RangeMap file_map;
+    bool contains = false;
+    vm_map.AddRangeWithTranslation(vmstart, vmsize, "", translator_->vm_map,
+                                   false, &file_map);
+    file_map.ForEachRange(
+        [this, &contains](uint64_t fileoff, uint64_t filesize) {
+          if (ContainsVerboseFileOffset(fileoff, filesize)) {
+            contains = true;
+          }
+        });
+    return contains;
+  }
+
+  return false;
+}
+
+bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
+  if (ContainsVerboseFileOffset(fileoff, filesize)) {
+    return true;
+  }
+
+  if (translator_ && options_.has_debug_vmaddr()) {
+    RangeMap vm_map;
+    RangeMap file_map;
+    bool contains = false;
+    file_map.AddRangeWithTranslation(fileoff, filesize, "",
+                                     translator_->file_map, false, &vm_map);
+    vm_map.ForEachRange([this, &contains](uint64_t vmstart, uint64_t vmsize) {
+      if (ContainsVerboseVMAddr(vmstart, vmsize)) {
+        contains = true;
+      }
+    });
+    return contains;
+  }
+
+  return false;
+}
 
 void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
   outputs_.push_back(std::make_pair(map, munger));
@@ -871,16 +933,18 @@ void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
 
 void RangeSink::AddFileRange(const char* analyzer, string_view name,
                              uint64_t fileoff, uint64_t filesize) {
-  if (verbose_level > 2) {
-    fprintf(stdout, "[%s, %s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
-            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
-            name.data(), fileoff, filesize);
+  bool verbose = IsVerboseForFileRange(fileoff, filesize);
+  if (verbose) {
+    printf("[%s, %s] AddFileRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+           GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+           name.data(), fileoff, filesize);
   }
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     if (translator_) {
       bool ok = pair.first->file_map.AddRangeWithTranslation(
-          fileoff, filesize, label, translator_->file_map, &pair.first->vm_map);
+          fileoff, filesize, label, translator_->file_map, verbose,
+          &pair.first->vm_map);
       if (!ok) {
         THROWF("File range ($0, $1) for label $2 extends beyond base map",
                fileoff, filesize, name);
@@ -895,12 +959,11 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
                                 uint64_t label_from_vmaddr,
                                 string_view file_range) {
   uint64_t file_offset = file_range.data() - file_->data().data();
-  if (verbose_level > 2) {
-    fprintf(stdout,
-            "[%s, %s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64
-            ", %zx])\n",
-            GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr,
-            file_offset, file_range.size());
+  bool verbose = IsVerboseForFileRange(file_offset, file_range.size());
+  if (verbose) {
+    printf("[%s, %s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64 ", %zx])\n",
+           GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr,
+           file_offset, file_range.size());
   }
   assert(translator_);
   for (auto& pair : outputs_) {
@@ -908,7 +971,7 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
     uint64_t offset;
     if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
       bool ok = pair.first->file_map.AddRangeWithTranslation(
-          file_offset, file_range.size(), label, translator_->file_map,
+          file_offset, file_range.size(), label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
         THROWF("File range ($0, $1) for label $2 extends beyond base map",
@@ -922,11 +985,11 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
 
 void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
                               uint64_t addr, uint64_t size) {
-  if (verbose_level > 2) {
-    fprintf(stdout,
-            "[%s, %s] AddVMRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
-            GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr, addr,
-            size);
+  bool verbose = IsVerboseForVMRange(addr, size);
+  if (verbose) {
+    printf("[%s, %s] AddVMRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
+           GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr, addr,
+           size);
   }
   assert(translator_);
   for (auto& pair : outputs_) {
@@ -934,7 +997,8 @@ void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
     uint64_t offset;
     if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
       bool ok = pair.first->vm_map.AddRangeWithTranslation(
-          addr, size, label, translator_->vm_map, &pair.first->file_map);
+          addr, size, label, translator_->vm_map, verbose,
+          &pair.first->file_map);
       if (!ok) {
         THROWF("VM range ($0, $1) for label $2 extends beyond base map", addr,
                size, label);
@@ -947,16 +1011,18 @@ void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
 
 void RangeSink::AddVMRange(const char* analyzer, uint64_t vmaddr,
                            uint64_t vmsize, const std::string& name) {
-  if (verbose_level > 2) {
-    fprintf(stdout, "[%s, %s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
-            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
-            name.data(), vmaddr, vmsize);
+  bool verbose = IsVerboseForVMRange(vmaddr, vmsize);
+  if (verbose) {
+    printf("[%s, %s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+           GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+           name.data(), vmaddr, vmsize);
   }
   assert(translator_);
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     bool ok = pair.first->vm_map.AddRangeWithTranslation(
-        vmaddr, vmsize, label, translator_->vm_map, &pair.first->file_map);
+        vmaddr, vmsize, label, translator_->vm_map, verbose,
+        &pair.first->file_map);
     if (!ok) {
       THROWF("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
              vmsize, name);
@@ -981,12 +1047,12 @@ void RangeSink::AddVMRangeIgnoreDuplicate(const char* analyzer, uint64_t vmaddr,
 void RangeSink::AddRange(const char* analyzer, string_view name,
                          uint64_t vmaddr, uint64_t vmsize, uint64_t fileoff,
                          uint64_t filesize) {
-  if (verbose_level > 2) {
-    fprintf(stdout,
-            "[%s, %s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
-            ", %" PRIx64 ")\n",
-            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
-            name.data(), vmaddr, vmsize, fileoff, filesize);
+  if (IsVerboseForVMRange(vmaddr, vmsize) ||
+      IsVerboseForFileRange(fileoff, filesize)) {
+    printf("[%s, %s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
+           ", %" PRIx64 ")\n",
+           GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+           name.data(), vmaddr, vmsize, fileoff, filesize);
   }
 
   if (translator_) {
@@ -1151,6 +1217,7 @@ class Bloaty {
                          std::string* out_build_id) const;
 
   const InputFileFactory& file_factory_;
+  const Options options_;
 
   // All data sources, indexed by name.
   // Contains both built-in sources and custom sources.
@@ -1168,7 +1235,7 @@ class Bloaty {
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
-    : file_factory_(factory) {
+    : file_factory_(factory), options_(options) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -1335,15 +1402,16 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
   std::vector<RangeSink*> filename_sink_ptrs;
 
   // Base map always goes first.
-  sinks.push_back(absl::make_unique<RangeSink>(
-      &file->file_data(), DataSource::kSegments, nullptr));
+  sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
+                                               DataSource::kSegments, nullptr));
   NameMunger empty_munger;
   sinks.back()->AddOutput(maps.base_map(), &empty_munger);
   sink_ptrs.push_back(sinks.back().get());
 
   for (auto source : sources_) {
-    sinks.push_back(absl::make_unique<RangeSink>(
-        &file->file_data(), source->effective_source, maps.base_map()));
+    sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
+                                                 source->effective_source,
+                                                 maps.base_map()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     // We handle the kInputFiles data source internally, without handing it off
     // to the file format implementation.  This seems slightly simpler, since
@@ -1414,9 +1482,9 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
   assert(filesize == file->file_data().data().size());
 
   if (verbose_level > 0) {
-    fprintf(stdout, "FILE MAP:\n");
+    printf("FILE MAP:\n");
     maps.PrintFileMaps();
-    fprintf(stdout, "VM MAP:\n");
+    printf("VM MAP:\n");
     maps.PrintVMMaps();
   }
 }
@@ -1636,7 +1704,30 @@ class ArgParser {
 
   bool TryParseIntegerOption(string_view flag, int* val) {
     string_view val_str;
-    return TryParseOption(flag, &val_str) && absl::SimpleAtoi(val_str, val);
+    if (!TryParseOption(flag, &val_str)) {
+      return false;
+    }
+
+    if (!absl::SimpleAtoi(val_str, val)) {
+      THROWF("option '$0' had non-integral argument: $1", flag, val_str);
+    }
+
+    return true;
+  }
+
+  bool TryParseUint64Option(string_view flag, uint64_t* val) {
+    string_view val_str;
+    if (!TryParseOption(flag, &val_str)) {
+      return false;
+    }
+
+    try {
+      *val = std::stoull(std::string(val_str));
+    } catch (...) {
+      THROWF("option '$0' had non-integral argument: $1", flag, val_str);
+    }
+
+    return true;
   }
 
  public:
@@ -1653,6 +1744,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
   ArgParser args(argc, argv);
   string_view option;
   int int_option;
+  uint64_t uint64_option;
 
   while (!args.IsDone()) {
     if (args.TryParseFlag("--")) {
@@ -1689,6 +1781,16 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseOption("--debug-file", &option)) {
       options->add_debug_filename(std::string(option));
+    } else if (args.TryParseUint64Option("--debug-fileoff", &uint64_option)) {
+      if (options->has_debug_fileoff()) {
+        THROW("currently we only support a single debug fileoff");
+      }
+      options->set_debug_fileoff(uint64_option);
+    } else if (args.TryParseUint64Option("--debug-vmaddr", &uint64_option)) {
+      if (options->has_debug_vmaddr()) {
+        THROW("currently we only support a single debug vmaddr");
+      }
+      options->set_debug_vmaddr(uint64_option);
     } else if (args.TryParseOption("--disassemble", &option)) {
       options->mutable_disassemble_function()->assign(std::string(option));
     } else if (args.TryParseIntegerOption("-n", &int_option)) {

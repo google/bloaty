@@ -230,6 +230,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
 bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                        const std::string& val,
                                        const RangeMap& translator,
+                                       bool verbose,
                                        RangeMap* other) {
   AddRange(addr, size, val);
 
@@ -251,7 +252,7 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
     uint64_t this_size;
     if (translator.TranslateAndTrimRangeWithEntry(it, addr, size, &this_addr,
                                                   &this_size)) {
-      if (verbose_level > 2) {
+      if (verbose_level > 2 || verbose) {
         printf("  -> translates to: [%" PRIx64 " %" PRIx64 "]\n", this_addr,
                this_size);
       }
