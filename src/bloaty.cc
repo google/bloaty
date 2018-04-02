@@ -50,6 +50,7 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "demangle.h"
+#include "rust_demangle.h"
 
 using absl::string_view;
 
@@ -98,6 +99,7 @@ constexpr DataSourceDefinition data_sources[] = {
      "symbols from symbol table (configure demangling with --demangle)"},
     {DataSource::kRawSymbols, "rawsymbols", "unmangled symbols"},
     {DataSource::kFullSymbols, "fullsymbols", "full demangled symbols"},
+    {DataSource::kRustSymbols, "rustsymbols", "rust demangled symbols"},
     {DataSource::kShortSymbols, "shortsymbols", "short demangled symbols"},
 };
 
@@ -245,6 +247,13 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
   if (source == DataSource::kShortSymbols) {
     char demangled[1024];
     if (::Demangle(demangle_from.data(), demangled, sizeof(demangled))) {
+      return std::string(demangled);
+    } else {
+      return std::string(symbol);
+    }
+  } else if (source == DataSource::kRustSymbols) {
+    char demangled[1024];
+    if (::RustDemangle(demangle_from.data(), demangled, sizeof(demangled))) {
       return std::string(demangled);
     } else {
       return std::string(symbol);
@@ -1203,6 +1212,8 @@ class Bloaty {
         return DataSource::kRawSymbols;
       case Options::DEMANGLE_SHORT:
         return DataSource::kShortSymbols;
+      case Options::DEMANGLE_RUST:
+        return DataSource::kRustSymbols;
       case Options::DEMANGLE_FULL:
         return DataSource::kFullSymbols;
       default:
@@ -1783,6 +1794,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
         options->set_demangle(Options::DEMANGLE_SHORT);
       } else if (option == "full") {
         options->set_demangle(Options::DEMANGLE_FULL);
+      } else if (option == "rust") {
+        options->set_demangle(Options::DEMANGLE_RUST);
       } else {
         THROWF("unknown value for --demangle: $0", option);
       }

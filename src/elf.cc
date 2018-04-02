@@ -1254,6 +1254,7 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
+        case DataSource::kRustSymbols:
           ReadELFSymbols(debug_file().file_data(), sink, nullptr, false);
           break;
         case DataSource::kArchiveMembers:

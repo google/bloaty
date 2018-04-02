@@ -77,6 +77,7 @@ enum class DataSource {
 
   kRawSymbols,
   kFullSymbols,
+  kRustSymbols,
   kShortSymbols
 };
 

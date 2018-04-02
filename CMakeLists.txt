@@ -105,8 +105,8 @@ add_library(libbloaty
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
 
-set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
-
+find_library(RUSTC_DEMANGLE_CLIB rustc_demangle_clib)
+set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static "${RUSTC_DEMANGLE_CLIB}")
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
   message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
