@@ -27,27 +27,28 @@ uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) const {
 
 template <class T>
 bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
-                                              uint64_t size, uint64_t* out_addr,
-                                              uint64_t* out_size) const {
-
+                                              uint64_t size, uint64_t* trimmed_addr,
+                                              uint64_t* translated_addr,
+                                              uint64_t* trimmed_size) const {
   addr = std::max(addr, iter->first);
+  *trimmed_addr = addr;
 
   if (size == kUnknownSize) {
-    *out_size = kUnknownSize;
+    *trimmed_size = kUnknownSize;
   } else {
     uint64_t end = std::min(addr + size, iter->first + iter->second.size);
     if (addr >= end) {
-      *out_size = 0;
+      *trimmed_size = 0;
       return false;
     }
-    *out_size = end - addr;
+    *trimmed_size = end - addr;
   }
 
   if (!iter->second.HasTranslation()) {
     return false;
   }
 
-  *out_addr = TranslateWithEntry(iter, addr);
+  *translated_addr = TranslateWithEntry(iter, addr);
   return true;
 }
 
@@ -232,8 +233,6 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                        const RangeMap& translator,
                                        bool verbose,
                                        RangeMap* other) {
-  AddRange(addr, size, val);
-
   auto it = translator.FindContaining(addr);
   uint64_t end;
   if (size == kUnknownSize) {
@@ -248,17 +247,19 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
   // cases this would be a bug (ie. symbols VM->file).  In other cases it's
   // totally normal (ie. archive members file->VM).
   while (!translator.IterIsEnd(it) && it->first < end) {
-    uint64_t this_addr;
-    uint64_t this_size;
-    if (translator.TranslateAndTrimRangeWithEntry(it, addr, size, &this_addr,
-                                                  &this_size)) {
+    uint64_t translated_addr;
+    uint64_t trimmed_addr;
+    uint64_t trimmed_size;
+    if (translator.TranslateAndTrimRangeWithEntry(
+            it, addr, size, &trimmed_addr, &translated_addr, &trimmed_size)) {
       if (verbose_level > 2 || verbose) {
-        printf("  -> translates to: [%" PRIx64 " %" PRIx64 "]\n", this_addr,
-               this_size);
+        printf("  -> translates to: [%" PRIx64 " %" PRIx64 "]\n", translated_addr,
+               trimmed_size);
       }
-      other->AddRange(this_addr, this_size, val);
+      other->AddRange(translated_addr, trimmed_size, val);
     }
-    total_size += this_size;
+    AddRange(trimmed_addr, trimmed_size, val);
+    total_size += trimmed_size;
     ++it;
   }
 

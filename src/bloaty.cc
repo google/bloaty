@@ -68,6 +68,10 @@ static void Throw(const char *str, int line) {
 
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
+#define WARN(...)                                                   \
+  if (verbose_level > 0) {                                          \
+    printf("WARNING: %s\n", absl::Substitute(__VA_ARGS__).c_str()); \
+  }
 
 namespace bloaty {
 
@@ -883,6 +887,10 @@ bool RangeSink::ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize) {
 }
 
 bool RangeSink::IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize) {
+  if (vmsize == RangeMap::kUnknownSize) {
+    vmsize = UINT64_MAX - vmstart;
+  }
+
   if (ContainsVerboseVMAddr(vmstart, vmsize)) {
     return true;
   }
@@ -906,6 +914,10 @@ bool RangeSink::IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize) {
 }
 
 bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
+  if (filesize == RangeMap::kUnknownSize) {
+    filesize = UINT64_MAX - fileoff;
+  }
+
   if (ContainsVerboseFileOffset(fileoff, filesize)) {
     return true;
   }
@@ -946,8 +958,8 @@ void RangeSink::AddFileRange(const char* analyzer, string_view name,
           fileoff, filesize, label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
-        THROWF("File range ($0, $1) for label $2 extends beyond base map",
-               fileoff, filesize, name);
+        WARN("File range ($0, $1) for label $2 extends beyond base map",
+             fileoff, filesize, name);
       }
     } else {
       pair.first->file_map.AddRange(fileoff, filesize, label);
@@ -974,8 +986,8 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
           file_offset, file_range.size(), label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
-        THROWF("File range ($0, $1) for label $2 extends beyond base map",
-               offset, file_range.size(), label);
+        WARN("File range ($0, $1) for label $2 extends beyond base map", offset,
+             file_range.size(), label);
       }
     } else if (verbose_level > 2) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
@@ -999,9 +1011,9 @@ void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
       bool ok = pair.first->vm_map.AddRangeWithTranslation(
           addr, size, label, translator_->vm_map, verbose,
           &pair.first->file_map);
-      if (!ok) {
-        THROWF("VM range ($0, $1) for label $2 extends beyond base map", addr,
-               size, label);
+      if (!ok && verbose_level > 0) {
+        WARN("VM range ($0, $1) for label $2 extends beyond base map", addr,
+             size, label);
       }
     } else if (verbose_level > 2) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
@@ -1024,8 +1036,8 @@ void RangeSink::AddVMRange(const char* analyzer, uint64_t vmaddr,
         vmaddr, vmsize, label, translator_->vm_map, verbose,
         &pair.first->file_map);
     if (!ok) {
-      THROWF("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
-             vmsize, name);
+      WARN("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
+           vmsize, name);
     }
   }
 }
@@ -1729,7 +1741,7 @@ class ArgParser {
     }
 
     try {
-      *val = std::stoull(std::string(val_str));
+      *val = std::stoull(std::string(val_str), nullptr, 0);
     } catch (...) {
       THROWF("option '$0' had non-integral argument: $1", flag, val_str);
     }

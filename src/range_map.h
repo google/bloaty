@@ -212,8 +212,9 @@ class RangeMap {
 
   template <class T>
   bool TranslateAndTrimRangeWithEntry(T iter, uint64_t addr, uint64_t size,
-                                      uint64_t* out_addr,
-                                      uint64_t* out_size) const;
+                                      uint64_t* trimmed_addr,
+                                      uint64_t* translated_addr,
+                                      uint64_t* trimmed_size) const;
 
   // Finds the entry that contains |addr|.  If no such mapping exists, returns
   // mappings_.end().

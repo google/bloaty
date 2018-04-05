@@ -337,7 +337,9 @@ TEST_F(RangeMapTest, Translation2) {
                                             &map3_));
   CheckConsistency();
   AssertMapEquals(map2_, {
-    {20, 35, kNoTranslation, "translate me"}
+    {20, 25, kNoTranslation, "translate me"},
+    {25, 30, kNoTranslation, "translate me"},
+    {30, 35, kNoTranslation, "translate me"}
   });
   AssertMapEquals(map3_, {
     {120, 125, kNoTranslation, "translate me"},
