@@ -126,7 +126,7 @@ add_library(libbloaty
 
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
 if(BLOATY_ENABLE_RUSTC_DEMANGLE)
-    set(LIBBLOATY_LIBS "${LIBBLOATY_LIBS}" rustc_demangle)
+    set(LIBBLOATY_LIBS "${LIBBLOATY_LIBS}" rustc_demangle dl)
 endif()
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
