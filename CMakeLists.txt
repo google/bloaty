@@ -4,6 +4,7 @@ project (Bloaty)
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
 option(BLOATY_ENABLE_UBSAN "Enable undefined behavior sanitizer." OFF)
+option(BLOATY_ENABLE_RUSTC_DEMANGLE "Use rustc-demangle to demangle Rust symbols" OFF)
 
 # Set default build type.
 if(NOT CMAKE_BUILD_TYPE)
@@ -36,6 +37,9 @@ include_directories(third_party/protobuf/src)
 include_directories(.)
 include_directories(src)
 include_directories(third_party/abseil-cpp)
+if(BLOATY_ENABLE_RUSTC_DEMANGLE)
+    include_directories(third_party/rustc-demangle/rustc-demangle-capi/include)
+endif()
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 
 # Baseline build flags.
@@ -65,6 +69,21 @@ endif()
 if(BLOATY_ENABLE_UBSAN)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
   set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=undefined")
+endif()
+
+if(BLOATY_ENABLE_RUSTC_DEMANGLE)
+    set(BLOATY_RUSTC_DEMANGLE_LIB_FILE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rustc-demangle/target/release/librustc_demangle.a)
+    add_definitions(-DBLOATY_ENABLE_RUSTC_DEMANGLE)
+    add_custom_command(
+        OUTPUT ${BLOATY_RUSTC_DEMANGLE_LIB_FILE}
+        COMMAND cargo build --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rustc-demangle/Cargo.toml --all --release
+    )
+    # add_custom_target(rustc_demangle_target DEPENDS ${BLOATY_RUSTC_DEMANGLE_LIB_FILE})
+    add_library(rustc_demangle STATIC IMPORTED GLOBAL)
+    add_dependencies(rustc_demangle ${BLOATY_RUSTC_DEMANGLE_LIB_FILE})
+    set_target_properties(rustc_demangle PROPERTIES
+        IMPORTED_LOCATION ${BLOATY_RUSTC_DEMANGLE_LIB_FILE}
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rustc-demangle/rustc-demangle-capi/include)
 endif()
 
 if(DEFINED ENV{CXXFLAGS})
@@ -105,8 +124,10 @@ add_library(libbloaty
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
 
-find_library(RUSTC_DEMANGLE_CLIB rustc_demangle_clib)
-set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static "${RUSTC_DEMANGLE_CLIB}")
+set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
+if(BLOATY_ENABLE_RUSTC_DEMANGLE)
+    set(LIBBLOATY_LIBS "${LIBBLOATY_LIBS}" rustc_demangle)
+endif()
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
   message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")

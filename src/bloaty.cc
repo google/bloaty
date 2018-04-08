@@ -50,7 +50,6 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "demangle.h"
-#include "rust_demangle.h"
 
 using absl::string_view;
 
@@ -69,6 +68,15 @@ static void Throw(const char *str, int line) {
 
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
+
+#ifdef BLOATY_ENABLE_RUSTC_DEMANGLE
+#include "rustc_demangle.h"
+#else
+int rustc_demangle(const char *mangled, char *out, size_t out_size) {
+    THROW("rustc-demangle not enabled");
+    return 0;
+}
+#endif
 
 namespace bloaty {
 
@@ -253,7 +261,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
     }
   } else if (source == DataSource::kRustSymbols) {
     char demangled[1024];
-    if (::RustDemangle(demangle_from.data(), demangled, sizeof(demangled))) {
+    if (::rustc_demangle(demangle_from.data(), demangled, sizeof(demangled))) {
       return std::string(demangled);
     } else {
       return std::string(symbol);
