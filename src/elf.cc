@@ -839,6 +839,10 @@ static void ElfMachineToCapstone(Elf64_Half e_machine, cs_arch* arch,
       *arch = CS_ARCH_SPARC;
       *mode = CS_MODE_V9;
       break;
+    case EM_AARCH64:
+      *arch = CS_ARCH_ARM64;
+      *mode = CS_MODE_LITTLE_ENDIAN;
+      break;
     default:
       THROWF("Unknown ELF machine value: $0'", e_machine);
   }
