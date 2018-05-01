@@ -1136,6 +1136,19 @@ static void DoReadELFSegments(RangeSink* sink, ReportSegmentsBy report_by) {
                                 header.p_memsz, segment.contents());
                }
              });
+  ForEachElf(sink->input_file(), sink,
+             [=](const ElfFile& elf, string_view /*filename*/,
+                 uint32_t /*index_base*/) {
+               for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
+                 ElfFile::Segment segment;
+                 elf.ReadSegment(i, &segment);
+                 const auto& header = segment.header();
+                 if(header.p_type != PT_TLS) continue;
+                 std::string name = "TLS";
+                 sink->AddRange("elf_segment", "TLS", header.p_vaddr, header.p_memsz,
+                                segment.contents());
+               }
+             });
 }
 
 static void ReadELFSegments(RangeSink* sink) {
