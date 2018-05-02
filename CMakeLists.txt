@@ -104,7 +104,11 @@ add_library(libbloaty
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
-  set_target_properties(libbloaty PROPERTIES OUTPUT_NAME bloaty)
+
+  set_target_properties(libbloaty PROPERTIES
+    OUTPUT_NAME bloaty
+    PUBLIC_HEADER src/bloaty.h
+    )
 
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
 install(TARGETS libbloaty
@@ -112,7 +116,8 @@ install(TARGETS libbloaty
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
-        INCLUDES DESTINATION include)
+        PUBLIC_HEADER DESTINATION include)
+
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
   message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
