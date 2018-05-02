@@ -104,9 +104,15 @@ add_library(libbloaty
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
+  set_target_properties(libbloaty PROPERTIES OUTPUT_NAME bloaty)
 
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
-
+install(TARGETS libbloaty
+  EXPORT ${PROJECT_NAME}Targets
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        INCLUDES DESTINATION include)
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
   message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
@@ -126,7 +132,13 @@ else()
     target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
-  enable_testing()
+  install(
+    TARGETS bloaty
+    EXPORT ${PROJECT_NAME}Targets
+    RUNTIME DESTINATION bin
+  )
+
+enable_testing()
 
   if(BUILD_TESTING)
     add_subdirectory(third_party/googletest)
@@ -156,3 +168,5 @@ else()
     add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
   endif()
 endif()
+
+install(EXPORT ${PROJECT_NAME}Targets NAMESPACE ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
