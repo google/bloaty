@@ -1584,9 +1584,16 @@ void AddDIE(const dwarf::File& file, const std::string& name,
 
   // Sometimes a location is given as an offset into debug_loc.
   if (die.has_location_uint64()) {
-    absl::string_view loc_range = file.debug_loc.substr(die.location_uint64());
-    loc_range = GetLocationListRange(sizes, loc_range);
-    sink->AddFileRange("dwarf_locrange", name, loc_range);
+    if (die.location_uint64() < file.debug_loc.size()) {
+      absl::string_view loc_range = file.debug_loc.substr(die.location_uint64());
+      loc_range = GetLocationListRange(sizes, loc_range);
+      sink->AddFileRange("dwarf_locrange", name, loc_range);
+    } else if (verbose_level > 0) {
+      fprintf(stderr,
+              "bloaty: warning: DWARF location out of range, location=%" PRIx64
+              "\n",
+              die.location_uint64());
+    }
   }
 
   uint64_t ranges_offset = UINT64_MAX;
