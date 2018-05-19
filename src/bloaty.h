@@ -230,9 +230,9 @@ class RangeSink {
     return ptr >= file_data.data() && ptr < file_data.data() + file_data.size();
   }
 
-  bool ContainsVerboseVMAddr(uint64_t vmstart, uint64_t vmsize);
+  bool ContainsVerboseVMAddr(uint64_t vmaddr, uint64_t vmsize);
   bool ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize);
-  bool IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize);
+  bool IsVerboseForVMRange(uint64_t vmaddr, uint64_t vmsize);
   bool IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize);
 
   const InputFile* file_;

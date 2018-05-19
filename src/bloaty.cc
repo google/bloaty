@@ -874,10 +874,10 @@ RangeSink::~RangeSink() {}
 uint64_t debug_vmaddr = -1;
 uint64_t debug_fileoff = -1;
 
-bool RangeSink::ContainsVerboseVMAddr(uint64_t vmstart, uint64_t vmsize) {
+bool RangeSink::ContainsVerboseVMAddr(uint64_t vmaddr, uint64_t vmsize) {
   return options_.verbose_level() > 2 ||
-         (options_.has_debug_vmaddr() && options_.debug_vmaddr() >= vmstart &&
-          options_.debug_vmaddr() < (vmstart + vmsize));
+         (options_.has_debug_vmaddr() && options_.debug_vmaddr() >= vmaddr &&
+          options_.debug_vmaddr() < (vmaddr + vmsize));
 }
 
 bool RangeSink::ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize) {
@@ -886,12 +886,16 @@ bool RangeSink::ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize) {
           options_.debug_fileoff() < (fileoff + filesize));
 }
 
-bool RangeSink::IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize) {
+bool RangeSink::IsVerboseForVMRange(uint64_t vmaddr, uint64_t vmsize) {
   if (vmsize == RangeMap::kUnknownSize) {
-    vmsize = UINT64_MAX - vmstart;
+    vmsize = UINT64_MAX - vmaddr;
   }
 
-  if (ContainsVerboseVMAddr(vmstart, vmsize)) {
+  if (vmaddr + vmsize < vmaddr) {
+    THROWF("Overflow in vm range, vmaddr=$0, vmsize=$1", vmaddr, vmsize);
+  }
+
+  if (ContainsVerboseVMAddr(vmaddr, vmsize)) {
     return true;
   }
 
@@ -899,7 +903,7 @@ bool RangeSink::IsVerboseForVMRange(uint64_t vmstart, uint64_t vmsize) {
     RangeMap vm_map;
     RangeMap file_map;
     bool contains = false;
-    vm_map.AddRangeWithTranslation(vmstart, vmsize, "", translator_->vm_map,
+    vm_map.AddRangeWithTranslation(vmaddr, vmsize, "", translator_->vm_map,
                                    false, &file_map);
     file_map.ForEachRange(
         [this, &contains](uint64_t fileoff, uint64_t filesize) {
@@ -918,6 +922,11 @@ bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
     filesize = UINT64_MAX - fileoff;
   }
 
+  if (fileoff + filesize < fileoff) {
+    THROWF("Overflow in file range, fileoff=$0, filesize=$1", fileoff,
+           filesize);
+  }
+
   if (ContainsVerboseFileOffset(fileoff, filesize)) {
     return true;
   }
@@ -928,8 +937,8 @@ bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
     bool contains = false;
     file_map.AddRangeWithTranslation(fileoff, filesize, "",
                                      translator_->file_map, false, &vm_map);
-    vm_map.ForEachRange([this, &contains](uint64_t vmstart, uint64_t vmsize) {
-      if (ContainsVerboseVMAddr(vmstart, vmsize)) {
+    vm_map.ForEachRange([this, &contains](uint64_t vmaddr, uint64_t vmsize) {
+      if (ContainsVerboseVMAddr(vmaddr, vmsize)) {
         contains = true;
       }
     });
@@ -1072,15 +1081,6 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
         !translator_->file_map.CoversRange(fileoff, filesize)) {
       THROW("Tried to add range that is not covered by base map.");
     }
-  }
-
-  if (vmaddr + vmsize < vmaddr) {
-    THROWF("Overflow in vm range, vmaddr=$0, vmsize=$1", vmaddr, vmsize);
-  }
-
-  if (fileoff + filesize < fileoff) {
-    THROWF("Overflow in file range, fileoff=$0, filesize=$1", fileoff,
-           filesize);
   }
 
   for (auto& pair : outputs_) {

@@ -122,10 +122,6 @@ void SkipNullTerminated(string_view* data) {
 
 // Parses the LEB128 format defined by DWARF (both signed and unsigned
 // versions).
-//
-// Bloaty doesn't actually use any LEB128's for signed values at the moment.
-// So while this attempts to implement the DWARF spec correctly with respect
-// to signed values, this isn't actually tested/exercised right now.
 
 uint64_t ReadLEB128Internal(bool is_signed, string_view* data) {
   uint64_t ret = 0;
@@ -140,7 +136,7 @@ uint64_t ReadLEB128Internal(bool is_signed, string_view* data) {
     shift += 7;
     if ((byte & 0x80) == 0) {
       data->remove_prefix(ptr - data->data());
-      if (is_signed && (byte & 0x40)) {
+      if (is_signed && shift < 64 && (byte & 0x40)) {
         ret |= -(1ULL << shift);
       }
       return ret;
@@ -1584,9 +1580,16 @@ void AddDIE(const dwarf::File& file, const std::string& name,
 
   // Sometimes a location is given as an offset into debug_loc.
   if (die.has_location_uint64()) {
-    absl::string_view loc_range = file.debug_loc.substr(die.location_uint64());
-    loc_range = GetLocationListRange(sizes, loc_range);
-    sink->AddFileRange("dwarf_locrange", name, loc_range);
+    if (die.location_uint64() < file.debug_loc.size()) {
+      absl::string_view loc_range = file.debug_loc.substr(die.location_uint64());
+      loc_range = GetLocationListRange(sizes, loc_range);
+      sink->AddFileRange("dwarf_locrange", name, loc_range);
+    } else if (verbose_level > 0) {
+      fprintf(stderr,
+              "bloaty: warning: DWARF location out of range, location=%" PRIx64
+              "\n",
+              die.location_uint64());
+    }
   }
 
   uint64_t ranges_offset = UINT64_MAX;
