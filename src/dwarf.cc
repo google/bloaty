@@ -122,10 +122,6 @@ void SkipNullTerminated(string_view* data) {
 
 // Parses the LEB128 format defined by DWARF (both signed and unsigned
 // versions).
-//
-// Bloaty doesn't actually use any LEB128's for signed values at the moment.
-// So while this attempts to implement the DWARF spec correctly with respect
-// to signed values, this isn't actually tested/exercised right now.
 
 uint64_t ReadLEB128Internal(bool is_signed, string_view* data) {
   uint64_t ret = 0;
@@ -140,7 +136,7 @@ uint64_t ReadLEB128Internal(bool is_signed, string_view* data) {
     shift += 7;
     if ((byte & 0x80) == 0) {
       data->remove_prefix(ptr - data->data());
-      if (is_signed && (byte & 0x40)) {
+      if (is_signed && shift < 64 && (byte & 0x40)) {
         ret |= -(1ULL << shift);
       }
       return ret;
