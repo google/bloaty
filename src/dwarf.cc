@@ -1603,9 +1603,16 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   }
 
   if (ranges_offset != UINT64_MAX) {
-    absl::string_view ranges_range = file.debug_ranges.substr(ranges_offset);
-    ranges_range = GetRangeListRange(sizes, ranges_range);
-    sink->AddFileRange("dwarf_debugrange", name, ranges_range);
+    if (ranges_offset < file.debug_ranges.size()) {
+      absl::string_view ranges_range = file.debug_ranges.substr(ranges_offset);
+      ranges_range = GetRangeListRange(sizes, ranges_range);
+      sink->AddFileRange("dwarf_debugrange", name, ranges_range);
+    } else if (verbose_level > 0) {
+      fprintf(stderr,
+              "bloaty: warning: DWARF debug range out of range, "
+              "ranges_offset=%" PRIx64 "\n",
+              ranges_offset);
+    }
   }
 }
 
