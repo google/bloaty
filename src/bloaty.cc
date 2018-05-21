@@ -1068,6 +1068,13 @@ void RangeSink::AddVMRangeIgnoreDuplicate(const char* analyzer, uint64_t vmaddr,
 void RangeSink::AddRange(const char* analyzer, string_view name,
                          uint64_t vmaddr, uint64_t vmsize, uint64_t fileoff,
                          uint64_t filesize) {
+  if (vmsize == RangeMap::kUnknownSize || filesize == RangeMap::kUnknownSize) {
+    // AddRange() is used for segments and sections; the mappings that establish
+    // the file <-> vm mapping.  The size should always be known.  Moreover it
+    // would be unclear how the logic should work if the size was *not* known.
+    THROW("AddRange() does not allow unknown size.");
+  }
+
   if (IsVerboseForVMRange(vmaddr, vmsize) ||
       IsVerboseForFileRange(fileoff, filesize)) {
     printf("[%s, %s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
