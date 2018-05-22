@@ -248,11 +248,7 @@ class ElfFile {
   bool Initialize();
 
   string_view GetRegion(uint64_t start, uint64_t n) const {
-    uint64_t end = CheckedAdd(start, n);
-    if (end > data_.size()) {
-      THROW("ELF region out-of-bounds");
-    }
-    return data_.substr(start, n);
+    return StrictSubstr(data_, start, n);
   }
 
   // Shared code for reading various ELF structures.  Handles endianness
@@ -428,7 +424,7 @@ string_view ElfFile::Section::ReadString(Elf64_Word index) const {
            contents_.size());
   }
 
-  string_view ret = contents_.substr(index);
+  string_view ret = StrictSubstr(contents_, index);
 
   const char* null_pos =
       static_cast<const char*>(memchr(ret.data(), '\0', ret.size()));
@@ -456,7 +452,7 @@ void ElfFile::Section::ReadSymbol(Elf64_Word index, Elf64_Sym* sym,
   size_t offset = header_.sh_entsize * index;
   reader.Read<Elf32_Sym>(offset, SymMunger(), sym);
   if (file_range) {
-    *file_range = contents().substr(offset, header_.sh_entsize);
+    *file_range = StrictSubstr(contents(), offset, header_.sh_entsize);
   }
 }
 
@@ -467,7 +463,7 @@ void ElfFile::Section::ReadRelocation(Elf64_Word index, Elf64_Rel* rel,
   size_t offset = header_.sh_entsize * index;
   reader.Read<Elf32_Rel>(offset, RelMunger(), rel);
   if (file_range) {
-    *file_range = contents().substr(offset, header_.sh_entsize);
+    *file_range = StrictSubstr(contents(), offset, header_.sh_entsize);
   }
 }
 
@@ -479,7 +475,7 @@ void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
   size_t offset = header_.sh_entsize * index;
   reader.Read<Elf32_Rela>(offset, RelaMunger(), rela);
   if (file_range) {
-    *file_range = contents().substr(offset, header_.sh_entsize);
+    *file_range = StrictSubstr(contents(), offset, header_.sh_entsize);
   }
 }
 
@@ -616,7 +612,7 @@ bool ElfFile::FindSectionByName(absl::string_view name, Section* section) const 
 class ArFile {
  public:
   ArFile(string_view data)
-      : magic_(data.substr(0, kMagicSize)),
+      : magic_(StrictSubstr(data, 0, kMagicSize)),
         contents_(data.substr(std::min<size_t>(data.size(), kMagicSize))) {}
 
   bool IsOpen() const { return magic() == string_view(kMagic); }
@@ -1058,7 +1054,7 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
           auto filesize = (header.sh_type == SHT_NOBITS) ? 0 : size;
           auto vmsize = (header.sh_flags & SHF_ALLOC) ? size : 0;
 
-          string_view contents = section.contents().substr(0, filesize);
+          string_view contents = StrictSubstr(section.contents(), 0, filesize);
 
           uint64_t full_addr = ToVMAddr(addr, index_base + i, is_object);
 
@@ -1379,7 +1375,7 @@ class ElfObjectFile : public ObjectFile {
         THROWF("Couldn't translate VM address for function $0", symbol);
       }
 
-      info->text = file_data().data().substr(fileoff, size);
+      info->text = StrictSubstr(file_data().data(), fileoff, size);
       info->start_address = vmaddr;
     }
 
