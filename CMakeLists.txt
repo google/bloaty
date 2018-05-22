@@ -105,18 +105,8 @@ add_library(libbloaty
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
 
-  set_target_properties(libbloaty PROPERTIES
-    OUTPUT_NAME bloaty
-    PUBLIC_HEADER src/bloaty.h
-    )
 
 set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
-install(TARGETS libbloaty
-  EXPORT ${PROJECT_NAME}Targets
-        RUNTIME DESTINATION bin
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-        PUBLIC_HEADER DESTINATION include)
 
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
