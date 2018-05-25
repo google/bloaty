@@ -27,6 +27,7 @@
 #include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
+#include "absl/types/optional.h"
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "dwarf_constants.h"
@@ -799,26 +800,20 @@ class AttrValue {
   bool IsUint() const { return type_ == Type::kUint; }
   bool IsString() const { return type_ == Type::kString; }
 
-  bool CoerceToUint() {
+  absl::optional<uint64_t> ToUint() const {
+    if (IsUint()) return uint_;
     string_view str = string_;
-    if (IsUint()) return true;
-    type_ = Type::kUint;
     switch (str.size()) {
       case 1:
-        uint_ = ReadMemcpy<uint8_t>(&str);
-        return true;
+        return ReadMemcpy<uint8_t>(&str);
       case 2:
-        uint_ = ReadMemcpy<uint8_t>(&str);
-        return true;
+        return ReadMemcpy<uint8_t>(&str);
       case 4:
-        uint_ = ReadMemcpy<uint32_t>(&str);
-        return true;
+        return ReadMemcpy<uint32_t>(&str);
       case 8:
-        uint_ = ReadMemcpy<uint64_t>(&str);
-        return true;
+        return ReadMemcpy<uint64_t>(&str);
     }
-    type_ = Type::kString;
-    return false;
+    return absl::nullopt;
   }
 
   uint64_t GetUint() const {
@@ -1930,28 +1925,33 @@ static void ReadDWARFDebugInfo(
                           });
   attr_reader.OnAttribute(DW_AT_low_pc,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.CoerceToUint()) return;
-                            die->set_low_pc(val.GetUint());
+                            absl::optional<uint64_t> uint = val.ToUint();
+                            if (!uint.has_value()) return;
+                            die->set_low_pc(uint.value());
                           });
   attr_reader.OnAttribute(DW_AT_high_pc,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.CoerceToUint()) return;
-                            die->set_high_pc(val.GetUint());
+                            absl::optional<uint64_t> uint = val.ToUint();
+                            if (!uint.has_value()) return;
+                            die->set_high_pc(uint.value());
                           });
   attr_reader.OnAttribute(DW_AT_stmt_list,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.CoerceToUint()) return;
-                            die->set_stmt_list(val.GetUint());
+                            absl::optional<uint64_t> uint = val.ToUint();
+                            if (!uint.has_value()) return;
+                            die->set_stmt_list(uint.value());
                           });
   attr_reader.OnAttribute(DW_AT_ranges,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.CoerceToUint()) return;
-                            die->set_ranges(val.GetUint());
+                            absl::optional<uint64_t> uint = val.ToUint();
+                            if (!uint.has_value()) return;
+                            die->set_ranges(uint.value());
                           });
   attr_reader.OnAttribute(DW_AT_start_scope,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
-                            if (!val.CoerceToUint()) return;
-                            die->set_start_scope(val.GetUint());
+                            absl::optional<uint64_t> uint = val.ToUint();
+                            if (!uint.has_value()) return;
+                            die->set_start_scope(uint.value());
                           });
 
   if (!die_reader.SeekToStart(section)) {
@@ -2083,8 +2083,9 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
 
   attr_reader.OnAttribute(
       DW_AT_stmt_list, [](InlinesDIE* die, dwarf::AttrValue data) {
-        if (!data.CoerceToUint()) return;
-        die->set_stmt_list(data.GetUint());
+        absl::optional<uint64_t> uint = data.ToUint();
+        if (!uint.has_value()) return;
+        die->set_stmt_list(uint.value());
       });
 
   if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
