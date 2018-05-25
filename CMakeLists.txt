@@ -98,9 +98,11 @@ add_library(libbloaty
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/numbers.cc
     third_party/abseil-cpp/absl/strings/str_cat.cc
-    third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
+    third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/substitute.cc
+    third_party/abseil-cpp/absl/types/bad_optional_access.cc
+    third_party/abseil-cpp/absl/types/optional.cc
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
