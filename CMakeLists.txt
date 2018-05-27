@@ -135,7 +135,7 @@ else()
     RUNTIME DESTINATION bin
   )
 
-enable_testing()
+  enable_testing()
 
   if(BUILD_TESTING)
     add_subdirectory(third_party/googletest)
@@ -164,6 +164,6 @@ enable_testing()
     add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
     add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
   endif()
-endif()
 
-install(EXPORT ${PROJECT_NAME}Targets NAMESPACE ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
+  install(EXPORT ${PROJECT_NAME}Targets NAMESPACE ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
+endif()
