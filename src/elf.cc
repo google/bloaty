@@ -823,6 +823,10 @@ static void ElfMachineToCapstone(Elf64_Half e_machine, cs_arch* arch,
       *arch = CS_ARCH_ARM;
       *mode = CS_MODE_LITTLE_ENDIAN;
       break;
+    case EM_AARCH64:
+      *arch = CS_ARCH_ARM64;
+      *mode = CS_MODE_ARM;
+      break;
     case EM_MIPS:
       *arch = CS_ARCH_MIPS;
       break;
