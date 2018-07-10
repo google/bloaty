@@ -472,9 +472,6 @@ struct RollupOutput {
         case bloaty::OutputFormat::kTSV:
           PrintToCSV(out, /*tabs=*/true);
           break;
-        case bloaty::OutputFormat::kTSV:
-          PrintToCSV(out, /*tabs=*/true);
-          break;
         default:
           BLOATY_UNREACHABLE();
       }
