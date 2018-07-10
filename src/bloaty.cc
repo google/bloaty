@@ -758,7 +758,7 @@ void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
                                  std::vector<std::string> parent_labels,
-                                 std::ostream* out) const {
+                                 std::ostream* out, bool tabs) const {
   while (parent_labels.size() < source_names_.size()) {
     // If this label had no data at this level, append an empty string.
     parent_labels.push_back("");
@@ -767,29 +767,31 @@ void RollupOutput::PrintRowToCSV(const RollupRow& row,
   parent_labels.push_back(std::to_string(row.vmsize));
   parent_labels.push_back(std::to_string(row.filesize));
 
-  *out << absl::StrJoin(parent_labels, ",") << "\n";
+  std::string sep = tabs ? "\t" : ",";
+  *out << absl::StrJoin(parent_labels, sep) << "\n";
 }
 
 void RollupOutput::PrintTreeToCSV(const RollupRow& row,
                                   std::vector<std::string> parent_labels,
-                                  std::ostream* out) const {
+                                  std::ostream* out, bool tabs) const {
   parent_labels.push_back(row.name);
   if (row.sorted_children.size() > 0) {
     for (const auto& child_row : row.sorted_children) {
-      PrintTreeToCSV(child_row, parent_labels, out);
+      PrintTreeToCSV(child_row, parent_labels, out, tabs);
     }
   } else {
-    PrintRowToCSV(row, parent_labels, out);
+    PrintRowToCSV(row, parent_labels, out, tabs);
   }
 }
 
-void RollupOutput::PrintToCSV(std::ostream* out) const {
+void RollupOutput::PrintToCSV(std::ostream* out, bool tabs) const {
   std::vector<std::string> names(source_names_);
   names.push_back("vmsize");
   names.push_back("filesize");
-  *out << absl::StrJoin(names, ",") << "\n";
+  std::string sep = tabs ? "\t" : ",";
+  *out << absl::StrJoin(names, sep) << "\n";
   for (const auto& child_row : toplevel_row_.sorted_children) {
-    PrintTreeToCSV(child_row, std::vector<std::string>(), out);
+    PrintTreeToCSV(child_row, std::vector<std::string>(), out, tabs);
   }
 }
 
@@ -1631,6 +1633,7 @@ USAGE: bloaty [OPTION]... FILE... [-- BASE_FILE...]
 Options:
 
   --csv              Output in CSV format instead of human-readable.
+  --tsv              Output in TSV format instead of human-readable.
   -c FILE            Load configuration from <file>.
   -d SOURCE,SOURCE   Comma-separated list of sources to scan.
   --debug-file=FILE  Use this file for debug symbols and/or symbol table.
@@ -1780,6 +1783,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       saw_separator = true;
     } else if (args.TryParseFlag("--csv")) {
       output_options->output_format = OutputFormat::kCSV;
+    } else if (args.TryParseFlag("--tsv")) {
+      output_options->output_format = OutputFormat::kTSV;
     } else if (args.TryParseOption("-c", &option)) {
       std::ifstream input_file(std::string(option), std::ios::in);
       if (!input_file.is_open()) {

@@ -442,6 +442,7 @@ struct RollupRow {
 enum class OutputFormat {
   kPrettyPrint,
   kCSV,
+  kTSV,
 };
 
 struct OutputOptions {
@@ -467,6 +468,9 @@ struct RollupOutput {
           break;
         case bloaty::OutputFormat::kCSV:
           PrintToCSV(out);
+          break;
+        case bloaty::OutputFormat::kTSV:
+          PrintToCSV(out, /*tabs=*/true);
           break;
         default:
           BLOATY_UNREACHABLE();
@@ -500,7 +504,7 @@ struct RollupOutput {
   bool diff_mode_ = false;
 
   void PrettyPrint(size_t max_label_len, std::ostream* out) const;
-  void PrintToCSV(std::ostream* out) const;
+  void PrintToCSV(std::ostream* out, bool tabs=false) const;
   size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
   void PrettyPrintRow(const RollupRow& row, size_t indent, size_t longest_row,
                       std::ostream* out) const;
@@ -508,10 +512,10 @@ struct RollupOutput {
                        std::ostream* out) const;
   void PrintRowToCSV(const RollupRow& row,
                      std::vector<std::string> parent_labels,
-                     std::ostream* out) const;
+                     std::ostream* out, bool tabs=false) const;
   void PrintTreeToCSV(const RollupRow& row,
                       std::vector<std::string> parent_labels,
-                      std::ostream* out) const;
+                      std::ostream* out, bool tabs=false) const;
 };
 
 bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,

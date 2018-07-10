@@ -133,6 +133,7 @@ USAGE: bloaty [options] file... [-- base_file...]
 Options:
 
   --csv              Output in CSV format instead of human-readable.
+  --tsv              Output in TSV format instead of human-readable.
   -c <file>          Load configuration from <file>.
   -d <sources>       Comma-separated list of sources to scan.
   -C <mode>          How to demangle symbols.  Possible values are:
