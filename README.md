@@ -3,15 +3,24 @@
 
 [![Build Status](https://travis-ci.org/google/bloaty.svg?branch=master)](https://travis-ci.org/google/bloaty)
 
-Ever wondered what's making your ELF or Mach-O binary big?
-Bloaty McBloatface will show you a size profile of the binary
-so you can understand what's taking up space inside.
+Ever wondered what's making your binary big?  Bloaty
+McBloatface will show you a size profile of the binary so
+you can understand what's taking up space inside.
 
 Bloaty works on binaries, shared objects, object files, and
-static libraries (`.a` files).  It supports ELF/DWARF and
-Mach-O, though the Mach-O support is much more preliminary
-(it shells out to `otool`/`symbols` instead of parsing the
-file directly).
+static libraries (`.a` files).  The following file formats
+are supported:
+
+* ELF
+* Mach-O
+* WebAssembly (experimental)
+
+These formats are NOT supported, but I am very interested
+in adding support for them (I may implement these myself but
+would also be happy to get contributions!)
+
+* PE/COFF (not supported)
+* Android APK (not supported, might be tricky due to compression)
 
 This is not an official Google product.
 

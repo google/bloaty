@@ -706,16 +706,36 @@ void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
        << PercentString(row.filepercent, diff_mode_) << "\n";
 }
 
+bool RollupOutput::IsSame(const std::string& a, const std::string& b) {
+  if (a == b) {
+    return true;
+  }
+
+  if (absl::EndsWith(b, a + "]") || absl::EndsWith(a, b + "]")) {
+    return true;
+  }
+
+  return false;
+}
+
 void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
                                    size_t longest_label,
                                    std::ostream* out) const {
   // Rows are printed before their sub-rows.
   PrettyPrintRow(row, indent, longest_label, out);
 
-  if (row.vmsize || row.filesize) {
-    for (const auto& child : row.sorted_children) {
-      PrettyPrintTree(child, indent + 4, longest_label, out);
-    }
+  if (!row.vmsize && !row.filesize) {
+    return;
+  }
+
+  if (row.sorted_children.size() == 1 &&
+      row.sorted_children[0].sorted_children.size() == 0 &&
+      IsSame(row.name, row.sorted_children[0].name)) {
+    return;
+  }
+
+  for (const auto& child : row.sorted_children) {
+    PrettyPrintTree(child, indent + 4, longest_label, out);
   }
 }
 
@@ -1264,6 +1284,10 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
 
   if (!object_file.get()) {
     object_file = TryOpenMachOFile(file);
+  }
+
+  if (!object_file.get()) {
+    object_file = TryOpenWebAssemblyFile(file);
   }
 
   if (!object_file.get()) {

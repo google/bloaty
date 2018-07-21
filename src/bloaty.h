@@ -302,6 +302,7 @@ class ObjectFile {
 
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
+std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(std::unique_ptr<InputFile>& file);
 
 namespace dwarf {
 
@@ -499,6 +500,7 @@ struct RollupOutput {
   // When we are in diff mode, rollup sizes are relative to the baseline.
   bool diff_mode_ = false;
 
+  static bool IsSame(const std::string& a, const std::string& b);
   void PrettyPrint(size_t max_label_len, std::ostream* out) const;
   void PrintToCSV(std::ostream* out) const;
   size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
