@@ -294,27 +294,26 @@ debug file match.  Otherwise the results would be nonsense
 easy mistake to make, and one that I made several times even
 as Bloaty's author!).
 
-Make sure you are compiling with build IDs enabled.  For gcc
-this happens automatically, but [Clang decided not to make
-this the default, since it makes the link
-slower](http://releases.llvm.org/3.9.0/tools/clang/docs/ReleaseNotes.html#major-new-features).
-For Clang add `-Wl,--build-id` to your link line.  (If you
-want a slightly faster link and don't care about
-reproducibility, you can use `-Wl,--build-id=uuid` instead).
-
-Then you can strip the binary and uses the unstripped binary
-as your debug file.  For example, with bloaty itself:
+If your binary has a build ID, then using separate debug
+files is as simple as:
 
 ```
 $ cp bloaty bloaty.stripped
 $ strip bloaty.stripped
-$ ./bloaty -d compileunits --debug-file=bloaty bloaty.stripped
+$ ./bloaty -d symbols --debug-file=bloaty bloaty.stripped
 ```
 
-It is also possible to remove debug sections only (see
-`objcopy --strip-debug`) while keeping the symbol table.
-You can also create debug file that contain *only* debug
-info (see `objcopy --only-keep-debug`).
+Some format-specific notes follow.
+
+## ELF
+
+For ELF, make sure you are compiling with build IDs enabled.
+With gcc this happens automatically, but [Clang decided not
+to make this the default, since it makes the link
+slower](http://releases.llvm.org/3.9.0/tools/clang/docs/ReleaseNotes.html#major-new-features).
+For Clang add `-Wl,--build-id` to your link line.  (If you
+want a slightly faster link and don't care about
+reproducibility, you can use `-Wl,--build-id=uuid` instead).
 
 Bloaty does not currently support the GNU debuglink or
 looking up debug files by build ID, [which are the methods
@@ -322,6 +321,17 @@ GDB uses to find debug
 files](https://sourceware.org/gdb/onlinedocs/gdb/Separate-Debug-Files.html).
 If there are use cases where Bloaty's `--debug-file` option
 won't work, we can reconsider implementing these.
+
+## Mach-O
+
+Mach-O files always have build IDs (as far as I can tell),
+so no special configuration is needed to make sure you get
+them.
+
+TODO: Mach-O puts debug info in separate files, which are
+created using `dsymutil`.  DWARF is not yet supported for
+Mach-O, but once it is then `--debug-file` will be necessary
+to help Bloaty find these separate debug files also.
 
 # Configuration Files
 
