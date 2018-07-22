@@ -102,7 +102,7 @@ bool ReadMagic(string_view* data) {
 
 class Section {
  public:
-  int id;
+  uint32_t id;
   std::string name;
   string_view data;
   string_view contents;
