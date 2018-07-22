@@ -416,7 +416,8 @@ void ParseLoadCommands(RangeSink* sink) {
       });
 }
 
-void ParseSymbolsFromSymbolTable(string_view command_data, string_view file_data, RangeSink* sink) {
+void ParseSymbolsFromSymbolTable(string_view command_data,
+                                 string_view file_data, RangeSink* sink) {
   auto symtab_cmd = GetStructPointer<symtab_command>(command_data);
 
   // TODO(haberman): use 32-bit symbol size where appropriate.
@@ -439,9 +440,9 @@ void ParseSymbolsFromSymbolTable(string_view command_data, string_view file_data
   }
 }
 
-void ParseSymbols(RangeSink* sink) {
+void ParseSymbols(string_view file_data, RangeSink* sink) {
   ForEachLoadCommand(
-      sink->input_file().data(), sink,
+      file_data, sink,
       [sink](uint32_t cmd, string_view command_data, string_view file_data) {
         switch (cmd) {
           case LC_SYMTAB:
@@ -478,8 +479,24 @@ class MachOObjectFile : public ObjectFile {
       : ObjectFile(std::move(file_data)) {}
 
   std::string GetBuildId() const override {
-    // TODO(haberman): implement.
-    return std::string();
+    std::string id;
+
+    ForEachLoadCommand(
+        file_data().data(), nullptr,
+        [&id](uint32_t cmd, string_view command_data,
+              string_view /* file_data */) {
+          if (cmd == LC_UUID) {
+            auto uuid_cmd =
+                GetStructPointerAndAdvance<uuid_command>(&command_data);
+            if (!command_data.empty()) {
+              THROWF("Unexpected excess uuid data: $0", command_data.size());
+            }
+            id.resize(sizeof(uuid_cmd->uuid));
+            memcpy(&id[0], &uuid_cmd->uuid[0], sizeof(uuid_cmd->uuid));
+          }
+        });
+
+    return id;
   }
 
   void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
@@ -493,7 +510,7 @@ class MachOObjectFile : public ObjectFile {
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ParseSymbols(sink);
+          ParseSymbols(debug_file().file_data().data(), sink);
           break;
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
