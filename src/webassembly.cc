@@ -68,12 +68,16 @@ bool ReadVarUInt1(string_view* data) {
   return static_cast<bool>(ReadLEB128Internal(false, 1, data));
 }
 
-char ReadVarUInt7(string_view* data) {
+uint8_t ReadVarUInt7(string_view* data) {
   return static_cast<char>(ReadLEB128Internal(false, 7, data));
 }
 
 uint32_t ReadVarUInt32(string_view* data) {
   return static_cast<uint32_t>(ReadLEB128Internal(false, 32, data));
+}
+
+int8_t ReadVarint7(string_view* data) {
+  return static_cast<int8_t>(ReadLEB128Internal(true, 7, data));
 }
 
 string_view ReadPiece(size_t bytes, string_view* data) {
@@ -165,6 +169,15 @@ const char* Section::names[] = {
   "Data",      // 11
 };
 
+struct ExternalKind {
+  enum Kind {
+    kFunction = 0,
+    kTable = 1,
+    kMemory = 2,
+    kGlobal = 3,
+  };
+};
+
 template <class Func>
 void ForEachSection(string_view file, Func&& section_func) {
   string_view data = file;
@@ -215,8 +228,74 @@ void ReadFunctionNames(const Section& section, FuncNames* names,
   }
 }
 
+int ReadValueType(string_view* data) {
+  return ReadVarint7(data);
+}
+
+int ReadElemType(string_view* data) {
+  return ReadVarint7(data);
+}
+
+void ReadResizableLimits(string_view* data) {
+  auto flags = ReadVarUInt1(data);
+  ReadVarUInt32(data);
+  if (flags) {
+    ReadVarUInt32(data);
+  }
+}
+
+void ReadGlobalType(string_view* data) {
+  ReadValueType(data);
+  ReadVarUInt1(data);
+}
+
+void ReadTableType(string_view* data) {
+  ReadElemType(data);
+  ReadResizableLimits(data);
+}
+
+void ReadMemoryType(string_view* data) {
+  ReadResizableLimits(data);
+}
+
+uint32_t GetNumFunctionImports(const Section& section) {
+  assert(section.id == Section::kImport);
+  string_view data = section.contents;
+
+  uint32_t count = ReadVarUInt32(&data);
+  uint32_t func_count = 0;
+
+  for (uint32_t i = 0; i < count; i++) {
+    uint32_t module_len = ReadVarUInt32(&data);
+    ReadPiece(module_len, &data);
+    uint32_t field_len = ReadVarUInt32(&data);
+    ReadPiece(field_len, &data);
+    auto kind = ReadMemcpy<uint8_t>(&data);
+
+    switch (kind) {
+      case ExternalKind::kFunction:
+        func_count++;
+        ReadVarUInt32(&data);
+        break;
+      case ExternalKind::kTable:
+        ReadTableType(&data);
+        break;
+      case ExternalKind::kMemory:
+        ReadMemoryType(&data);
+        break;
+      case ExternalKind::kGlobal:
+        ReadGlobalType(&data);
+        break;
+      default:
+        THROWF("Unrecognized import kind: $0", kind);
+    }
+  }
+
+  return func_count;
+}
+
 void ReadCodeSection(const Section& section, const FuncNames& names,
-                     RangeSink* sink) {
+                     uint32_t num_imports, RangeSink* sink) {
   string_view data = section.contents;
 
   uint32_t count = ReadVarUInt32(&data);
@@ -229,7 +308,7 @@ void ReadCodeSection(const Section& section, const FuncNames& names,
     func = func.substr(0, total_size);
     data = data.substr(size);
 
-    auto iter = names.find(i);
+    auto iter = names.find(num_imports + i);
 
     if (iter == names.end()) {
       std::string name = "func[" + std::to_string(i) + "]";
@@ -243,6 +322,7 @@ void ReadCodeSection(const Section& section, const FuncNames& names,
 void ParseSymbols(RangeSink* sink) {
   // First pass: read the custom naming section to get function names.
   std::unordered_map<int, std::string> func_names;
+  uint32_t num_imports = 0;
 
   ForEachSection(sink->input_file().data(),
                  [&func_names, sink](const Section& section) {
@@ -253,9 +333,11 @@ void ParseSymbols(RangeSink* sink) {
 
   // Second pass: read the function/code sections.
   ForEachSection(sink->input_file().data(),
-                 [&func_names, sink](const Section& section) {
-                   if (section.id == Section::kCode) {
-                     ReadCodeSection(section, func_names, sink);
+                 [&func_names, &num_imports, sink](const Section& section) {
+                   if (section.id == Section::kImport) {
+                     num_imports = GetNumFunctionImports(section);
+                   } else if (section.id == Section::kCode) {
+                     ReadCodeSection(section, func_names, num_imports, sink);
                    }
                  });
 }
