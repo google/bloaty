@@ -113,6 +113,19 @@ void MaybeAddOverhead(RangeSink* sink, const char* label, string_view data) {
   }
 }
 
+struct LoadCommand {
+  bool is64bit;
+  uint32_t cmd;
+  string_view command_data;
+  string_view file_data;
+};
+
+template <class Struct>
+bool Is64Bit() { return false; }
+
+template <>
+bool Is64Bit<mach_header_64>() { return true; }
+
 template <class Struct, class Func>
 void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
                           Func&& loadcmd_func) {
@@ -133,9 +146,14 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
       THROW("Mach-O load command had zero size.");
     }
 
-    string_view command_data = StrictSubstr(header_data, 0, command->cmdsize);
-    std::forward<Func>(loadcmd_func)(command->cmd, command_data, macho_data);
-    MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", command_data);
+    LoadCommand data;
+    data.is64bit = Is64Bit<Struct>();
+    data.cmd = command->cmd;
+    data.command_data = StrictSubstr(header_data, 0, command->cmdsize);
+    data.file_data = macho_data;
+    std::forward<Func>(loadcmd_func)(data);
+
+    MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", data.command_data);
     header_data = header_data.substr(command->cmdsize);
   }
 }
@@ -257,9 +275,8 @@ void AddSegmentAsFallback(string_view command_data, string_view file_data,
 }
 
 template <class Segment, class Section>
-void ParseSegment(string_view command_data, string_view file_data,
-                  RangeSink* sink) {
-  auto segment = GetStructPointerAndAdvance<Segment>(&command_data);
+void ParseSegment(LoadCommand cmd, RangeSink* sink) {
+  auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
 
   if (segment->maxprot == VM_PROT_NONE) {
     return;
@@ -270,11 +287,11 @@ void ParseSegment(string_view command_data, string_view file_data,
   if (sink->data_source() == DataSource::kSegments) {
     sink->AddRange(
         "macho_segment", segname, segment->vmaddr, segment->vmsize,
-        StrictSubstr(file_data, segment->fileoff, segment->filesize));
+        StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
   } else if (sink->data_source() == DataSource::kSections) {
     uint32_t nsects = segment->nsects;
     for (uint32_t j = 0; j < nsects; j++) {
-      auto section = GetStructPointerAndAdvance<Section>(&command_data);
+      auto section = GetStructPointerAndAdvance<Section>(&cmd.command_data);
 
       // filesize equals vmsize unless the section is zerofill
       uint64_t filesize = section->size;
@@ -291,119 +308,114 @@ void ParseSegment(string_view command_data, string_view file_data,
       std::string label = absl::StrJoin(
           std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
       sink->AddRange("macho_section", label, section->addr, section->size,
-                     StrictSubstr(file_data, section->offset, filesize));
+                     StrictSubstr(cmd.file_data, section->offset, filesize));
     }
   } else {
     BLOATY_UNREACHABLE();
   }
 }
 
-static void ParseDyldInfo(string_view command_data, string_view file_data,
-                          RangeSink* sink) {
-  auto info = GetStructPointer<dyld_info_command>(command_data);
+static void ParseDyldInfo(const LoadCommand& cmd, RangeSink* sink) {
+  auto info = GetStructPointer<dyld_info_command>(cmd.command_data);
 
   sink->AddFileRange(
       "macho_dyld", "Rebase Info",
-      StrictSubstr(file_data, info->rebase_off, info->rebase_size));
-  sink->AddFileRange("macho_dyld", "Binding Info",
-                     StrictSubstr(file_data, info->bind_off, info->bind_size));
+      StrictSubstr(cmd.file_data, info->rebase_off, info->rebase_size));
+  sink->AddFileRange(
+      "macho_dyld", "Binding Info",
+      StrictSubstr(cmd.file_data, info->bind_off, info->bind_size));
   sink->AddFileRange(
       "macho_dyld", "Weak Binding Info",
-      StrictSubstr(file_data, info->weak_bind_off, info->weak_bind_size));
+      StrictSubstr(cmd.file_data, info->weak_bind_off, info->weak_bind_size));
   sink->AddFileRange(
       "macho_dyld", "Lazy Binding Info",
-      StrictSubstr(file_data, info->lazy_bind_off, info->lazy_bind_size));
+      StrictSubstr(cmd.file_data, info->lazy_bind_off, info->lazy_bind_size));
   sink->AddFileRange(
       "macho_dyld", "Export Info",
-      StrictSubstr(file_data, info->export_off, info->export_size));
+      StrictSubstr(cmd.file_data, info->export_off, info->export_size));
 }
 
-static void ParseSymbolTable(string_view command_data, string_view file_data,
-                             RangeSink* sink) {
-  auto symtab = GetStructPointer<symtab_command>(command_data);
+static void ParseSymbolTable(const LoadCommand& cmd, RangeSink* sink) {
+  auto symtab = GetStructPointer<symtab_command>(cmd.command_data);
 
-  // TODO(haberman): use 32-bit symbol size where appropriate.
-  sink->AddFileRange("macho_symtab", "Symbol Table",
-                     StrictSubstr(file_data, symtab->symoff,
-                                  symtab->nsyms * sizeof(nlist_64)));
-  sink->AddFileRange("macho_symtab", "String Table",
-                     StrictSubstr(file_data, symtab->stroff, symtab->strsize));
+  size_t size = cmd.is64bit ? sizeof(nlist_64) : sizeof(struct nlist);
+  sink->AddFileRange(
+      "macho_symtab", "Symbol Table",
+      StrictSubstr(cmd.file_data, symtab->symoff, symtab->nsyms * size));
+  sink->AddFileRange(
+      "macho_symtab", "String Table",
+      StrictSubstr(cmd.file_data, symtab->stroff, symtab->strsize));
 }
 
-static void ParseDynamicSymbolTable(string_view command_data,
-                                    string_view file_data, RangeSink* sink) {
-  auto dysymtab = GetStructPointer<dysymtab_command>(command_data);
+static void ParseDynamicSymbolTable(const LoadCommand& cmd, RangeSink* sink) {
+  auto dysymtab = GetStructPointer<dysymtab_command>(cmd.command_data);
 
   sink->AddFileRange(
       "macho_dynsymtab", "Table of Contents",
-      StrictSubstr(file_data, dysymtab->tocoff,
+      StrictSubstr(cmd.file_data, dysymtab->tocoff,
                    dysymtab->ntoc * sizeof(dylib_table_of_contents)));
   sink->AddFileRange("macho_dynsymtab", "Module Table",
-                     StrictSubstr(file_data, dysymtab->modtaboff,
+                     StrictSubstr(cmd.file_data, dysymtab->modtaboff,
                                   dysymtab->nmodtab * sizeof(dylib_module_64)));
   sink->AddFileRange(
       "macho_dynsymtab", "Referenced Symbol Table",
-      StrictSubstr(file_data, dysymtab->extrefsymoff,
+      StrictSubstr(cmd.file_data, dysymtab->extrefsymoff,
                    dysymtab->nextrefsyms * sizeof(dylib_reference)));
   sink->AddFileRange("macho_dynsymtab", "Indirect Symbol Table",
-                     StrictSubstr(file_data, dysymtab->indirectsymoff,
+                     StrictSubstr(cmd.file_data, dysymtab->indirectsymoff,
                                   dysymtab->nindirectsyms * sizeof(uint32_t)));
   sink->AddFileRange("macho_dynsymtab", "External Relocation Entries",
-                     StrictSubstr(file_data, dysymtab->extreloff,
+                     StrictSubstr(cmd.file_data, dysymtab->extreloff,
                                   dysymtab->nextrel * sizeof(relocation_info)));
   sink->AddFileRange(
       "macho_dynsymtab", "Local Relocation Entries",
-      StrictSubstr(file_data, dysymtab->locreloff,
+      StrictSubstr(cmd.file_data, dysymtab->locreloff,
                    dysymtab->nlocrel * sizeof(struct relocation_info)));
 }
 
-static void ParseLinkeditCommand(string_view label, string_view command_data,
-                                 string_view file_data, RangeSink* sink) {
-  auto linkedit = GetStructPointer<linkedit_data_command>(command_data);
+static void ParseLinkeditCommand(string_view label, const LoadCommand& cmd,
+                                 RangeSink* sink) {
+  auto linkedit = GetStructPointer<linkedit_data_command>(cmd.command_data);
   sink->AddFileRange(
       "macho_linkedit", label,
-      StrictSubstr(file_data, linkedit->dataoff, linkedit->datasize));
+      StrictSubstr(cmd.file_data, linkedit->dataoff, linkedit->datasize));
 }
 
-void ParseLoadCommand(uint32_t cmd, string_view command_data,
-                      string_view file_data, RangeSink* sink) {
-  switch (cmd) {
+void ParseLoadCommand(const LoadCommand& cmd, RangeSink* sink) {
+  switch (cmd.cmd) {
     case LC_SEGMENT_64:
-      ParseSegment<segment_command_64, section_64>(command_data, file_data,
-                                                   sink);
+      ParseSegment<segment_command_64, section_64>(cmd, sink);
       break;
     case LC_SEGMENT:
-      ParseSegment<segment_command, section>(command_data, file_data, sink);
+      ParseSegment<segment_command, section>(cmd, sink);
       break;
     case LC_DYLD_INFO:
     case LC_DYLD_INFO_ONLY:
-      ParseDyldInfo(command_data, file_data, sink);
+      ParseDyldInfo(cmd, sink);
       break;
     case LC_SYMTAB:
-      ParseSymbolTable(command_data, file_data, sink);
+      ParseSymbolTable(cmd, sink);
       break;
     case LC_DYSYMTAB:
-      ParseDynamicSymbolTable(command_data, file_data, sink);
+      ParseDynamicSymbolTable(cmd, sink);
       break;
     case LC_CODE_SIGNATURE:
-      ParseLinkeditCommand("Code Signature", command_data, file_data, sink);
+      ParseLinkeditCommand("Code Signature", cmd, sink);
       break;
     case LC_SEGMENT_SPLIT_INFO:
-      ParseLinkeditCommand("Segment Split Info", command_data, file_data, sink);
+      ParseLinkeditCommand("Segment Split Info", cmd, sink);
       break;
     case LC_FUNCTION_STARTS:
-      ParseLinkeditCommand("Function Start Addresses", command_data, file_data,
-                           sink);
+      ParseLinkeditCommand("Function Start Addresses", cmd, sink);
       break;
     case LC_DATA_IN_CODE:
-      ParseLinkeditCommand("Table of Non-instructions", command_data, file_data,
-                           sink);
+      ParseLinkeditCommand("Table of Non-instructions", cmd, sink);
       break;
     case LC_DYLIB_CODE_SIGN_DRS:
-      ParseLinkeditCommand("Code Signing DRs", command_data, file_data, sink);
+      ParseLinkeditCommand("Code Signing DRs", cmd, sink);
       break;
     case LC_LINKER_OPTIMIZATION_HINT:
-      ParseLinkeditCommand("Optimization Hints", command_data, file_data, sink);
+      ParseLinkeditCommand("Optimization Hints", cmd, sink);
       break;
   }
 }
@@ -411,24 +423,21 @@ void ParseLoadCommand(uint32_t cmd, string_view command_data,
 void ParseLoadCommands(RangeSink* sink) {
   ForEachLoadCommand(
       sink->input_file().data(), sink,
-      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
-        ParseLoadCommand(cmd, command_data, file_data, sink);
-      });
+      [sink](const LoadCommand& cmd) { ParseLoadCommand(cmd, sink); });
 }
 
-void ParseSymbolsFromSymbolTable(string_view command_data,
-                                 string_view file_data, RangeSink* sink) {
-  auto symtab_cmd = GetStructPointer<symtab_command>(command_data);
+template <class NList>
+void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, RangeSink* sink) {
+  auto symtab_cmd = GetStructPointer<symtab_command>(cmd.command_data);
 
-  // TODO(haberman): use 32-bit symbol size where appropriate.
-  string_view symtab = StrictSubstr(file_data, symtab_cmd->symoff,
-                                    symtab_cmd->nsyms * sizeof(nlist_64));
+  string_view symtab = StrictSubstr(cmd.file_data, symtab_cmd->symoff,
+                                    symtab_cmd->nsyms * sizeof(NList));
   string_view strtab =
-      StrictSubstr(file_data, symtab_cmd->stroff, symtab_cmd->strsize);
+      StrictSubstr(cmd.file_data, symtab_cmd->stroff, symtab_cmd->strsize);
 
   uint32_t nsyms = symtab_cmd->nsyms;
   for (uint32_t i = 0; i < nsyms; i++) {
-    auto sym = GetStructPointerAndAdvance<nlist_64>(&symtab);
+    auto sym = GetStructPointerAndAdvance<NList>(&symtab);
 
     if (sym->n_type & N_STAB || sym->n_value == 0) {
       continue;
@@ -443,10 +452,14 @@ void ParseSymbolsFromSymbolTable(string_view command_data,
 void ParseSymbols(string_view file_data, RangeSink* sink) {
   ForEachLoadCommand(
       file_data, sink,
-      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
-        switch (cmd) {
+      [sink](const LoadCommand& cmd) {
+        switch (cmd.cmd) {
           case LC_SYMTAB:
-            ParseSymbolsFromSymbolTable(command_data, file_data, sink);
+            if (cmd.is64bit) {
+              ParseSymbolsFromSymbolTable<nlist_64>(cmd, sink);
+            } else {
+              ParseSymbolsFromSymbolTable<struct nlist>(cmd, sink);
+            }
             break;
           case LC_DYSYMTAB:
             //ParseSymbolsFromDynamicSymbolTable(command_data, file_data, sink);
@@ -458,15 +471,15 @@ void ParseSymbols(string_view file_data, RangeSink* sink) {
 static void AddMachOFallback(RangeSink* sink) {
   ForEachLoadCommand(
       sink->input_file().data(), sink,
-      [sink](uint32_t cmd, string_view command_data, string_view file_data) {
-        switch (cmd) {
+      [sink](const LoadCommand& cmd) {
+        switch (cmd.cmd) {
           case LC_SEGMENT_64:
             AddSegmentAsFallback<segment_command_64, section_64>(
-                command_data, file_data, sink);
+                cmd.command_data, cmd.file_data, sink);
             break;
           case LC_SEGMENT:
-            AddSegmentAsFallback<segment_command, section>(command_data,
-                                                           file_data, sink);
+            AddSegmentAsFallback<segment_command, section>(cmd.command_data,
+                                                           cmd.file_data, sink);
             break;
         }
       });
@@ -481,20 +494,17 @@ class MachOObjectFile : public ObjectFile {
   std::string GetBuildId() const override {
     std::string id;
 
-    ForEachLoadCommand(
-        file_data().data(), nullptr,
-        [&id](uint32_t cmd, string_view command_data,
-              string_view /* file_data */) {
-          if (cmd == LC_UUID) {
-            auto uuid_cmd =
-                GetStructPointerAndAdvance<uuid_command>(&command_data);
-            if (!command_data.empty()) {
-              THROWF("Unexpected excess uuid data: $0", command_data.size());
-            }
-            id.resize(sizeof(uuid_cmd->uuid));
-            memcpy(&id[0], &uuid_cmd->uuid[0], sizeof(uuid_cmd->uuid));
-          }
-        });
+    ForEachLoadCommand(file_data().data(), nullptr, [&id](LoadCommand cmd) {
+      if (cmd.cmd == LC_UUID) {
+        auto uuid_cmd =
+            GetStructPointerAndAdvance<uuid_command>(&cmd.command_data);
+        if (!cmd.command_data.empty()) {
+          THROWF("Unexpected excess uuid data: $0", cmd.command_data.size());
+        }
+        id.resize(sizeof(uuid_cmd->uuid));
+        memcpy(&id[0], &uuid_cmd->uuid[0], sizeof(uuid_cmd->uuid));
+      }
+    });
 
     return id;
   }
