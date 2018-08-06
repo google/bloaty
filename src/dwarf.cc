@@ -874,7 +874,6 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
     case DW_FORM_ref8:
       return AttrValue(ReadMemcpy<uint64_t>(data));
     case DW_FORM_addr:
-    case DW_FORM_ref_addr:
       switch (reader.unit_sizes().address_size()) {
         case 4:
           return AttrValue(ReadMemcpy<uint32_t>(data));
@@ -884,6 +883,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
           BLOATY_UNREACHABLE();
       }
     case DW_FORM_sec_offset:
+    case DW_FORM_ref_addr:
       if (reader.unit_sizes().dwarf64()) {
         return AttrValue(ReadMemcpy<uint64_t>(data));
       } else {

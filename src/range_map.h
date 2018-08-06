@@ -136,7 +136,7 @@ class RangeMap {
     }
   }
 
-  static const uint64_t kUnknownSize = UINT64_MAX;
+  static constexpr uint64_t kUnknownSize = UINT64_MAX;
 
  private:
   friend class RangeMapTest;

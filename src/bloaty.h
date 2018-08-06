@@ -220,7 +220,7 @@ class RangeSink {
   uint64_t TranslateFileToVM(const char* ptr);
   absl::string_view TranslateVMToFile(uint64_t address);
 
-  static const uint64_t kUnknownSize = RangeMap::kUnknownSize;
+  static constexpr uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeSink);

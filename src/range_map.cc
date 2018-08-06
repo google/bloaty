@@ -18,6 +18,8 @@
 
 namespace bloaty {
 
+constexpr uint64_t RangeMap::kUnknownSize;
+
 template <class T>
 uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) const {
   assert(EntryContains(iter, addr));

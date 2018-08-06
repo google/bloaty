@@ -329,10 +329,14 @@ Mach-O files always have build IDs (as far as I can tell),
 so no special configuration is needed to make sure you get
 them.
 
-TODO: Mach-O puts debug info in separate files, which are
-created using `dsymutil`.  DWARF is not yet supported for
-Mach-O, but once it is then `--debug-file` will be necessary
-to help Bloaty find these separate debug files also.
+Mach-O puts debug information in separate files which you
+can create with `dsymutil`:
+
+```
+$ dsymutil bloaty
+$ strip bloaty  (optional)
+$ ./bloaty -d symbols --debug-file=bloaty.dSYM/Contents/Resources/DWARF/bloaty bloaty
+```
 
 # Configuration Files
 
