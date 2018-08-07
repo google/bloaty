@@ -439,18 +439,28 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
   uint32_t nsyms = symtab_cmd->nsyms;
   for (uint32_t i = 0; i < nsyms; i++) {
     auto sym = GetStructPointerAndAdvance<NList>(&symtab);
+    string_view sym_range(reinterpret_cast<const char*>(sym), sizeof(NList));
 
     if (sym->n_type & N_STAB || sym->n_value == 0) {
       continue;
     }
 
     string_view name = ReadNullTerminated(strtab.substr(sym->n_un.n_strx));
-    sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
-                     ItaniumDemangle(name, sink->data_source()));
+
+    if (sink->data_source() >= DataSource::kSymbols) {
+      sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
+                       ItaniumDemangle(name, sink->data_source()));
+    }
+
     if (table) {
       table->insert(std::make_pair(
           name, std::make_pair(sym->n_value, RangeSink::kUnknownSize)));
     }
+
+    // Capture the trailing NULL.
+    name = string_view(name.data(), name.size() + 1);
+    sink->AddFileRangeFor("macho_symtab_name", sym->n_value, name);
+    sink->AddFileRangeFor("macho_symtab_sym", sym->n_value, sym_range);
   }
 }
 
@@ -612,6 +622,7 @@ class MachOObjectFile : public ObjectFile {
           dwarf::File dwarf;
           ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ParseSymbols(sink->input_file().data(), nullptr, sink);
           break;
         }
         case DataSource::kArchiveMembers:
