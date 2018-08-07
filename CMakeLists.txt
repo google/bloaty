@@ -136,34 +136,36 @@ else()
     RUNTIME DESTINATION bin
   )
 
-  enable_testing()
+  if (EXISTS "tests")
+    enable_testing()
 
-  if(BUILD_TESTING)
-    add_subdirectory(third_party/googletest)
-    include_directories(third_party/googletest/googletest/include)
-    include_directories(third_party/googletest/googlemock/include)
+    if(BUILD_TESTING)
+      add_subdirectory(third_party/googletest)
+      include_directories(third_party/googletest/googletest/include)
+      include_directories(third_party/googletest/googlemock/include)
 
-    set(TEST_TARGETS
-        bloaty_test
-        bloaty_misc_test
-        range_map_test
-        )
+      set(TEST_TARGETS
+          bloaty_test
+          bloaty_misc_test
+          range_map_test
+          )
 
-    foreach(target ${TEST_TARGETS})
-      add_executable(${target} tests/${target}.cc)
-      target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
-    endforeach(target)
+      foreach(target ${TEST_TARGETS})
+        add_executable(${target} tests/${target}.cc)
+        target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
+      endforeach(target)
 
-    add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
-    target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
+      add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
+      target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
 
-    file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
+      file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
 
-    add_test(NAME range_map_test COMMAND range_map_test)
-    add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
-    add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
-    add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
-    add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
+      add_test(NAME range_map_test COMMAND range_map_test)
+      add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
+      add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
+      add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
+      add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
+    endif()
   endif()
 
   install(EXPORT ${PROJECT_NAME}Targets NAMESPACE ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
