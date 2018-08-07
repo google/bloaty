@@ -988,8 +988,7 @@ static void ReadELFRelaEntries(const ElfFile::Section& section,
 //   .strtab
 //   .dynsym
 //   .dynstr
-static void ReadELFTables(const InputFile& file, DisassemblyInfo* info,
-                          RangeSink* sink) {
+static void ReadELFTables(const InputFile& file, RangeSink* sink) {
   bool is_object = IsObjectFile(file.data());
 
   // Disassemble first, because sometimes other tables will refer to things we
@@ -997,37 +996,36 @@ static void ReadELFTables(const InputFile& file, DisassemblyInfo* info,
   ReadELFSymbols(file, sink, nullptr, true);
 
   // Now scan other tables.
-  ForEachElf(
-      file, sink,
-      [&file, info, sink, is_object](
-          const ElfFile& elf, string_view /*filename*/, uint32_t index_base) {
-        for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
-          ElfFile::Section section;
-          elf.ReadSection(i, &section);
+  ForEachElf(file, sink,
+             [sink, is_object](const ElfFile& elf, string_view /*filename*/,
+                               uint32_t index_base) {
+               for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
+                 ElfFile::Section section;
+                 elf.ReadSection(i, &section);
 
-          switch (section.header().sh_type) {
-            case SHT_SYMTAB:
-            case SHT_DYNSYM:
-              ReadELFSymbolTableEntries(elf, section, index_base, is_object,
-                                        sink);
-              break;
-            case SHT_RELA:
-              ReadELFRelaEntries(section, index_base, is_object, sink);
-              break;
-          }
+                 switch (section.header().sh_type) {
+                   case SHT_SYMTAB:
+                   case SHT_DYNSYM:
+                     ReadELFSymbolTableEntries(elf, section, index_base,
+                                               is_object, sink);
+                     break;
+                   case SHT_RELA:
+                     ReadELFRelaEntries(section, index_base, is_object, sink);
+                     break;
+                 }
 
-          // We are looking by section name, which is a little different than
-          // what the loader actually does (which is find eh_frame_hdr from the
-          // program headers and then find eh_frame fde entries from there).
-          // But these section names should be standard enough that this
-          // approach works also.
-          if (section.GetName() == ".eh_frame") {
-            ReadEhFrame(section.contents(), sink);
-          } else if (section.GetName() == ".eh_frame_hdr") {
-            ReadEhFrameHdr(section.contents(), sink);
-          }
-        }
-      });
+                 // We are looking by section name, which is a little different
+                 // than what the loader actually does (which is find
+                 // eh_frame_hdr from the program headers and then find eh_frame
+                 // fde entries from there). But these section names should be
+                 // standard enough that this approach works also.
+                 if (section.GetName() == ".eh_frame") {
+                   ReadEhFrame(section.contents(), sink);
+                 } else if (section.GetName() == ".eh_frame_hdr") {
+                   ReadEhFrameHdr(section.contents(), sink);
+                 }
+               }
+             });
 }
 
 enum ReportSectionsBy {
@@ -1314,11 +1312,7 @@ class ElfObjectFile : public ObjectFile {
         case DataSource::kArchiveMembers:
           break;
         default: {
-          DisassemblyInfo info;
-          if (!DoGetDisassemblyInfo(nullptr, DataSource::kRawSymbols, &info)) {
-            THROW("Failed to get disassembly info!");
-          }
-          ReadELFTables(sink->input_file(), &info, sink);
+          ReadELFTables(sink->input_file(), sink);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           if (!IsObjectFile(sink->input_file().data())) {
             DoReadELFSegments(sink, kReportByEscapedSegmentName);
