@@ -62,28 +62,28 @@ On Linux you'll see output something like:
 ```
      VM SIZE                         FILE SIZE
  --------------                   --------------
-   0.0%       0 .debug_info        13.0Mi  37.6%
-   0.0%       0 .debug_loc         7.45Mi  21.5%
-   0.0%       0 .debug_str         5.14Mi  14.8%
-  40.1%  2.17Mi .text              2.17Mi   6.3%
-   0.0%       0 .debug_ranges      1.83Mi   5.3%
-  30.6%  1.66Mi .rodata            1.66Mi   4.8%
-   0.0%       0 .debug_line         878Ki   2.5%
-   0.0%       0 .strtab             458Ki   1.3%
-   7.1%   394Ki .rela.dyn           394Ki   1.1%
-   6.4%   357Ki .dynstr             357Ki   1.0%
-   5.5%   307Ki .data.rel.ro        307Ki   0.9%
-   0.0%       0 .debug_abbrev       283Ki   0.8%
-   4.2%   235Ki .eh_frame           235Ki   0.7%
-   0.0%       0 .symtab             187Ki   0.5%
-   2.2%   123Ki .dynsym             123Ki   0.3%
-   1.0%  54.1Ki .data              54.1Ki   0.2%
-   0.8%  44.6Ki .gcc_except_table  44.6Ki   0.1%
-   0.7%  39.6Ki .gnu.hash          39.6Ki   0.1%
-   0.7%  36.5Ki .eh_frame_hdr      36.5Ki   0.1%
-   0.5%  30.0Ki [24 Others]        29.7Ki   0.1%
-   0.0%       0 .debug_aranges     27.3Ki   0.1%
- 100.0%  5.42Mi TOTAL              34.7Mi 100.0%
+   0.0%       0 .debug_info        10.7Mi  37.1%
+   0.0%       0 .debug_loc         5.39Mi  18.6%
+   0.0%       0 .debug_str         4.48Mi  15.5%
+  37.7%  1.86Mi .text              1.86Mi   6.4%
+   0.0%       0 .debug_ranges      1.67Mi   5.8%
+  32.6%  1.61Mi .rodata            1.61Mi   5.6%
+   0.0%       0 .debug_line         856Ki   2.9%
+   0.0%       0 .strtab             470Ki   1.6%
+   7.2%   362Ki .dynstr             362Ki   1.2%
+   6.4%   321Ki .rela.dyn           321Ki   1.1%
+   6.1%   307Ki .data.rel.ro        307Ki   1.0%
+   0.0%       0 .debug_abbrev       241Ki   0.8%
+   4.6%   232Ki .eh_frame           232Ki   0.8%
+   0.0%       0 .symtab             188Ki   0.6%
+   2.5%   123Ki .dynsym             123Ki   0.4%
+   1.0%  48.4Ki .gcc_except_table  48.4Ki   0.2%
+   0.8%  39.8Ki .gnu.hash          39.8Ki   0.1%
+   0.7%  36.6Ki .eh_frame_hdr      36.6Ki   0.1%
+   0.0%       0 .debug_aranges     27.1Ki   0.1%
+   0.4%  17.7Ki [23 Others]        14.5Ki   0.0%
+   0.2%  10.3Ki .gnu.version       10.3Ki   0.0%
+ 100.0%  4.93Mi TOTAL              28.9Mi 100.0%
 ```
 
 The "VM SIZE" column tells you how much space the binary
@@ -104,58 +104,58 @@ can even break down by compile units and inlines!
 
 ```
 $ ./bloaty bloaty -d compileunits
-     VM SIZE                                                                                FILE SIZE
- --------------                                                                          --------------
-  62.3%  3.04Mi [None]                                                                    31.1Mi  94.4%
-  11.2%   557Ki [91 Others]                                                                556Ki   1.7%
-   3.7%   182Ki third_party/protobuf/src/google/protobuf/descriptor.cc                     179Ki   0.5%
-   3.2%   162Ki third_party/protobuf/src/google/protobuf/descriptor.pb.cc                  161Ki   0.5%
-   2.4%   117Ki third_party/capstone/arch/AArch64/AArch64InstPrinter.c                     117Ki   0.3%
-   2.1%   103Ki third_party/capstone/arch/ARM/ARMDisassembler.c                            103Ki   0.3%
-   1.9%  96.5Ki third_party/capstone/arch/Sparc/SparcInstPrinter.c                        96.5Ki   0.3%
-   1.6%  82.1Ki third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp               82.1Ki   0.2%
-   1.5%  74.7Ki third_party/capstone/arch/PowerPC/PPCInstPrinter.c                        74.7Ki   0.2%
-   1.2%  61.8Ki third_party/protobuf/src/google/protobuf/generated_message_reflection.cc  61.8Ki   0.2%
-   1.2%  59.8Ki src/bloaty.cc                                                             59.7Ki   0.2%
-   1.1%  55.1Ki third_party/protobuf/src/google/protobuf/text_format.cc                   55.1Ki   0.2%
-   0.9%  43.3Ki third_party/capstone/arch/ARM/ARMInstPrinter.c                            43.3Ki   0.1%
-   0.8%  41.9Ki third_party/re2/re2/parse.cc                                              41.9Ki   0.1%
-   0.8%  39.1Ki third_party/protobuf/src/google/protobuf/map_field.cc                     39.1Ki   0.1%
-   0.7%  36.1Ki third_party/protobuf/src/google/protobuf/wire_format.cc                   36.1Ki   0.1%
-   0.7%  36.0Ki src/dwarf.cc                                                              36.0Ki   0.1%
-   0.7%  35.3Ki third_party/re2/re2/re2.cc                                                35.3Ki   0.1%
-   0.7%  33.8Ki third_party/protobuf/src/google/protobuf/extension_set.cc                 33.8Ki   0.1%
-   0.6%  30.8Ki third_party/capstone/arch/AArch64/AArch64Disassembler.c                   30.8Ki   0.1%
-   0.6%  29.4Ki third_party/re2/re2/dfa.cc                                                29.4Ki   0.1%
- 100.0%  4.87Mi TOTAL                                                                     32.9Mi 100.0%
+     VM SIZE                                                                                   FILE SIZE
+ --------------                                                                             --------------
+  44.2%  2.18Mi [137 Others]                                                                 10.7Mi  36.9%
+   5.4%   271Ki ../third_party/protobuf/src/google/protobuf/descriptor.cc                    3.92Mi  13.5%
+   7.1%   360Ki ../third_party/protobuf/src/google/protobuf/descriptor.pb.cc                 2.39Mi   8.2%
+   8.3%   416Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c                           1.57Mi   5.4%
+   1.7%  87.4Ki ../third_party/protobuf/src/google/protobuf/text_format.cc                   1.00Mi   3.5%
+   2.1%   106Ki ../third_party/protobuf/src/google/protobuf/generated_message_reflection.cc   959Ki   3.2%
+   0.8%  38.1Ki ../third_party/protobuf/src/google/protobuf/descriptor_database.cc            771Ki   2.6%
+   1.5%  73.4Ki ../third_party/protobuf/src/google/protobuf/message.cc                        754Ki   2.5%
+   2.5%   126Ki ../src/bloaty.cc                                                              753Ki   2.5%
+   0.9%  43.5Ki ../third_party/re2/re2/dfa.cc                                                 648Ki   2.2%
+   1.2%  60.5Ki ../third_party/protobuf/src/google/protobuf/extension_set.cc                  610Ki   2.1%
+   0.8%  42.0Ki ../third_party/re2/re2/re2.cc                                                 595Ki   2.0%
+   0.6%  28.2Ki ../third_party/protobuf/src/google/protobuf/generated_message_util.cc         572Ki   1.9%
+   1.1%  56.5Ki ../third_party/protobuf/src/google/protobuf/map_field.cc                      565Ki   1.9%
+   0.8%  42.5Ki ../third_party/re2/re2/regexp.cc                                              543Ki   1.8%
+   1.8%  91.3Ki ../third_party/capstone/arch/AArch64/AArch64Disassembler.c                    523Ki   1.8%
+   1.0%  50.9Ki ../third_party/protobuf/src/google/protobuf/wire_format.cc                    520Ki   1.8%
+   1.8%  88.8Ki ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp                490Ki   1.7%
+   3.2%   163Ki ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c                     456Ki   1.5%
+   6.5%   329Ki ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c                     427Ki   1.4%
+   6.7%   337Ki ../third_party/capstone/arch/X86/X86Mapping.c                                 417Ki   1.4%
+ 100.0%  4.93Mi TOTAL                                                                        28.9Mi 100.0%
 ```
 
 
 Run Bloaty with `--help` to see a list of available options:
 
 ```
-$ ./bloaty --help
 Bloaty McBloatface: a size profiler for binaries.
 
-USAGE: bloaty [options] file... [-- base_file...]
+USAGE: bloaty [OPTION]... FILE... [-- BASE_FILE...]
 
 Options:
 
   --csv              Output in CSV format instead of human-readable.
   --tsv              Output in TSV format instead of human-readable.
-  -c <file>          Load configuration from <file>.
-  -d <sources>       Comma-separated list of sources to scan.
-  -C <mode>          How to demangle symbols.  Possible values are:
-  --demangle=<mode>    --demangle=none   no demangling, print raw symbols
+  -c FILE            Load configuration from <file>.
+  -d SOURCE,SOURCE   Comma-separated list of sources to scan.
+  --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  -C MODE            How to demangle symbols.  Possible values are:
+  --demangle=MODE      --demangle=none   no demangling, print raw symbols
                        --demangle=short  demangle, but omit arg/return types
                        --demangle=full   print full demangled type
                      The default is --demangle=short.
-  --disassemble=<function>
+  --disassemble=FUNCTION
                      Disassemble this function (EXPERIMENTAL)
-  -n <num>           How many rows to show per level before collapsing
+  -n NUM             How many rows to show per level before collapsing
                      other keys into '[Other]'.  Set to '0' for unlimited.
                      Defaults to 20.
-  -s <sortby>        Whether to sort by VM or File size.  Possible values
+  -s SORTBY          Whether to sort by VM or File size.  Possible values
                      are:
                        -s vm
                        -s file
@@ -226,55 +226,56 @@ a single hierarchical profile.  For example, we can use the
 
 ```
 $ bloaty -d segments,sections bloaty
-      VM SIZE                              FILE SIZE
+     VM SIZE                              FILE SIZE
  --------------                        --------------
-   0.0%       0 [Unmapped]              7.31Mi  94.2%
-      -NAN%       0 .debug_info             2.97Mi  40.6%
-      -NAN%       0 .debug_loc              2.30Mi  31.5%
-      -NAN%       0 .debug_str              1.03Mi  14.2%
-      -NAN%       0 .debug_ranges            611Ki   8.2%
-      -NAN%       0 .debug_line              218Ki   2.9%
-      -NAN%       0 .debug_abbrev           85.4Ki   1.1%
-      -NAN%       0 .strtab                 62.8Ki   0.8%
-      -NAN%       0 .symtab                 27.8Ki   0.4%
-      -NAN%       0 .debug_aranges          13.5Ki   0.2%
-      -NAN%       0 [Unmapped]              2.82Ki   0.0%
-      -NAN%       0 .shstrtab                  371   0.0%
-      -NAN%       0 .comment                    43   0.0%
-  99.2%   452Ki LOAD [RX]                452Ki   5.7%
-      73.4%   332Ki .text                    332Ki  73.4%
-      13.3%  60.0Ki .rodata                 60.0Ki  13.3%
-       7.0%  31.8Ki .eh_frame               31.8Ki   7.0%
-       2.3%  10.5Ki .gcc_except_table       10.5Ki   2.3%
-       0.9%  4.18Ki .eh_frame_hdr           4.18Ki   0.9%
-       0.8%  3.54Ki .dynsym                 3.54Ki   0.8%
-       0.8%  3.52Ki .dynstr                 3.52Ki   0.8%
-       0.7%  2.98Ki .rela.plt               2.98Ki   0.7%
-       0.4%  2.00Ki .plt                    2.00Ki   0.4%
-       0.1%     568 [ELF Headers]              568   0.1%
-       0.1%     408 .rela.dyn                  408   0.1%
-       0.1%     304 .gnu.version_r             304   0.1%
-       0.1%     302 .gnu.version               302   0.1%
-       0.0%     216 .gnu.hash                  216   0.0%
+   0.0%       0 [Unmapped]              24.0Mi  83.0%
+       NAN%       0 .debug_info             10.7Mi  44.7%
+       NAN%       0 .debug_loc              5.39Mi  22.4%
+       NAN%       0 .debug_str              4.48Mi  18.7%
+       NAN%       0 .debug_ranges           1.67Mi   6.9%
+       NAN%       0 .debug_line              856Ki   3.5%
+       NAN%       0 .strtab                  470Ki   1.9%
+       NAN%       0 .debug_abbrev            241Ki   1.0%
+       NAN%       0 .symtab                  188Ki   0.8%
+       NAN%       0 .debug_aranges          27.1Ki   0.1%
+       NAN%       0 .shstrtab                  390   0.0%
+       NAN%       0 [Unmapped]                 118   0.0%
+       NAN%       0 .comment                    28   0.0%
+  93.7%  4.62Mi LOAD [RX]               4.62Mi  16.0%
+      40.2%  1.86Mi .text                   1.86Mi  40.2%
+      34.8%  1.61Mi .rodata                 1.61Mi  34.8%
+       7.7%   362Ki .dynstr                  362Ki   7.7%
+       6.8%   321Ki .rela.dyn                321Ki   6.8%
+       4.9%   232Ki .eh_frame                232Ki   4.9%
+       2.6%   123Ki .dynsym                  123Ki   2.6%
+       1.0%  48.4Ki .gcc_except_table       48.4Ki   1.0%
+       0.8%  39.8Ki .gnu.hash               39.8Ki   0.8%
+       0.8%  36.6Ki .eh_frame_hdr           36.6Ki   0.8%
+       0.2%  10.3Ki .gnu.version            10.3Ki   0.2%
+       0.1%  4.36Ki .rela.plt               4.36Ki   0.1%
+       0.1%  2.92Ki .plt                    2.92Ki   0.1%
+       0.0%     624 [ELF Headers]              624   0.0%
+       0.0%     384 .gnu.version_r             384   0.0%
+       0.0%     104 .plt.got                   104   0.0%
+       0.0%      39 [LOAD [RX]]                 39   0.0%
        0.0%      36 .note.gnu.build-id          36   0.0%
        0.0%      32 .note.ABI-tag               32   0.0%
        0.0%      28 .interp                     28   0.0%
-       0.0%      26 .init                       26   0.0%
-       0.0%      18 [Unmapped]                  18   0.0%
-       0.0%       9 .fini                        9   0.0%
-   0.8%  3.46Ki LOAD [RW]               1.88Ki   0.0%
-      45.6%  1.58Ki .bss                         0   0.0%
-      29.3%  1.02Ki .got.plt                1.02Ki  54.1%
-      14.9%     528 .dynamic                   528  27.4%
-       7.1%     252 .data                      252  13.1%
-       1.4%      48 .init_array                 48   2.5%
-       0.7%      24 .got                        24   1.2%
-       0.5%      16 [Unmapped]                  16   0.8%
-       0.2%       8 .fini_array                  8   0.4%
-       0.2%       8 .jcr                         8   0.4%
-       0.1%       4 [None]                       0   0.0%
-   0.0%       0 [ELF Headers]           2.38Ki   0.0%
- 100.0%   456Ki TOTAL                   7.75Mi 100.0%
+       0.0%      23 .init                       23   0.0%
+       0.0%       9 [1 Others]                   9   0.0%
+   6.3%   316Ki LOAD [RW]                310Ki   1.0%
+      97.1%   307Ki .data.rel.ro             307Ki  99.1%
+       2.0%  6.20Ki .bss                         0   0.0%
+       0.5%  1.48Ki .got.plt                1.48Ki   0.5%
+       0.2%     560 .dynamic                   560   0.2%
+       0.1%     352 .init_array                352   0.1%
+       0.1%     328 .data                      328   0.1%
+       0.1%     192 .got                       192   0.1%
+       0.0%      56 [LOAD [RW]]                 32   0.0%
+       0.0%      16 .tdata                      16   0.0%
+       0.0%       8 .fini_array                  8   0.0%
+   0.0%       0 [ELF Headers]           2.50Ki   0.0%
+ 100.0%  4.93Mi TOTAL                   28.9Mi 100.0%
 ```
 
 Bloaty displays a maximum of 20 lines for each level; other
@@ -465,30 +466,30 @@ functions or variables.
 
 ```
 $ ./bloaty -d symbols bloaty
-      VM SIZE                                                                                        FILE SIZE
- --------------                                                                                  --------------
-  17.9%  81.9Ki [Unmapped]                                                                        7.39Mi  95.3%
-  62.3%   283Ki [Other]                                                                            284Ki   3.6%
-   2.7%  12.3Ki re2::RE2::Match(re2::StringPiece const&, int, int, re2::RE2::Anchor, re2::String  12.3Ki   0.2%
-   1.7%  7.83Ki re2::unicode_groups                                                               7.83Ki   0.1%
-   1.7%  7.56Ki re2::NFA::Search                                                                  7.56Ki   0.1%
-   1.3%  5.76Ki re2::BitState::TrySearch                                                          5.76Ki   0.1%
-   1.2%  5.43Ki bloaty::Bloaty::ScanAndRollupFile                                                 5.43Ki   0.1%
-   1.0%  4.49Ki re2::DFA::DFA                                                                     4.49Ki   0.1%
-   1.0%  4.35Ki bool bloaty::(anonymous namespace)::ForEachElf<bloaty::(anonymous namespace)::Do  4.35Ki   0.1%
-   1.0%  4.34Ki re2::Regexp::Parse                                                                4.34Ki   0.1%
-   0.9%  4.20Ki re2::RE2::Init                                                                    4.20Ki   0.1%
-   0.9%  4.09Ki re2::Prog::IsOnePass                                                              4.09Ki   0.1%
-   0.9%  4.04Ki re2::Compiler::PostVisit                                                          4.04Ki   0.1%
-   0.9%  4.04Ki bloaty::ReadDWARFInlines                                                          4.04Ki   0.1%
-   0.9%  3.91Ki re2::Regexp::FactorAlternationRecursive                                           3.91Ki   0.0%
-   0.8%  3.77Ki re2::DFA::RunStateOnByte                                                          3.77Ki   0.0%
-   0.8%  3.68Ki re2::unicode_casefold                                                             3.68Ki   0.0%
-   0.8%  3.52Ki bloaty::ElfFileHandler::ProcessFile                                               3.52Ki   0.0%
-   0.7%  3.40Ki re2::DFA::InlinedSearchLoop(re2::DFA::SearchParams*, bool, bool, bool) [clone .c  3.40Ki   0.0%
-   0.7%  3.38Ki re2::DFA::InlinedSearchLoop(re2::DFA::SearchParams*, bool, bool, bool) [clone .c  3.38Ki   0.0%
-   0.0%     165 [None]                                                                                 0   0.0%
- 100.0%   456Ki TOTAL                                                                             7.75Mi 100.0%
+     VM SIZE                                         FILE SIZE
+ --------------                                   --------------
+   0.0%       0 [section .debug_info]              10.7Mi  37.1%
+   0.0%       0 [section .debug_loc]               5.39Mi  18.6%
+   0.0%       0 [section .debug_str]               4.48Mi  15.5%
+  64.8%  3.20Mi [5661 Others]                      3.86Mi  13.3%
+   0.0%       0 [section .debug_ranges]            1.67Mi   5.8%
+   0.0%       0 [section .debug_line]               856Ki   2.9%
+  12.9%   648Ki insns                               648Ki   2.2%
+   0.0%       0 [section .debug_abbrev]             241Ki   0.8%
+   4.3%   217Ki ARMInsts                            217Ki   0.7%
+   3.7%   185Ki insn_name_maps                      185Ki   0.6%
+   2.3%   117Ki AArch64_printInst                   117Ki   0.4%
+   2.3%   117Ki x86DisassemblerTwoByteOpcodes       117Ki   0.4%
+   2.0%   101Ki Sparc_printInst                     101Ki   0.3%
+   1.5%  74.3Ki PPC_printInst                      74.4Ki   0.3%
+   1.1%  54.0Ki x86DisassemblerThreeByte38Opcodes  54.0Ki   0.2%
+   1.1%  53.0Ki DecoderTable32                     53.1Ki   0.2%
+   1.0%  48.4Ki [section .gcc_except_table]        48.4Ki   0.2%
+   0.8%  41.5Ki reg_name_maps                      41.7Ki   0.1%
+   0.8%  39.8Ki [section .gnu.hash]                39.8Ki   0.1%
+   0.8%  38.7Ki decodeInstruction_4.constprop.128  38.8Ki   0.1%
+   0.7%  37.8Ki printInstruction                   37.8Ki   0.1%
+ 100.0%  4.93Mi TOTAL                              28.9Mi 100.0%
 ```
 
 You can control how symbols are demangled with the `-C MODE`
@@ -563,30 +564,30 @@ can tell us a lot.
 
 ```
  $ ./bloaty -d compileunits bloaty
-     VM SIZE                            FILE SIZE
- --------------                      --------------
-  27.9%   128Ki [None]                7.43Mi  95.9%
-  12.9%  59.2Ki src/bloaty.cc         59.0Ki   0.7%
-   7.3%  33.4Ki re2/re2.cc            32.3Ki   0.4%
-   6.9%  31.6Ki re2/dfa.cc            31.6Ki   0.4%
-   6.8%  31.4Ki re2/parse.cc          31.4Ki   0.4%
-   6.7%  30.9Ki src/dwarf.cc          30.9Ki   0.4%
-   6.7%  30.6Ki re2/regexp.cc         27.8Ki   0.4%
-   5.1%  23.7Ki re2/compile.cc        23.7Ki   0.3%
-   4.3%  19.7Ki re2/simplify.cc       19.7Ki   0.2%
-   3.2%  14.8Ki src/elf.cc            14.8Ki   0.2%
-   3.1%  14.2Ki re2/nfa.cc            14.2Ki   0.2%
-   1.8%  8.34Ki re2/bitstate.cc       8.34Ki   0.1%
-   1.7%  7.84Ki re2/prog.cc           7.84Ki   0.1%
-   1.6%  7.13Ki re2/tostring.cc       7.13Ki   0.1%
-   1.5%  6.67Ki re2/onepass.cc        6.67Ki   0.1%
-   1.4%  6.58Ki src/macho.cc          6.58Ki   0.1%
-   0.7%  3.27Ki src/main.cc           3.27Ki   0.0%
-   0.2%     797 [Other]                  797   0.0%
-   0.1%     666 util/stringprintf.cc     666   0.0%
-   0.1%     573 util/strutil.cc          573   0.0%
-   0.1%     476 util/rune.cc             476   0.0%
- 100.0%   460Ki TOTAL                 7.75Mi 100.0%
+     VM SIZE                                                                                   FILE SIZE
+ --------------                                                                             --------------
+  44.2%  2.18Mi [137 Others]                                                                 10.7Mi  36.9%
+   5.4%   271Ki ../third_party/protobuf/src/google/protobuf/descriptor.cc                    3.92Mi  13.5%
+   7.1%   360Ki ../third_party/protobuf/src/google/protobuf/descriptor.pb.cc                 2.39Mi   8.2%
+   8.3%   416Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c                           1.57Mi   5.4%
+   1.7%  87.4Ki ../third_party/protobuf/src/google/protobuf/text_format.cc                   1.00Mi   3.5%
+   2.1%   106Ki ../third_party/protobuf/src/google/protobuf/generated_message_reflection.cc   959Ki   3.2%
+   0.8%  38.1Ki ../third_party/protobuf/src/google/protobuf/descriptor_database.cc            771Ki   2.6%
+   1.5%  73.4Ki ../third_party/protobuf/src/google/protobuf/message.cc                        754Ki   2.5%
+   2.5%   126Ki ../src/bloaty.cc                                                              753Ki   2.5%
+   0.9%  43.5Ki ../third_party/re2/re2/dfa.cc                                                 648Ki   2.2%
+   1.2%  60.5Ki ../third_party/protobuf/src/google/protobuf/extension_set.cc                  610Ki   2.1%
+   0.8%  42.0Ki ../third_party/re2/re2/re2.cc                                                 595Ki   2.0%
+   0.6%  28.2Ki ../third_party/protobuf/src/google/protobuf/generated_message_util.cc         572Ki   1.9%
+   1.1%  56.5Ki ../third_party/protobuf/src/google/protobuf/map_field.cc                      565Ki   1.9%
+   0.8%  42.5Ki ../third_party/re2/re2/regexp.cc                                              543Ki   1.8%
+   1.8%  91.3Ki ../third_party/capstone/arch/AArch64/AArch64Disassembler.c                    523Ki   1.8%
+   1.0%  50.9Ki ../third_party/protobuf/src/google/protobuf/wire_format.cc                    520Ki   1.8%
+   1.8%  88.8Ki ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp                490Ki   1.7%
+   3.2%   163Ki ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c                     456Ki   1.5%
+   6.5%   329Ki ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c                     427Ki   1.4%
+   6.7%   337Ki ../third_party/capstone/arch/X86/X86Mapping.c                                 417Ki   1.4%
+ 100.0%  4.93Mi TOTAL                                                                        28.9Mi 100.0%
 ```
 
 ## Inlines
@@ -844,12 +845,3 @@ enable a lot of features:
 - Visualize the dependency tree of symbols (probably as a
   dominator tree) so users can see the weight of their
   binary in this way.
-
-## Improving the quality of data sources
-
-One of the things we have to do in Bloaty is deal with
-incomplete information.  For examples, `.debug_aranges`
-which we use for the `compileunits` data source is often
-missing or incomplete.  Refining the input sources to be
-more complete and accurate will make help Bloaty's numbers
-be even more accurate.
