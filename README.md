@@ -34,7 +34,7 @@ $ cmake .
 $ make -j6
 ```
 
-To run tests, type:
+To run tests (Git only, these are not included in the release tarball), type:
 
 ```
 $ make test

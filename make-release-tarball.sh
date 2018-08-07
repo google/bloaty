@@ -19,6 +19,7 @@ FILES=$(git ls-files --exclude-standard --recurse-submodules |
           grep -v ^tests |
           grep -v third_party/protobuf |
           grep -v 'third_party/capstone/\(suite\|bindings\|xcode\|msvc\|contrib\)' |
+          grep -v third_party/abseil-cpp/absl/time/internal/cctz/testdata |
           grep -v ^.git)
 FILES="$FILES $(git ls-files --exclude-standard --recurse-submodules |
           grep 'third_party/protobuf/\(src\|cmake\|configure.ac\)')"
