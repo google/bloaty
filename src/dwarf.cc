@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/base/macros.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "absl/types/optional.h"
@@ -694,13 +695,11 @@ class DIEReader {
 
 bool DIEReader::ReadCode() {
   uint32_t code;
-  size_t offset;
 again:
   if (remaining_.empty()) {
     state_ = State::kEof;
     return false;
   }
-  offset = remaining_.data() - unit_range_.data();
   code = ReadLEB128<uint32_t>(&remaining_);
   if (code == 0) {
     // null entry terminates a chain of sibling entries.
@@ -897,6 +896,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       if (reader.unit_sizes().dwarf_version() <= 2) {
         goto address_size;
       }
+      ABSL_FALLTHROUGH_INTENDED;
     case DW_FORM_sec_offset:
       if (reader.unit_sizes().dwarf64()) {
         return AttrValue(ReadMemcpy<uint64_t>(data));
