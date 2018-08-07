@@ -32,7 +32,7 @@
 
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
-#include "capstone.h"
+#include "capstone/capstone.h"
 #include "re2/re2.h"
 
 #include "bloaty.pb.h"
