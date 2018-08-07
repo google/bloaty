@@ -140,7 +140,7 @@ else()
     RUNTIME DESTINATION bin
   )
 
-  if (EXISTS "tests")
+  if (IS_DIRECTORY "${PROJECT_SOURCE_DIR}/tests")
     enable_testing()
 
     if(BUILD_TESTING)
