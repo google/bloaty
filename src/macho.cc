@@ -427,7 +427,8 @@ void ParseLoadCommands(RangeSink* sink) {
 }
 
 template <class NList>
-void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, RangeSink* sink) {
+void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
+                                 RangeSink* sink) {
   auto symtab_cmd = GetStructPointer<symtab_command>(cmd.command_data);
 
   string_view symtab = StrictSubstr(cmd.file_data, symtab_cmd->symoff,
@@ -438,27 +439,41 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, RangeSink* sink) {
   uint32_t nsyms = symtab_cmd->nsyms;
   for (uint32_t i = 0; i < nsyms; i++) {
     auto sym = GetStructPointerAndAdvance<NList>(&symtab);
+    string_view sym_range(reinterpret_cast<const char*>(sym), sizeof(NList));
 
     if (sym->n_type & N_STAB || sym->n_value == 0) {
       continue;
     }
 
     string_view name = ReadNullTerminated(strtab.substr(sym->n_un.n_strx));
-    sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
-                     ItaniumDemangle(name, sink->data_source()));
+
+    if (sink->data_source() >= DataSource::kSymbols) {
+      sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
+                       ItaniumDemangle(name, sink->data_source()));
+    }
+
+    if (table) {
+      table->insert(std::make_pair(
+          name, std::make_pair(sym->n_value, RangeSink::kUnknownSize)));
+    }
+
+    // Capture the trailing NULL.
+    name = string_view(name.data(), name.size() + 1);
+    sink->AddFileRangeFor("macho_symtab_name", sym->n_value, name);
+    sink->AddFileRangeFor("macho_symtab_sym", sym->n_value, sym_range);
   }
 }
 
-void ParseSymbols(string_view file_data, RangeSink* sink) {
+void ParseSymbols(string_view file_data, SymbolTable* symtab, RangeSink* sink) {
   ForEachLoadCommand(
       file_data, sink,
-      [sink](const LoadCommand& cmd) {
+      [symtab, sink](const LoadCommand& cmd) {
         switch (cmd.cmd) {
           case LC_SYMTAB:
             if (cmd.is64bit) {
-              ParseSymbolsFromSymbolTable<nlist_64>(cmd, sink);
+              ParseSymbolsFromSymbolTable<nlist_64>(cmd, symtab, sink);
             } else {
-              ParseSymbolsFromSymbolTable<struct nlist>(cmd, sink);
+              ParseSymbolsFromSymbolTable<struct nlist>(cmd, symtab, sink);
             }
             break;
           case LC_DYSYMTAB:
@@ -484,6 +499,78 @@ static void AddMachOFallback(RangeSink* sink) {
         }
       });
   sink->AddFileRange("macho_fallback", "[Unmapped]", sink->input_file().data());
+}
+
+template <class Segment, class Section>
+void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf) {
+  auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
+
+  if (segment->maxprot == VM_PROT_NONE) {
+    return;
+  }
+
+  string_view segname = ArrayToStr(segment->segname, 16);
+
+  if (segname != "__DWARF") {
+    return;
+  }
+
+  uint32_t nsects = segment->nsects;
+  for (uint32_t j = 0; j < nsects; j++) {
+    auto section = GetStructPointerAndAdvance<Section>(&cmd.command_data);
+    string_view sectname = ArrayToStr(section->sectname, 16);
+
+    // filesize equals vmsize unless the section is zerofill
+    uint64_t filesize = section->size;
+    switch (section->flags & SECTION_TYPE) {
+      case S_ZEROFILL:
+      case S_GB_ZEROFILL:
+      case S_THREAD_LOCAL_ZEROFILL:
+        filesize = 0;
+        break;
+      default:
+        break;
+    }
+
+    string_view contents =
+        StrictSubstr(cmd.file_data, section->offset, filesize);
+
+    if (sectname == "__debug_aranges") {
+      dwarf->debug_aranges = contents;
+    } else if (sectname == "__debug_str") {
+      dwarf->debug_str = contents;
+    } else if (sectname == "__debug_info") {
+      dwarf->debug_info = contents;
+    } else if (sectname == "__debug_types") {
+      dwarf->debug_types = contents;
+    } else if (sectname == "__debug_abbrev") {
+      dwarf->debug_abbrev = contents;
+    } else if (sectname == "__debug_line") {
+      dwarf->debug_line = contents;
+    } else if (sectname == "__debug_loc") {
+      dwarf->debug_loc = contents;
+    } else if (sectname == "__debug_pubnames") {
+      dwarf->debug_pubnames = contents;
+    } else if (sectname == "__debug_pubtypes") {
+      dwarf->debug_pubtypes = contents;
+    } else if (sectname == "__debug_ranges") {
+      dwarf->debug_ranges = contents;
+    }
+  }
+}
+
+static void ReadDebugSectionsFromMachO(const InputFile& file, dwarf::File* dwarf) {
+  ForEachLoadCommand(file.data(), nullptr, [dwarf](const LoadCommand& cmd) {
+    switch (cmd.cmd) {
+      case LC_SEGMENT_64:
+        ReadDebugSectionsFromSegment<segment_command_64, section_64>(cmd,
+                                                                     dwarf);
+        break;
+      case LC_SEGMENT:
+        ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf);
+        break;
+    }
+  });
 }
 
 class MachOObjectFile : public ObjectFile {
@@ -520,10 +607,25 @@ class MachOObjectFile : public ObjectFile {
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          ParseSymbols(debug_file().file_data().data(), sink);
+          ParseSymbols(debug_file().file_data().data(), nullptr, sink);
           break;
+        case DataSource::kCompileUnits: {
+          SymbolTable symtab;
+          DualMap symbol_map;
+          NameMunger empty_munger;
+          RangeSink symbol_sink(&debug_file().file_data(),
+                                sink->options(),
+                                DataSource::kRawSymbols,
+                                &sinks[0]->MapAtIndex(0));
+          symbol_sink.AddOutput(&symbol_map, &empty_munger);
+          ParseSymbols(debug_file().file_data().data(), &symtab, &symbol_sink);
+          dwarf::File dwarf;
+          ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf);
+          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ParseSymbols(sink->input_file().data(), nullptr, sink);
+          break;
+        }
         case DataSource::kArchiveMembers:
-        case DataSource::kCompileUnits:
         case DataSource::kInlines:
         default:
           THROW("Mach-O doesn't support this data source");

@@ -98,6 +98,7 @@ constexpr DataSourceDefinition data_sources[] = {
      "raw ranges of previous data source."},
     {DataSource::kSections, "sections", "object file section"},
     {DataSource::kSegments, "segments", "load commands in the binary"},
+    // We require that all symbols sources are >= kSymbols.
     {DataSource::kSymbols, "symbols",
      "symbols from symbol table (configure demangling with --demangle)"},
     {DataSource::kRawSymbols, "rawsymbols", "unmangled symbols"},
@@ -816,6 +817,8 @@ void RollupOutput::PrintToCSV(std::ostream* out, bool tabs) const {
 }
 
 // RangeMap ////////////////////////////////////////////////////////////////////
+
+constexpr uint64_t RangeSink::kUnknownSize;
 
 
 // MmapInputFile ///////////////////////////////////////////////////////////////

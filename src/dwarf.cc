@@ -183,6 +183,9 @@ class CompilationUnitSizes {
   // The size of addresses.  Guaranteed to be either 4 or 8.
   uint8_t address_size() const { return address_size_; }
 
+  // DWARF version of this unit.
+  uint8_t dwarf_version() const { return dwarf_version_; }
+
   void SetAddressSize(uint8_t address_size) {
     if (address_size != 4 && address_size != 8) {
       THROWF("Unexpected address size: $0", address_size);
@@ -243,7 +246,12 @@ class CompilationUnitSizes {
     return unit;
   }
 
+  void ReadDWARFVersion(string_view* data) {
+    dwarf_version_ = ReadMemcpy<uint16_t>(data);
+  }
+
  private:
+  uint16_t dwarf_version_;
   bool dwarf64_;
   uint8_t address_size_;
 };
@@ -422,9 +430,9 @@ bool AddressRanges::NextUnit() {
   }
 
   unit_remaining_ = sizes_.ReadInitialLength(&next_unit_);
-  uint16_t version = ReadMemcpy<uint16_t>(&unit_remaining_);
+  sizes_.ReadDWARFVersion(&unit_remaining_);
 
-  if (version > 2) {
+  if (sizes_.dwarf_version() > 2) {
     THROW("DWARF data is too new for us");
   }
 
@@ -686,11 +694,13 @@ class DIEReader {
 
 bool DIEReader::ReadCode() {
   uint32_t code;
+  size_t offset;
 again:
   if (remaining_.empty()) {
     state_ = State::kEof;
     return false;
   }
+  offset = remaining_.data() - unit_range_.data();
   code = ReadLEB128<uint32_t>(&remaining_);
   if (code == 0) {
     // null entry terminates a chain of sibling entries.
@@ -748,9 +758,9 @@ bool DIEReader::ReadCompilationUnitHeader() {
   unit_range_ = unit_range_.substr(
       0, remaining_.size() + (remaining_.data() - unit_range_.data()));
 
-  uint16_t version = ReadMemcpy<uint16_t>(&remaining_);
+  unit_sizes_.ReadDWARFVersion(&remaining_);
 
-  if (version > 4) {
+  if (unit_sizes_.dwarf_version() > 4) {
     THROW("Data is in new DWARF format we don't understand");
   }
 
@@ -874,7 +884,7 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
     case DW_FORM_ref8:
       return AttrValue(ReadMemcpy<uint64_t>(data));
     case DW_FORM_addr:
-    case DW_FORM_ref_addr:
+    address_size:
       switch (reader.unit_sizes().address_size()) {
         case 4:
           return AttrValue(ReadMemcpy<uint32_t>(data));
@@ -882,6 +892,10 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
           return AttrValue(ReadMemcpy<uint64_t>(data));
         default:
           BLOATY_UNREACHABLE();
+      }
+    case DW_FORM_ref_addr:
+      if (reader.unit_sizes().dwarf_version() <= 2) {
+        goto address_size;
       }
     case DW_FORM_sec_offset:
       if (reader.unit_sizes().dwarf64()) {
@@ -1108,13 +1122,13 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
 
   sizes_.SetAddressSize(address_size);
   data = sizes_.ReadInitialLength(&data);
-  uint16_t version = ReadMemcpy<uint16_t>(&data);
+  sizes_.ReadDWARFVersion(&data);
   uint64_t header_length = sizes_.ReadDWARFOffset(&data);
   string_view program = data;
   SkipBytes(header_length, &program);
 
   params_.minimum_instruction_length = ReadMemcpy<uint8_t>(&data);
-  if (version == 4) {
+  if (sizes_.dwarf_version() == 4) {
     params_.maximum_operations_per_instruction = ReadMemcpy<uint8_t>(&data);
 
     if (params_.maximum_operations_per_instruction == 0) {
@@ -1630,7 +1644,7 @@ static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
     string_view unit = sizes.ReadInitialLength(&remaining);
     full_unit =
         full_unit.substr(0, unit.size() + (unit.data() - full_unit.data()));
-    dwarf::SkipBytes(2, &unit);
+    sizes.ReadDWARFVersion(&unit);
     uint64_t debug_info_offset = sizes.ReadDWARFOffset(&unit);
     bool ok = die_reader.SeekToCompilationUnit(
         dwarf::DIEReader::Section::kDebugInfo, debug_info_offset);
