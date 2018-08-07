@@ -20,7 +20,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
-#include "capstone.h"
+#include "capstone/capstone.h"
 
 static void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);

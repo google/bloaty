@@ -1,5 +1,6 @@
-cmake_minimum_required (VERSION 2.6)
-project (Bloaty)
+cmake_minimum_required (VERSION 3.0)
+cmake_policy(SET CMP0048 NEW)
+project (Bloaty VERSION 1.0)
 
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
@@ -94,6 +95,9 @@ add_library(libbloaty
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
     third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
     third_party/abseil-cpp/absl/strings/ascii.cc
+    third_party/abseil-cpp/absl/strings/charconv.cc
+    third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
+    third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
     third_party/abseil-cpp/absl/strings/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
     third_party/abseil-cpp/absl/strings/internal/utf8.cc

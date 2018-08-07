@@ -1884,6 +1884,9 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
     } else if (args.TryParseFlag("--help")) {
       fputs(usage, stderr);
       return false;
+    } else if (args.TryParseFlag("--version")) {
+      printf("Bloaty McBloatface 1.0\n");
+      exit(0);
     } else if (absl::StartsWith(args.Arg(), "-")) {
       if (skip_unknown) {
         args.ConsumeAndSaveArg();
