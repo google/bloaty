@@ -46,7 +46,7 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1")
 
 if(APPLE)
 elseif(UNIX)
-  set(CMAKE_EXE_LINKER_FLAGS "-Wl,--build-id")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--build-id")
 endif()
 
 # When using Ninja, compiler output won't be colorized without this.
