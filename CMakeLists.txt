@@ -5,6 +5,7 @@ project (Bloaty VERSION 1.0)
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
 option(BLOATY_ENABLE_UBSAN "Enable undefined behavior sanitizer." OFF)
+option(USE_SYSTEM_PROTOBUF "Use system protobuf instead of bundled" OFF)
 
 # Set default build type.
 if(NOT CMAKE_BUILD_TYPE)
@@ -24,16 +25,27 @@ endif()
 set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
 set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
 set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
-set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
-set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
 add_definitions(-D_LIBCXXABI_FUNC_VIS=)  # For Demumble.
 add_subdirectory(third_party/re2)
 add_subdirectory(third_party/capstone)
-add_subdirectory(third_party/protobuf/cmake)
 
+if(NOT USE_SYSTEM_PROTOBUF)
+    set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
+    set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
+    add_subdirectory(third_party/protobuf/cmake)
+    include_directories(third_party/protobuf/src)
+    # Need to build protoc, so depend on it
+    set(protobuf_DEPENDS protoc)
+    set(Protobuf_PROTOC_EXECUTABLE protoc)
+    set(Protobuf_LIBRARY "libprotoc")
+else()
+    find_package(Protobuf REQUIRED)
+    # Assume protobuf
+    set(protobuf_DEPENDS "")
+    include_directories(Protobuf::libprotobuf)
+endif()
 include_directories(third_party/capstone/include)
 include_directories(third_party/re2)
-include_directories(third_party/protobuf/src)
 include_directories(.)
 include_directories(src)
 include_directories(third_party/abseil-cpp)
@@ -75,13 +87,13 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
-  DEPENDS protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
-  COMMAND protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+  DEPENDS ${protobuf_DEPENDS} ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+  COMMAND ${Protobuf_PROTOC_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
       --cpp_out=${CMAKE_CURRENT_BINARY_DIR}/src
       -I${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-add_library(libbloaty
+add_library(libbloaty SHARED
     src/bloaty.cc
     src/demangle.cc
     src/disassemble.cc
@@ -113,7 +125,7 @@ add_library(libbloaty
     )
 
 
-set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
+set(LIBBLOATY_LIBS libbloaty "${Protobuf_LIBRARY}" re2 capstone-static)
 
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
@@ -135,9 +147,10 @@ else()
   endif()
 
   install(
-    TARGETS bloaty
+    TARGETS bloaty libbloaty
     EXPORT ${PROJECT_NAME}Targets
     RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
   )
 
   if (IS_DIRECTORY "${PROJECT_SOURCE_DIR}/tests")
