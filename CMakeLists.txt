@@ -43,6 +43,7 @@ else()
     # Assume protobuf
     set(protobuf_DEPENDS "")
     include_directories(Protobuf::libprotobuf)
+    set(BLOATY_LIBRARY_TYPE SHARED)
 endif()
 include_directories(third_party/capstone/include)
 include_directories(third_party/re2)
@@ -93,7 +94,7 @@ add_custom_command(
       -I${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-add_library(libbloaty SHARED
+add_library(libbloaty ${BLOATY_LIBRARY_TYPE}
     src/bloaty.cc
     src/demangle.cc
     src/disassemble.cc
@@ -151,6 +152,7 @@ else()
     EXPORT ${PROJECT_NAME}Targets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
   )
 
   if (IS_DIRECTORY "${PROJECT_SOURCE_DIR}/tests")
