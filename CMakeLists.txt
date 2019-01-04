@@ -5,6 +5,34 @@ project (Bloaty VERSION 1.0)
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
 option(BLOATY_ENABLE_UBSAN "Enable undefined behavior sanitizer." OFF)
+option(BLOATY_ENABLE_CMAKETARGETS "Enable installing cmake target files." ON)
+option(BLOATY_ENABLE_BUILDID "Enable build id." ON)
+
+if(UNIX)
+find_package(PkgConfig)
+if(${PKG_CONFIG_FOUND})
+pkg_search_module(RE2 re2)
+pkg_search_module(CAPSTONE capstone)
+pkg_search_module(PROTOBUF protobuf)
+if(${RE2_FOUND})
+  MESSAGE(STATUS "System re2 found, using")
+else(${RE2_FOUND})
+  MESSAGE(STATUS "System re2 not found, using bundled version")
+endif(${RE2_FOUND})
+if(${CAPSTONE_FOUND})
+  MESSAGE(STATUS "System capstone found, using")
+else(${CAPSTONE_FOUND})
+  MESSAGE(STATUS "System capstone not found, using bundled version")
+endif(${CAPSTONE_FOUND})
+if(${PROTOBUF_FOUND})
+  MESSAGE(STATUS "System protobuf found, using")
+else(${PROTOBUF_FOUND})
+  MESSAGE(STATUS "System protobuf not found, using bundled version")
+endif(${PROTOBUF_FOUND})
+else(${PKG_CONFIG_FOUND})
+  MESSAGE(STATUS "pkg-config not found, using bundled dependencies")
+endif(${PKG_CONFIG_FOUND})
+endif(UNIX)
 
 # Set default build type.
 if(NOT CMAKE_BUILD_TYPE)
@@ -21,19 +49,42 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules")
 endif()
 
 # Add third_party libraries, disabling as much as we can of their builds.
-set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
-set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
-set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
-set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
-set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
-add_definitions(-D_LIBCXXABI_FUNC_VIS=)  # For Demumble.
-add_subdirectory(third_party/re2)
-add_subdirectory(third_party/capstone)
-add_subdirectory(third_party/protobuf/cmake)
 
-include_directories(third_party/capstone/include)
-include_directories(third_party/re2)
-include_directories(third_party/protobuf/src)
+add_definitions(-D_LIBCXXABI_FUNC_VIS=)  # For Demumble.
+
+if(UNIX)
+  if(${RE2_FOUND})
+    include_directories(${RE2_INCLUDE_DIRS})
+  else(${RE2_FOUND})
+    set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
+    add_subdirectory(third_party/re2)
+    include_directories(third_party/re2)
+  endif(${RE2_FOUND})
+  if(${CAPSTONE_FOUND})
+    include_directories(${CAPSTONE_INCLUDE_DIRS})
+  else(${CAPSTONE_FOUND})
+    set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
+    set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
+    add_subdirectory(third_party/capstone)
+    include_directories(third_party/capstone/include)
+  endif(${CAPSTONE_FOUND})
+  if(${PROTOBUF_FOUND})
+    include_directories(${PROTOBUF_INCLUDE_DIRS})
+  else(${PROTOBUF_FOUND})
+    set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
+    set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
+    add_subdirectory(third_party/protobuf/cmake)
+    include_directories(third_party/protobuf/src)
+  endif(${PROTOBUF_FOUND})
+else(UNIX)
+  add_subdirectory(third_party/re2)
+  add_subdirectory(third_party/capstone)
+  add_subdirectory(third_party/protobuf/cmake)
+  include_directories(third_party/re2)
+  include_directories(third_party/capstone/include)
+  include_directories(third_party/protobuf/src)
+endif(UNIX)
+
 include_directories(.)
 include_directories(src)
 include_directories(third_party/abseil-cpp)
@@ -47,7 +98,9 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1")
 
 if(APPLE)
 elseif(UNIX)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--build-id")
+  if(BLOATY_ENABLE_BUILDID)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--build-id")
+  endif(BLOATY_ENABLE_BUILDID)
 endif()
 
 # When using Ninja, compiler output won't be colorized without this.
@@ -73,6 +126,7 @@ if(DEFINED ENV{CXXFLAGS})
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
+if(${PROTOC_FOUND})
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
   DEPENDS protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
@@ -80,6 +134,14 @@ add_custom_command(
       --cpp_out=${CMAKE_CURRENT_BINARY_DIR}/src
       -I${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+else(${PROTOC_FOUND})
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
+  COMMAND protoc ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty.proto
+      --cpp_out=${CMAKE_CURRENT_BINARY_DIR}/src
+      -I${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+endif(${PROTOC_FOUND})
 
 add_library(libbloaty
     src/bloaty.cc
@@ -112,9 +174,38 @@ add_library(libbloaty
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
 
+if(UNIX)
+  set(LIBBLOATY_LIBS libbloaty)
+  if(${PROTOBUF_FOUND})
+    set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} ${PROTOBUF_LIBRARIES})
+  else(${PROTOBUF_FOUND})
+    set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} libprotoc)
+  endif(${PROTOBUF_FOUND})
+  if(${RE2_FOUND})
+    set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} ${RE2_LIBRARIES})
+  else(${RE2_FOUND})
+    set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} re2)
+  endif(${RE2_FOUND})
+  if(${CAPSTONE_FOUND})
+    set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} ${CAPSTONE_LIBRARIES})
+  else(${CAPSTONE_FOUND})
+    set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} capstone-static)
+  endif(${CAPSTONE_FOUND})
+else(UNIX)
+    set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
+endif(UNIX)
 
-set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
-
+if(UNIX)
+  if(${RE2_FOUND})
+    link_directories(${RE2_LIBRARY_DIRS})
+  endif(${RE2_FOUND})
+  if(${CAPSTONE_FOUND})
+    link_directories(${CAPSTONE_LIBRARY_DIRS})
+  endif(${CAPSTONE_FOUND})
+  if(${PROTOBUF_FOUND})
+    link_directories(${PROTOBUF_LIBRARY_DIRS})
+  endif(${PROTOBUF_FOUND})
+endif(UNIX)
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
   message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
@@ -134,11 +225,18 @@ else()
     target_link_libraries(bloaty "${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
-  install(
-    TARGETS bloaty
-    EXPORT ${PROJECT_NAME}Targets
-    RUNTIME DESTINATION bin
-  )
+  if(BLOATY_ENABLE_CMAKETARGETS)
+    install(
+      TARGETS bloaty
+      EXPORT ${PROJECT_NAME}Targets
+      RUNTIME DESTINATION bin
+    )
+  else(BLOATY_ENABLE_CMAKETARGETS)
+    install(
+      TARGETS bloaty
+      RUNTIME DESTINATION bin
+    )
+  endif(BLOATY_ENABLE_CMAKETARGETS)
 
   if (IS_DIRECTORY "${PROJECT_SOURCE_DIR}/tests")
     enable_testing()
@@ -172,5 +270,7 @@ else()
     endif()
   endif()
 
-  install(EXPORT ${PROJECT_NAME}Targets NAMESPACE ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
+  if(BLOATY_ENABLE_CMAKETARGETS)
+    install(EXPORT ${PROJECT_NAME}Targets NAMESPACE ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
+  endif(BLOATY_ENABLE_CMAKETARGETS)
 endif()
