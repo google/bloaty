@@ -16,3 +16,7 @@
 [submodule "third_party/demumble"]
 	path = third_party/demumble
 	url = https://github.com/nico/demumble.git
+[submodule "third_party/rustc-demangle"]
+	path = third_party/rustc-demangle
+	url = https://github.com/zokier/rustc-demangle.git
+	branch = capi

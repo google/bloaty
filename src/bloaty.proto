@@ -44,6 +44,7 @@ message Options {
     DEMANGLE_SHORT = 0;
     DEMANGLE_FULL = 1;
     DEMANGLE_NONE = 2;
+    DEMANGLE_RUST = 3;
   }
   optional Demangle demangle = 5 [default = DEMANGLE_SHORT];
 

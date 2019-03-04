@@ -73,6 +73,15 @@ static void Throw(const char *str, int line) {
     printf("WARNING: %s\n", absl::Substitute(__VA_ARGS__).c_str()); \
   }
 
+#ifdef BLOATY_ENABLE_RUSTC_DEMANGLE
+#include "rustc_demangle.h"
+#else
+int rustc_demangle(const char *mangled, char *out, size_t out_size) {
+    THROW("rustc-demangle not enabled");
+    return 0;
+}
+#endif
+
 namespace bloaty {
 
 // Use a global since we would have to plumb it through so many call-stacks
@@ -103,6 +112,7 @@ constexpr DataSourceDefinition data_sources[] = {
      "symbols from symbol table (configure demangling with --demangle)"},
     {DataSource::kRawSymbols, "rawsymbols", "unmangled symbols"},
     {DataSource::kFullSymbols, "fullsymbols", "full demangled symbols"},
+    {DataSource::kRustSymbols, "rustsymbols", "rust demangled symbols"},
     {DataSource::kShortSymbols, "shortsymbols", "short demangled symbols"},
 };
 
@@ -250,6 +260,13 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
   if (source == DataSource::kShortSymbols) {
     char demangled[1024];
     if (::Demangle(demangle_from.data(), demangled, sizeof(demangled))) {
+      return std::string(demangled);
+    } else {
+      return std::string(symbol);
+    }
+  } else if (source == DataSource::kRustSymbols) {
+    char demangled[1024];
+    if (::rustc_demangle(demangle_from.data(), demangled, sizeof(demangled))) {
       return std::string(demangled);
     } else {
       return std::string(symbol);
@@ -1247,6 +1264,8 @@ class Bloaty {
         return DataSource::kRawSymbols;
       case Options::DEMANGLE_SHORT:
         return DataSource::kShortSymbols;
+      case Options::DEMANGLE_RUST:
+        return DataSource::kRustSymbols;
       case Options::DEMANGLE_FULL:
         return DataSource::kFullSymbols;
       default:
@@ -1834,6 +1853,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
         options->set_demangle(Options::DEMANGLE_SHORT);
       } else if (option == "full") {
         options->set_demangle(Options::DEMANGLE_FULL);
+      } else if (option == "rust") {
+        options->set_demangle(Options::DEMANGLE_RUST);
       } else {
         THROWF("unknown value for --demangle: $0", option);
       }
