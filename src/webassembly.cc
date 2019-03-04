@@ -314,7 +314,7 @@ void ReadCodeSection(const Section& section, const FuncNames& names,
       std::string name = "func[" + std::to_string(i) + "]";
       sink->AddFileRange("wasm_function", name, func);
     } else {
-      sink->AddFileRange("wasm_function", iter->second, func);
+      sink->AddFileRange("wasm_function", ItaniumDemangle(iter->second, sink->data_source()), func);
     }
   }
 }
