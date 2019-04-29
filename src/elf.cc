@@ -1117,7 +1117,20 @@ static void DoReadELFSegments(RangeSink* sink, ReportSegmentsBy report_by) {
                    continue;
                  }
 
-                 std::string name = "LOAD [";
+                 // Include the segment index in the label, to support embedded.
+                 //
+                 // Including the index in the segment label differentiates
+                 // segments with the same access control (e.g. RWX vs RW). In
+                 // ELF files built for embedded microcontroller projects, a
+                 // segment is used for each distinct type of memory. In simple
+                 // cases, there is a segment for the flash (which will store
+                 // code and read-only data) and a segment for RAM (which
+                 // usually stores globals, stacks, and maybe a heap). In more
+                 // involved projects, there may be special segments for faster
+                 // RAM (e.g. core coupled RAM or CCRAM), or there may even be
+                 // memory overlays to support manual paging of code from flash
+                 // (which may be slow) into RAM.
+                 std::string name(absl::StrCat("LOAD #", i, " ["));
 
                  if (header.p_flags & PF_R) {
                    name += 'R';
