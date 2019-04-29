@@ -316,7 +316,7 @@ class ElfFile {
 struct EhdrMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Ehdr* to, Func func) {
-    memcpy(&to->e_ident[0], &from.e_ident[0], EI_NIDENT);
+    memmove(&to->e_ident[0], &from.e_ident[0], EI_NIDENT);
     to->e_type       = func(from.e_type);
     to->e_machine    = func(from.e_machine);
     to->e_version    = func(from.e_version);
