@@ -325,7 +325,7 @@ class Rollup {
   Rollup(Rollup&& other) = default;
   Rollup& operator=(Rollup&& other) = default;
 
-  void AddSizes(const std::vector<std::string> names,
+  void AddSizes(const std::vector<std::string>& names,
                 uint64_t size, bool is_vmsize) {
     // We start at 1 to exclude the base map (see base_map_).
     AddInternal(names, 1, size, is_vmsize);
@@ -399,7 +399,7 @@ class Rollup {
 
   // Adds "size" bytes to the rollup under the label names[i].
   // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
-  void AddInternal(const std::vector<std::string> names, size_t i,
+  void AddInternal(const std::vector<std::string>& names, size_t i,
                    uint64_t size, bool is_vmsize) {
     if (is_vmsize) {
       CheckedAdd(&vm_total_, size);
