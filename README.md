@@ -26,6 +26,12 @@ This is not an official Google product.
 
 ## Building Bloaty
 
+To build Bloaty from source, the protobuf compiler is needed.
+On Ubuntu/Debian, you can install it with:
+```
+$ sudo apt-get install protobuf-compiler
+```
+
 Bloaty uses CMake to build.  All dependencies are included as Git submodules.
 To build, simply run:
 
