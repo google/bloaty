@@ -446,9 +446,16 @@ enum class OutputFormat {
   kTSV,
 };
 
+enum class ShowDomain {
+  kShowFile,
+  kShowVM,
+  kShowBoth,
+};
+
 struct OutputOptions {
   OutputFormat output_format = OutputFormat::kPrettyPrint;
   size_t max_label_len = 80;
+  ShowDomain show = ShowDomain::kShowBoth;
 };
 
 struct RollupOutput {
@@ -465,7 +472,7 @@ struct RollupOutput {
     if (!source_names_.empty()) {
       switch (options.output_format) {
         case bloaty::OutputFormat::kPrettyPrint:
-          PrettyPrint(options.max_label_len, out);
+          PrettyPrint(options, out);
           break;
         case bloaty::OutputFormat::kCSV:
           PrintToCSV(out, /*tabs=*/false);
@@ -505,13 +512,12 @@ struct RollupOutput {
   bool diff_mode_ = false;
 
   static bool IsSame(const std::string& a, const std::string& b);
-  void PrettyPrint(size_t max_label_len, std::ostream* out) const;
+  void PrettyPrint(const OutputOptions& options, std::ostream* out) const;
   void PrintToCSV(std::ostream* out, bool tabs) const;
-  size_t CalculateLongestLabel(const RollupRow& row, int indent) const;
-  void PrettyPrintRow(const RollupRow& row, size_t indent, size_t longest_row,
-                      std::ostream* out) const;
-  void PrettyPrintTree(const RollupRow& row, size_t indent, size_t longest_row,
-                       std::ostream* out) const;
+  void PrettyPrintRow(const RollupRow& row, size_t indent,
+                      const OutputOptions& options, std::ostream* out) const;
+  void PrettyPrintTree(const RollupRow& row, size_t indent,
+                       const OutputOptions& options, std::ostream* out) const;
   void PrintRowToCSV(const RollupRow& row,
                      std::vector<std::string> parent_labels,
                      std::ostream* out, bool tabs) const;
