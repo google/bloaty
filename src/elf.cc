@@ -971,13 +971,13 @@ static void ReadELFRelaEntries(const ElfFile::Section& section,
                                uint64_t index_base, bool is_object,
                                RangeSink* sink) {
   Elf64_Word rela_count = section.GetEntryCount();
+  Elf64_Word sh_info = section.header().sh_info;
   for (Elf64_Word i = 1; i < rela_count; i++) {
     Elf64_Rela rela;
     string_view rela_range;
     section.ReadRelocationWithAddend(i, &rela, &rela_range);
-    // TODO(haberman): fix this for object files.
-    uint64_t full_addr = ToVMAddr(rela.r_offset, index_base, is_object);
-    full_addr = rela.r_offset;
+    uint64_t full_addr =
+        ToVMAddr(rela.r_offset, index_base + sh_info, is_object);
     sink->AddFileRangeFor("elf_rela", full_addr, rela_range);
   }
 }
@@ -1409,7 +1409,6 @@ std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file) {
   // A few functions that have been defined but are not yet used.
   (void)&ElfFile::FindSectionByName;
   (void)&ElfFile::Section::ReadRelocation;
-  (void)&ElfFile::Section::ReadRelocationWithAddend;
 }
 
 }  // namespace bloaty
