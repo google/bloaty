@@ -601,11 +601,7 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
 // data is in this format, we can print it to the screen (or verify the output
 // in unit tests).
 
-void PrintSpaces(size_t n, std::ostream* out) {
-  for (size_t i = 0; i < n; i++) {
-    *out << " ";
-  }
-}
+namespace {
 
 std::string FixedWidthString(const std::string& input, size_t size) {
   if (input.size() < size) {
@@ -617,6 +613,14 @@ std::string FixedWidthString(const std::string& input, size_t size) {
   } else {
     return input.substr(0, size);
   }
+}
+
+bool ShowFile(const OutputOptions& options) {
+  return options.show != ShowDomain::kShowVM;
+}
+
+bool ShowVM(const OutputOptions& options) {
+  return options.show != ShowDomain::kShowFile;
 }
 
 std::string LeftPad(const std::string& input, size_t size) {
@@ -696,15 +700,24 @@ std::string PercentString(double percent, bool diff_mode) {
   }
 }
 
+}  // namespace
+
 void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
-                                  size_t longest_label,
+                                  const OutputOptions& options,
                                   std::ostream* out) const {
-  *out << FixedWidthString("", indent) << " "
-       << PercentString(row.vmpercent, diff_mode_) << " "
-       << SiPrint(row.vmsize, diff_mode_) << " "
-       << FixedWidthString(row.name, longest_label) << " "
-       << SiPrint(row.filesize, diff_mode_) << " "
-       << PercentString(row.filepercent, diff_mode_) << "\n";
+  *out << FixedWidthString("", indent) << " ";
+
+  if (ShowFile(options)) {
+    *out << PercentString(row.filepercent, diff_mode_) << " "
+         << SiPrint(row.filesize, diff_mode_) << " ";
+  }
+
+  if (ShowVM(options)) {
+    *out << PercentString(row.vmpercent, diff_mode_) << " "
+         << SiPrint(row.vmsize, diff_mode_) << " ";
+  }
+
+  *out << row.name << "\n";
 }
 
 bool RollupOutput::IsSame(const std::string& a, const std::string& b) {
@@ -720,10 +733,10 @@ bool RollupOutput::IsSame(const std::string& a, const std::string& b) {
 }
 
 void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
-                                   size_t longest_label,
+                                   const OutputOptions& options,
                                    std::ostream* out) const {
   // Rows are printed before their sub-rows.
-  PrettyPrintRow(row, indent, longest_label, out);
+  PrettyPrintRow(row, indent, options, out);
 
   if (!row.vmsize && !row.filesize) {
     return;
@@ -736,45 +749,38 @@ void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
   }
 
   for (const auto& child : row.sorted_children) {
-    PrettyPrintTree(child, indent + 4, longest_label, out);
+    PrettyPrintTree(child, indent + 4, options, out);
   }
 }
 
-size_t RollupOutput::CalculateLongestLabel(const RollupRow& row,
-                                           int indent) const {
-  size_t ret = indent + row.name.size();
-
-  for (const auto& child : row.sorted_children) {
-    ret = std::max(ret, CalculateLongestLabel(child, indent + 4));
+void RollupOutput::PrettyPrint(const OutputOptions& options,
+                               std::ostream* out) const {
+  if (ShowFile(options)) {
+    *out << "    FILE SIZE   ";
   }
 
-  return ret;
-}
-
-void RollupOutput::PrettyPrint(size_t max_label_len, std::ostream* out) const {
-  size_t longest_label = toplevel_row_.name.size();
-  for (const auto& child : toplevel_row_.sorted_children) {
-    longest_label = std::max(longest_label, CalculateLongestLabel(child, 0));
+  if (ShowVM(options)) {
+    *out << "     VM SIZE    ";
   }
 
-  longest_label = std::min(longest_label, max_label_len);
-
-  *out << "     VM SIZE    ";
-  PrintSpaces(longest_label, out);
-  *out << "    FILE SIZE";
   *out << "\n";
 
-  *out << " -------------- ";
-  PrintSpaces(longest_label, out);
-  *out << " --------------";
+  if (ShowFile(options)) {
+    *out << " -------------- ";
+  }
+
+  if (ShowVM(options)) {
+    *out << " -------------- ";
+  }
+
   *out << "\n";
 
   for (const auto& child : toplevel_row_.sorted_children) {
-    PrettyPrintTree(child, 0, longest_label, out);
+    PrettyPrintTree(child, 0, options, out);
   }
 
   // The "TOTAL" row comes after all other rows.
-  PrettyPrintRow(toplevel_row_, 0, longest_label, out);
+  PrettyPrintRow(toplevel_row_, 0, options, out);
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
@@ -1801,6 +1807,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
   string_view option;
   int int_option;
   uint64_t uint64_option;
+  bool has_domain = false;
 
   while (!args.IsDone()) {
     if (args.TryParseFlag("--")) {
@@ -1857,6 +1864,17 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       } else {
         options->set_max_rows_per_level(int_option);
       }
+    } else if (args.TryParseOption("--domain", &option)) {
+      has_domain = true;
+      if (option == "vm") {
+        output_options->show = ShowDomain::kShowVM;
+      } else if (option == "file") {
+        output_options->show = ShowDomain::kShowFile;
+      } else if (option == "both") {
+        output_options->show = ShowDomain::kShowBoth;
+      } else {
+        THROWF("unknown value for --domain: $0", option);
+      }
     } else if (args.TryParseOption("-s", &option)) {
       if (option == "vm") {
         options->set_sort_by(Options::SORTBY_VMSIZE);
@@ -1906,6 +1924,21 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       !options->has_disassemble_function()) {
     // Default when no sources are specified.
     options->add_data_source("sections");
+  }
+
+  if (has_domain && !options->has_sort_by()) {
+    // Default to sorting by what we are showing.
+    switch (output_options->show) {
+      case ShowDomain::kShowFile:
+        options->set_sort_by(Options::SORTBY_FILESIZE);
+        break;
+      case ShowDomain::kShowVM:
+        options->set_sort_by(Options::SORTBY_VMSIZE);
+        break;
+      case ShowDomain::kShowBoth:
+        options->set_sort_by(Options::SORTBY_BOTH);
+        break;
+    }
   }
 
   return true;
