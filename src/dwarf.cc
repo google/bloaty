@@ -433,7 +433,7 @@ bool AddressRanges::NextUnit() {
   unit_remaining_ = sizes_.ReadInitialLength(&next_unit_);
   sizes_.ReadDWARFVersion(&unit_remaining_);
 
-  if (sizes_.dwarf_version() > 2) {
+  if (sizes_.dwarf_version() > 4) {
     THROW("DWARF data is too new for us");
   }
 
