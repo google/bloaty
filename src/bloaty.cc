@@ -1007,27 +1007,26 @@ void RangeSink::AddFileRange(const char* analyzer, string_view name,
   }
 }
 
-void RangeSink::AddFileRangeFor(const char* analyzer,
-                                uint64_t label_from_vmaddr,
-                                string_view file_range) {
+void RangeSink::AddFileRangeForVMAddr(const char* analyzer,
+                                      uint64_t label_from_vmaddr,
+                                      string_view file_range) {
   uint64_t file_offset = file_range.data() - file_->data().data();
   bool verbose = IsVerboseForFileRange(file_offset, file_range.size());
   if (verbose) {
-    printf("[%s, %s] AddFileRangeFor(%" PRIx64 ", [%" PRIx64 ", %zx])\n",
+    printf("[%s, %s] AddFileRangeForVMAddr(%" PRIx64 ", [%" PRIx64 ", %zx])\n",
            GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr,
            file_offset, file_range.size());
   }
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    uint64_t offset;
-    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
+    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label)) {
       bool ok = pair.first->file_map.AddRangeWithTranslation(
           file_offset, file_range.size(), label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
-        WARN("File range ($0, $1) for label $2 extends beyond base map", offset,
-             file_range.size(), label);
+        WARN("File range ($0, $1) for label $2 extends beyond base map",
+             file_offset, file_range.size(), label);
       }
     } else if (verbose_level > 2) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
@@ -1035,19 +1034,51 @@ void RangeSink::AddFileRangeFor(const char* analyzer,
   }
 }
 
-void RangeSink::AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
-                              uint64_t addr, uint64_t size) {
+void RangeSink::AddFileRangeForFileRange(const char* analyzer,
+                                         absl::string_view from_file_range,
+                                         absl::string_view file_range) {
+  uint64_t file_offset = file_range.data() - file_->data().data();
+  uint64_t from_file_offset = from_file_range.data() - file_->data().data();
+  bool verbose = IsVerboseForFileRange(file_offset, file_range.size());
+  if (verbose) {
+    printf("[%s, %s] AddFileRangeForFileRange([%" PRIx64 ", %zx], [%" PRIx64
+           ", %zx])\n",
+           GetDataSourceLabel(data_source_), analyzer, from_file_offset,
+           from_file_range.size(), file_offset, file_range.size());
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label;
+    if (pair.first->file_map.TryGetLabelForRange(
+            from_file_offset, from_file_range.size(), &label)) {
+      bool ok = pair.first->file_map.AddRangeWithTranslation(
+          file_offset, file_range.size(), label, translator_->file_map, verbose,
+          &pair.first->vm_map);
+      if (!ok) {
+        WARN("File range ($0, $1) for label $2 extends beyond base map",
+             file_offset, file_range.size(), label);
+      }
+    } else if (verbose_level > 2) {
+      printf("No label found for file range [%" PRIx64 ", %zx]\n",
+             from_file_offset, from_file_range.size());
+    }
+  }
+}
+
+void RangeSink::AddVMRangeForVMAddr(const char* analyzer,
+                                    uint64_t label_from_vmaddr, uint64_t addr,
+                                    uint64_t size) {
   bool verbose = IsVerboseForVMRange(addr, size);
   if (verbose) {
-    printf("[%s, %s] AddVMRangeFor(%" PRIx64 ", [%" PRIx64 ", %" PRIx64 "])\n",
+    printf("[%s, %s] AddVMRangeForVMAddr(%" PRIx64 ", [%" PRIx64 ", %" PRIx64
+           "])\n",
            GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr, addr,
            size);
   }
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    uint64_t offset;
-    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label, &offset)) {
+    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label)) {
       bool ok = pair.first->vm_map.AddRangeWithTranslation(
           addr, size, label, translator_->vm_map, verbose,
           &pair.first->file_map);

@@ -94,14 +94,34 @@ bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
   }
 }
 
-bool RangeMap::TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const {
+bool RangeMap::TryGetLabel(uint64_t addr, std::string* label) const {
   auto iter = FindContaining(addr);
   if (iter == mappings_.end()) {
     return false;
   } else {
     *label = iter->second.label;
-    *offset = addr - iter->first;
     return true;
+  }
+}
+
+bool RangeMap::TryGetLabelForRange(uint64_t addr, uint64_t size,
+                                   std::string* label) const {
+  uint64_t end = addr + size;
+  if (end < addr) {
+    return false;
+  }
+  auto iter = FindContaining(addr);
+  if (iter == mappings_.end()) {
+    return false;
+  } else {
+    *label = iter->second.label;
+    while (iter != mappings_.end() && iter->first + iter->second.size < end) {
+      if (iter->second.label != *label) {
+        return false;
+      }
+      ++iter;
+    }
+    return iter != mappings_.end();
   }
 }
 
