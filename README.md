@@ -80,7 +80,7 @@ $ ./bloaty bloaty
    0.6%   109Ki   1.9%   109Ki .eh_frame
    0.6%  97.7Ki   1.7%  97.7Ki .dynstr
    0.3%  43.4Ki   0.7%  43.4Ki .dynsym
-   0.2%  34.4Ki   0.5%  27.9Ki [22 Others]
+   0.2%  34.2Ki   0.5%  27.9Ki [22 Others]
    0.1%  17.9Ki   0.3%  17.9Ki .eh_frame_hdr
    0.1%  17.8Ki   0.3%  17.8Ki .gcc_except_table
    0.1%  13.0Ki   0.0%       0 .debug_aranges
@@ -240,7 +240,7 @@ $ ./bloaty -d segments,sections bloaty
        1.0%   123Ki   NAN%       0 .debug_abbrev
        0.9%   114Ki   NAN%       0 .symtab
        0.1%  13.0Ki   NAN%       0 .debug_aranges
-       0.0%  3.65Ki   NAN%       0 [Unmapped]
+       0.0%  3.46Ki   NAN%       0 [Unmapped]
        0.0%     383   NAN%       0 .shstrtab
        0.0%      29   NAN%       0 .comment
   24.3%  4.03Mi  70.0%  4.03Mi LOAD #2 [RX]
@@ -401,8 +401,8 @@ $ ./bloaty -d segments bloaty
  100.0%  16.6Mi 100.0%  5.76Mi TOTAL
 ```
 
-Here we see one segment mapped `[R E]` (read/execute) and
-one segment mapped `[RW ]` (read/write).  A large part of
+Here we see one segment mapped `[RX]` (read/execute) and
+one segment mapped `[RW]` (read/write).  A large part of
 the binary is not loaded into memory, which we see as
 `[Unmapped]`.
 
@@ -411,18 +411,16 @@ However we fake it by grouping sections by their flags.
 This gives us a break-down sort of like real segments.
 
 ```cmdoutput
-$ ./bloaty bloaty -d segments CMakeFiles/libbloaty.dir/src/bloaty.cc.o
+$ ./bloaty -d segments CMakeFiles/libbloaty.dir/src/bloaty.cc.o
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  66.2%  11.9Mi   0.0%       0 [Unmapped]
-  22.5%  4.03Mi  68.8%  4.03Mi LOAD #2 [RX]
-   4.0%   742Ki  29.5%  1.73Mi LOAD #3 [RW]
-   6.6%  1.19Mi   0.0%       0 Section []
-   0.4%  80.9Ki   1.3%  80.9Ki Section [AX]
-   0.1%  25.2Ki   0.0%       0 [ELF Headers]
-   0.1%  20.7Ki   0.3%  20.7Ki Section [A]
-   0.0%     656   0.0%     725 Section [AW]
- 100.0%  17.9Mi 100.0%  5.86Mi TOTAL
+  90.6%  1.19Mi   0.0%       0 Section []
+   6.0%  80.9Ki  78.9%  80.9Ki Section [AX]
+   1.7%  22.8Ki   0.0%       0 [ELF Headers]
+   1.6%  20.9Ki  20.4%  20.9Ki Section [A]
+   0.1%     812   0.0%       0 [Unmapped]
+   0.0%     656   0.7%     725 Section [AW]
+ 100.0%  1.31Mi 100.0%   102Ki TOTAL
 ```
 
 ## Sections
@@ -453,7 +451,7 @@ $ ./bloaty -d sections bloaty
    0.6%   109Ki   1.9%   109Ki .eh_frame
    0.6%  97.7Ki   1.7%  97.7Ki .dynstr
    0.3%  43.4Ki   0.7%  43.4Ki .dynsym
-   0.2%  34.4Ki   0.5%  27.9Ki [22 Others]
+   0.2%  34.2Ki   0.5%  27.9Ki [22 Others]
    0.1%  17.9Ki   0.3%  17.9Ki .eh_frame_hdr
    0.1%  17.8Ki   0.3%  17.8Ki .gcc_except_table
    0.1%  13.0Ki   0.0%       0 .debug_aranges
@@ -575,12 +573,6 @@ resolve to the input file (the `.a` file).
 
 Using debug information, we can tell what compile unit (and
 corresponding source file) each bit of the binary came from.
-There are a couple different places in DWARF we can look for
-this information; currently we mainly use the
-`.debug_aranges` section.  It's not perfect and sometimes
-you'll see some of the binary show up as `[None]` if it's
-not mentioned in aranges (improving this is a TODO).  But it
-can tell us a lot.
 
 ```cmdoutput
 $ ./bloaty -d compileunits bloaty
@@ -733,8 +725,8 @@ $ ./bloaty -c bloaty_package.bloaty -d bloaty_package bloaty
    0.0%  6.12Ki   0.1%  6.12Ki [section .dynsym]
    0.0%  5.08Ki   0.0%       0 [section .debug_ranges]
    0.0%  4.04Ki   0.1%  4.04Ki [section .text]
-   0.0%  3.65Ki   0.0%       0 [Unmapped]
    0.0%  3.62Ki   0.1%  3.62Ki [section .gnu.version]
+   0.0%  3.46Ki   0.0%       0 [Unmapped]
  100.0%  16.6Mi 100.0%  5.76Mi TOTAL
 ```
 
@@ -828,8 +820,8 @@ $ ./bloaty -c config.bloaty -d bloaty_package,compileunits bloaty
    0.0%  6.12Ki   0.1%  6.12Ki [section .dynsym]
    0.0%  5.08Ki   0.0%       0 [section .debug_ranges]
    0.0%  4.04Ki   0.1%  4.04Ki [section .text]
-   0.0%  3.65Ki   0.0%       0 [Unmapped]
    0.0%  3.62Ki   0.1%  3.62Ki [section .gnu.version]
+   0.0%  3.46Ki   0.0%       0 [Unmapped]
  100.0%  16.6Mi 100.0%  5.76Mi TOTAL
 ```
 

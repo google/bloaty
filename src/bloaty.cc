@@ -1677,6 +1677,10 @@ Options:
                      The default is --demangle=short.
   --disassemble=FUNCTION
                      Disassemble this function (EXPERIMENTAL)
+  --domain=DOMAIN    Which domains to show.  Possible values are:
+                       --domain=vm
+                       --domain=file
+                       --domain=both (the default)
   -n NUM             How many rows to show per level before collapsing
                      other keys into '[Other]'.  Set to '0' for unlimited.
                      Defaults to 20.
