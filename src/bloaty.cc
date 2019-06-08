@@ -1904,7 +1904,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
       return false;
     } else if (args.TryParseFlag("--help")) {
-      fputs(usage, stderr);
+      puts(usage);
       return false;
     } else if (args.TryParseFlag("--version")) {
       printf("Bloaty McBloatface 1.0\n");

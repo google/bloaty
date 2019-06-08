@@ -80,7 +80,7 @@ $ ./bloaty bloaty
    0.6%   109Ki   1.9%   109Ki .eh_frame
    0.6%  97.7Ki   1.7%  97.7Ki .dynstr
    0.3%  43.4Ki   0.7%  43.4Ki .dynsym
-   0.2%  34.2Ki   0.5%  27.9Ki [22 Others]
+   0.2%  34.3Ki   0.5%  27.9Ki [22 Others]
    0.1%  17.9Ki   0.3%  17.9Ki .eh_frame_hdr
    0.1%  17.8Ki   0.3%  17.8Ki .gcc_except_table
    0.1%  13.0Ki   0.0%       0 .debug_aranges
@@ -134,7 +134,7 @@ $ ./bloaty bloaty -d compileunits
 
 Run Bloaty with `--help` to see a list of available options:
 
-```
+```cmdoutput
 $ ./bloaty --help
 Bloaty McBloatface: a size profiler for binaries.
 
@@ -154,6 +154,10 @@ Options:
                      The default is --demangle=short.
   --disassemble=FUNCTION
                      Disassemble this function (EXPERIMENTAL)
+  --domain=DOMAIN    Which domains to show.  Possible values are:
+                       --domain=vm
+                       --domain=file
+                       --domain=both (the default)
   -n NUM             How many rows to show per level before collapsing
                      other keys into '[Other]'.  Set to '0' for unlimited.
                      Defaults to 20.
@@ -175,6 +179,7 @@ Options for debugging Bloaty:
   -v                 Verbose output.  Dumps warnings encountered during
                      processing and full VM/file maps at the end.
                      Add more v's (-vv, -vvv) for even more.
+
 ```
 
 # Size Diffs
@@ -240,7 +245,7 @@ $ ./bloaty -d segments,sections bloaty
        1.0%   123Ki   NAN%       0 .debug_abbrev
        0.9%   114Ki   NAN%       0 .symtab
        0.1%  13.0Ki   NAN%       0 .debug_aranges
-       0.0%  3.46Ki   NAN%       0 [Unmapped]
+       0.0%  3.49Ki   NAN%       0 [Unmapped]
        0.0%     383   NAN%       0 .shstrtab
        0.0%      29   NAN%       0 .comment
   24.3%  4.03Mi  70.0%  4.03Mi LOAD #2 [RX]
@@ -259,11 +264,11 @@ $ ./bloaty -d segments,sections bloaty
        0.0%     568   0.0%     568 [ELF Headers]
        0.0%     368   0.0%     368 .gnu.version_r
        0.0%      96   0.0%      96 .plt.got
-       0.0%      39   0.0%      39 [LOAD #2 [RX]]
        0.0%      36   0.0%      36 .note.gnu.build-id
        0.0%      32   0.0%      32 .note.ABI-tag
        0.0%      28   0.0%      28 .interp
        0.0%      23   0.0%      23 .init
+       0.0%      23   0.0%      23 [LOAD #2 [RX]]
        0.0%       9   0.0%       9 [1 Others]
    4.4%   742Ki  30.0%  1.73Mi LOAD #3 [RW]
        0.0%       0  58.0%  1.00Mi .bss
@@ -418,7 +423,7 @@ $ ./bloaty -d segments CMakeFiles/libbloaty.dir/src/bloaty.cc.o
    6.0%  80.9Ki  78.9%  80.9Ki Section [AX]
    1.7%  22.8Ki   0.0%       0 [ELF Headers]
    1.6%  20.9Ki  20.4%  20.9Ki Section [A]
-   0.1%     812   0.0%       0 [Unmapped]
+   0.1%     796   0.0%       0 [Unmapped]
    0.0%     656   0.7%     725 Section [AW]
  100.0%  1.31Mi 100.0%   102Ki TOTAL
 ```
@@ -451,7 +456,7 @@ $ ./bloaty -d sections bloaty
    0.6%   109Ki   1.9%   109Ki .eh_frame
    0.6%  97.7Ki   1.7%  97.7Ki .dynstr
    0.3%  43.4Ki   0.7%  43.4Ki .dynsym
-   0.2%  34.2Ki   0.5%  27.9Ki [22 Others]
+   0.2%  34.3Ki   0.5%  27.9Ki [22 Others]
    0.1%  17.9Ki   0.3%  17.9Ki .eh_frame_hdr
    0.1%  17.8Ki   0.3%  17.8Ki .gcc_except_table
    0.1%  13.0Ki   0.0%       0 .debug_aranges
@@ -619,7 +624,7 @@ $ ./bloaty -d inlines bloaty
   14.3%  2.37Mi   0.0%       0 [section .debug_loc]
   13.2%  2.20Mi  38.1%  2.20Mi [section .rodata]
   11.1%  1.84Mi   0.0%       0 [section .debug_str]
-   7.5%  1.24Mi  21.2%  1.22Mi [34613 Others]
+   7.5%  1.24Mi  21.2%  1.22Mi [34614 Others]
    0.0%       0  17.4%  1.00Mi [section .bss]
    5.8%   993Ki   0.0%       0 [section .debug_ranges]
    3.0%   504Ki   0.0%       0 [section .debug_line]
@@ -719,14 +724,14 @@ $ ./bloaty -c bloaty_package.bloaty -d bloaty_package bloaty
    0.1%  15.1Ki   0.0%       0 [section .symtab]
    0.1%  13.0Ki   0.0%       0 [section .debug_aranges]
    0.1%  12.3Ki   0.2%  12.3Ki [section .gnu.hash]
-   0.1%  11.3Ki   0.1%  8.02Ki [26 Others]
+   0.1%  11.3Ki   0.1%  8.01Ki [26 Others]
    0.1%  9.80Ki   0.2%  9.80Ki [section .dynstr]
    0.0%  6.56Ki   0.1%  6.56Ki [section .data]
    0.0%  6.12Ki   0.1%  6.12Ki [section .dynsym]
    0.0%  5.08Ki   0.0%       0 [section .debug_ranges]
    0.0%  4.04Ki   0.1%  4.04Ki [section .text]
    0.0%  3.62Ki   0.1%  3.62Ki [section .gnu.version]
-   0.0%  3.46Ki   0.0%       0 [Unmapped]
+   0.0%  3.49Ki   0.0%       0 [Unmapped]
  100.0%  16.6Mi 100.0%  5.76Mi TOTAL
 ```
 
@@ -814,14 +819,14 @@ $ ./bloaty -c config.bloaty -d bloaty_package,compileunits bloaty
    0.1%  15.1Ki   0.0%       0 [section .symtab]
    0.1%  13.0Ki   0.0%       0 [section .debug_aranges]
    0.1%  12.3Ki   0.2%  12.3Ki [section .gnu.hash]
-   0.1%  11.3Ki   0.1%  8.02Ki [26 Others]
+   0.1%  11.3Ki   0.1%  8.01Ki [26 Others]
    0.1%  9.80Ki   0.2%  9.80Ki [section .dynstr]
    0.0%  6.56Ki   0.1%  6.56Ki [section .data]
    0.0%  6.12Ki   0.1%  6.12Ki [section .dynsym]
    0.0%  5.08Ki   0.0%       0 [section .debug_ranges]
    0.0%  4.04Ki   0.1%  4.04Ki [section .text]
    0.0%  3.62Ki   0.1%  3.62Ki [section .gnu.version]
-   0.0%  3.46Ki   0.0%       0 [Unmapped]
+   0.0%  3.49Ki   0.0%       0 [Unmapped]
  100.0%  16.6Mi 100.0%  5.76Mi TOTAL
 ```
 
