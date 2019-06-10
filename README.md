@@ -32,7 +32,7 @@ Building Bloaty requires CMake and ``protoc``, the protobuf compiler. On Ubuntu,
 $ sudo apt install cmake protobuf-compiler
 ```
 
-All other dependencies are included as Git submodules. To build, run:
+Bloaty includes ``libprotobuf``, ``re2``, and ``capstone`` as Git submodules, but it will prefer the system's versions of those dependencies if available. All other dependencies are included as Git submodules. To build, run:
 
 ```
 $ cmake .
