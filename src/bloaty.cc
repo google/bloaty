@@ -1708,6 +1708,10 @@ Options:
                      The default is --demangle=short.
   --disassemble=FUNCTION
                      Disassemble this function (EXPERIMENTAL)
+  --domain=DOMAIN    Which domains to show.  Possible values are:
+                       --domain=vm
+                       --domain=file
+                       --domain=both (the default)
   -n NUM             How many rows to show per level before collapsing
                      other keys into '[Other]'.  Set to '0' for unlimited.
                      Defaults to 20.
@@ -1931,7 +1935,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
       return false;
     } else if (args.TryParseFlag("--help")) {
-      fputs(usage, stderr);
+      puts(usage);
       return false;
     } else if (args.TryParseFlag("--version")) {
       printf("Bloaty McBloatface 1.0\n");

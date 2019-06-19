@@ -144,6 +144,9 @@ add_custom_command(
 )
 endif(${PROTOC_FOUND})
 
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty_package.bloaty
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
 add_library(libbloaty
     src/bloaty.cc
     src/demangle.cc

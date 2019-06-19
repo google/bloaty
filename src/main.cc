@@ -25,8 +25,10 @@ int main(int argc, char *argv[]) {
                             &error)) {
     if (!error.empty()) {
       fprintf(stderr, "bloaty: %s\n", error.c_str());
+      return 1;
+    } else {
+      return 0;  // --help or similar.
     }
-    return 1;
   }
 
   bloaty::RollupOutput output;
