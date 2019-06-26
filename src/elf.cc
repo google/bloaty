@@ -1229,7 +1229,9 @@ static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
 
 void AddCatchAll(RangeSink* sink) {
   // The last-line fallback to make sure we cover the entire VM space.
-  DoReadELFSections(sink, kReportByEscapedSectionName);
+  if (sink->data_source() != DataSource::kSegments) {
+    DoReadELFSections(sink, kReportByEscapedSectionName);
+  }
   DoReadELFSegments(sink, kReportByEscapedSegmentName);
 
   ForEachElf(sink->input_file(), sink,
