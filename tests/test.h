@@ -258,7 +258,7 @@ class BloatyTest : public ::testing::Test {
       if (expected_file != kUnknown) {
         EXPECT_GE(child.filesize, expected_file);
         // Allow some overhead.
-        EXPECT_LE(child.filesize, (expected_file * 1.2) + 150);
+        EXPECT_LE(child.filesize, (expected_file * 1.2) + 180);
       }
 
       if (++i == children.size()) {
