@@ -1856,7 +1856,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
       }
       */
 
-      sink->AddFileRangeFor("dwarf_fde", address, full_entry);
+      sink->AddFileRangeForVMAddr("dwarf_fde", address, full_entry);
     }
   }
 }
@@ -1887,7 +1887,8 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
         ReadEncodedPointer(table_enc, true, &data, base, sink);
     uint64_t fde_addr = ReadEncodedPointer(table_enc, true, &data, base, sink);
     entry_data.remove_suffix(data.size());
-    sink->AddFileRangeFor("dwarf_fde_table", initial_location, entry_data);
+    sink->AddFileRangeForVMAddr("dwarf_fde_table", initial_location,
+                                entry_data);
 
     // We could add fde_addr with an unknown length if we wanted to skip reading
     // eh_frame.  We can't count on this table being available though, so we

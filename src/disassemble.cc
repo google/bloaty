@@ -85,8 +85,8 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
           op->mem.index == X86_REG_INVALID) {
         uint64_t to_address = in->address + in->size + op->mem.disp;
         if (to_address) {
-          sink->AddVMRangeFor("x86_disassemble", in->address, to_address,
-                              RangeSink::kUnknownSize);
+          sink->AddVMRangeForVMAddr("x86_disassemble", in->address, to_address,
+                                    RangeSink::kUnknownSize);
         }
       }
     }
@@ -210,14 +210,13 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
     if (TryGetJumpTarget(info.arch, in, &target)) {
       auto iter = local_labels.find(target);
       std::string label;
-      uint64_t offset;
       if (iter != local_labels.end()) {
         if (target > in->address) {
           op_str = ">" + std::to_string(iter->second);
         } else {
           op_str = "<" + std::to_string(iter->second);
         }
-      } else if (info.symbol_map.vm_map.TryGetLabel(target, &label, &offset)) {
+      } else if (info.symbol_map.vm_map.TryGetLabel(target, &label)) {
         op_str = label;
       }
     }

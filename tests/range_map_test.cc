@@ -277,6 +277,35 @@ TEST_F(RangeMapTest, Bug3) {
   });
 }
 
+TEST_F(RangeMapTest, GetLabel) {
+  map_.AddRange(100, kUnknownSize, "foo");
+  map_.AddRange(200, 50, "bar");
+  map_.AddRange(150, 10, "baz");
+  AssertMainMapEquals({
+    {100, 150, kNoTranslation, "foo"},
+    {150, 160, kNoTranslation, "baz"},
+    {200, 250, kNoTranslation, "bar"},
+  });
+
+  std::string label;
+
+  ASSERT_TRUE(map_.TryGetLabel(100, &label));
+  ASSERT_EQ(label, "foo");
+  ASSERT_TRUE(map_.TryGetLabel(155, &label));
+  ASSERT_EQ(label, "baz");
+  ASSERT_TRUE(map_.TryGetLabel(249, &label));
+  ASSERT_EQ(label, "bar");
+  ASSERT_FALSE(map_.TryGetLabel(250, &label));
+
+  ASSERT_TRUE(map_.TryGetLabelForRange(100, 10, &label));
+  ASSERT_EQ(label, "foo");
+  ASSERT_TRUE(map_.TryGetLabelForRange(155, 3, &label));
+  ASSERT_EQ(label, "baz");
+  ASSERT_TRUE(map_.TryGetLabelForRange(200, 50, &label));
+  ASSERT_EQ(label, "bar");
+  ASSERT_FALSE(map_.TryGetLabelForRange(200, 51, &label));
+}
+
 TEST_F(RangeMapTest, Translation) {
   map_.AddDualRange(20, 5, 120, "foo");
   CheckConsistency();

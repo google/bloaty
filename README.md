@@ -68,28 +68,28 @@ On Linux you'll see output something like:
 $ ./bloaty bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  34.6%  5.75Mi   0.0%       0 .debug_info
-  14.3%  2.37Mi   0.0%       0 .debug_loc
-  13.2%  2.20Mi  38.1%  2.20Mi .rodata
-  11.1%  1.84Mi   0.0%       0 .debug_str
-   7.4%  1.23Mi  21.4%  1.23Mi .text
-   0.0%       0  17.4%  1.00Mi .bss
-   5.8%   993Ki   0.0%       0 .debug_ranges
-   3.0%   504Ki   0.0%       0 .debug_line
-   2.6%   442Ki   7.5%   442Ki .data
-   1.8%   304Ki   5.2%   304Ki .rela.dyn
-   1.7%   297Ki   5.0%   297Ki .data.rel.ro
-   1.1%   187Ki   0.0%       0 .strtab
-   0.7%   123Ki   0.0%       0 .debug_abbrev
-   0.7%   114Ki   0.0%       0 .symtab
-   0.6%   109Ki   1.9%   109Ki .eh_frame
-   0.6%  97.7Ki   1.7%  97.7Ki .dynstr
-   0.3%  43.4Ki   0.7%  43.4Ki .dynsym
-   0.2%  34.3Ki   0.5%  27.9Ki [22 Others]
-   0.1%  17.9Ki   0.3%  17.9Ki .eh_frame_hdr
-   0.1%  17.8Ki   0.3%  17.8Ki .gcc_except_table
-   0.1%  13.0Ki   0.0%       0 .debug_aranges
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  30.7%  8.32Mi   0.0%       0    .debug_info
+  22.0%  5.97Mi   0.0%       0    .debug_loc
+  13.7%  3.71Mi   0.0%       0    .debug_str
+   9.7%  2.64Mi  38.7%  2.64Mi    .rodata
+   7.0%  1.89Mi  27.7%  1.89Mi    .text
+   5.8%  1.57Mi   0.0%       0    .debug_line
+   0.0%       0  14.8%  1.01Mi    .bss
+   3.3%   928Ki   0.0%       0    .debug_ranges
+   1.6%   442Ki   0.0%       0    .strtab
+   1.6%   437Ki   6.3%   437Ki    .data
+   1.3%   361Ki   5.2%   361Ki    .dynstr
+   0.8%   235Ki   3.4%   235Ki    .eh_frame
+   0.8%   219Ki   0.0%       0    .symtab
+   0.5%   135Ki   0.0%       0    .debug_abbrev
+   0.4%   123Ki   1.8%   123Ki    .dynsym
+   0.2%  51.9Ki   0.7%  51.8Ki    .gcc_except_table
+   0.1%  39.9Ki   0.6%  39.9Ki    .gnu.hash
+   0.1%  37.8Ki   0.5%  37.8Ki    .eh_frame_hdr
+   0.1%  15.9Ki   0.2%  14.0Ki    [24 Others]
+   0.0%  10.3Ki   0.1%  10.3Ki    .gnu.version
+   0.0%  5.50Ki   0.0%       0    [Unmapped]
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 The "VM SIZE" column tells you how much space the binary
@@ -112,28 +112,28 @@ can even break down by compile units and inlines!
 $ ./bloaty bloaty -d compileunits
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  36.3%  6.03Mi  31.8%  1.83Mi [119 Others]
-   9.5%  1.59Mi   7.1%   416Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c
-   1.8%   310Ki  18.3%  1.05Mi ../third_party/capstone/arch/M68K/M68KDisassembler.c
-   5.7%   974Ki  14.6%   863Ki ../third_party/capstone/arch/X86/X86Mapping.c
-   4.4%   756Ki   2.2%   127Ki ../src/bloaty.cc
-   3.5%   590Ki   0.7%  41.6Ki ../third_party/re2/re2/dfa.cc
-   3.5%   589Ki   0.7%  41.7Ki ../third_party/re2/re2/re2.cc
-   3.2%   543Ki   0.7%  42.5Ki ../third_party/re2/re2/regexp.cc
-   3.2%   538Ki   7.3%   431Ki ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
-   3.1%   529Ki   1.6%  91.5Ki ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
-   2.9%   490Ki   1.5%  88.8Ki ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
-   2.8%   484Ki   2.9%   170Ki ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c
-   2.8%   483Ki   1.8%   104Ki ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
-   2.6%   442Ki   1.1%  67.4Ki ../third_party/capstone/arch/Mips/MipsDisassembler.c
-   2.4%   402Ki   0.6%  38.1Ki ../third_party/re2/re2/parse.cc
-   2.2%   374Ki   0.9%  53.9Ki ../src/dwarf.cc
-   2.1%   362Ki   0.5%  28.9Ki ../third_party/re2/re2/compile.cc
-   2.1%   357Ki   0.4%  23.1Ki ../third_party/re2/re2/prog.cc
-   2.0%   334Ki   1.7%   100Ki ../third_party/capstone/arch/ARM/ARMInstPrinter.c
-   2.0%   334Ki   1.9%   110Ki ../third_party/capstone/arch/PowerPC/PPCInstPrinter.c
-   1.9%   323Ki   1.7%   101Ki ../third_party/capstone/arch/X86/X86IntelInstPrinter.c
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  34.7%  9.38Mi  39.4%  2.68Mi    [153 Others]
+  16.9%  4.58Mi   4.9%   341Ki    ../third_party/protobuf/src/google/protobuf/descriptor.cc
+   8.9%  2.42Mi   4.3%   301Ki    ../third_party/protobuf/src/google/protobuf/descriptor.pb.cc
+   4.1%  1.11Mi   4.5%   311Ki    ../third_party/capstone/arch/ARM/ARMDisassembler.c
+   1.5%   415Ki  15.6%  1.07Mi    ../third_party/capstone/arch/M68K/M68KDisassembler.c
+   3.4%   944Ki   1.3%  92.9Ki    ../third_party/protobuf/src/google/protobuf/generated_message_reflection.cc
+   3.3%   925Ki   1.3%  87.7Ki    ../third_party/protobuf/src/google/protobuf/text_format.cc
+   3.3%   923Ki  11.8%   820Ki    ../third_party/capstone/arch/X86/X86Mapping.c
+   2.6%   716Ki   0.6%  44.6Ki    ../third_party/protobuf/src/google/protobuf/descriptor_database.cc
+   2.4%   676Ki   1.0%  73.1Ki    ../third_party/protobuf/src/google/protobuf/extension_set.cc
+   2.2%   619Ki   0.6%  41.7Ki    ../third_party/protobuf/src/google/protobuf/generated_message_util.cc
+   2.1%   584Ki   1.6%   113Ki    ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
+   2.1%   582Ki   0.7%  48.4Ki    ../third_party/protobuf/src/google/protobuf/message.cc
+   1.9%   533Ki   1.9%   131Ki    ../src/bloaty.cc
+   1.9%   529Ki   6.1%   427Ki    ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
+   1.6%   439Ki   0.5%  35.1Ki    ../third_party/protobuf/src/google/protobuf/wire_format.cc
+   1.4%   394Ki   0.5%  31.5Ki    ../third_party/re2/re2/regexp.cc
+   1.4%   392Ki   0.4%  28.6Ki    ../third_party/re2/re2/dfa.cc
+   1.4%   383Ki   1.4%  99.4Ki    ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
+   1.3%   373Ki   1.0%  73.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
+   1.3%   370Ki   0.5%  34.6Ki    ../third_party/re2/re2/re2.cc
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 
@@ -240,53 +240,77 @@ a single hierarchical profile.  For example, we can use the
 $ ./bloaty -d segments,sections bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  71.4%  11.9Mi   0.0%       0 [Unmapped]
-      48.5%  5.75Mi   NAN%       0 .debug_info
-      20.0%  2.37Mi   NAN%       0 .debug_loc
-      15.5%  1.84Mi   NAN%       0 .debug_str
-       8.2%   993Ki   NAN%       0 .debug_ranges
-       4.1%   504Ki   NAN%       0 .debug_line
-       1.5%   187Ki   NAN%       0 .strtab
-       1.0%   123Ki   NAN%       0 .debug_abbrev
-       0.9%   114Ki   NAN%       0 .symtab
-       0.1%  13.0Ki   NAN%       0 .debug_aranges
-       0.0%  3.49Ki   NAN%       0 [Unmapped]
-       0.0%     383   NAN%       0 .shstrtab
-       0.0%      29   NAN%       0 .comment
-  24.3%  4.03Mi  70.0%  4.03Mi LOAD #2 [RX]
-      54.5%  2.20Mi  54.5%  2.20Mi .rodata
-      30.6%  1.23Mi  30.6%  1.23Mi .text
-       7.4%   304Ki   7.4%   304Ki .rela.dyn
-       2.7%   109Ki   2.7%   109Ki .eh_frame
-       2.4%  97.7Ki   2.4%  97.7Ki .dynstr
-       1.1%  43.4Ki   1.1%  43.4Ki .dynsym
-       0.4%  17.9Ki   0.4%  17.9Ki .eh_frame_hdr
-       0.4%  17.8Ki   0.4%  17.8Ki .gcc_except_table
-       0.3%  12.3Ki   0.3%  12.3Ki .gnu.hash
-       0.1%  4.99Ki   0.1%  4.99Ki .rela.plt
-       0.1%  3.62Ki   0.1%  3.62Ki .gnu.version
-       0.1%  3.34Ki   0.1%  3.34Ki .plt
-       0.0%     568   0.0%     568 [ELF Headers]
-       0.0%     368   0.0%     368 .gnu.version_r
-       0.0%      96   0.0%      96 .plt.got
-       0.0%      36   0.0%      36 .note.gnu.build-id
-       0.0%      32   0.0%      32 .note.ABI-tag
-       0.0%      28   0.0%      28 .interp
-       0.0%      23   0.0%      23 .init
-       0.0%      23   0.0%      23 [LOAD #2 [RX]]
-       0.0%       9   0.0%       9 [1 Others]
-   4.4%   742Ki  30.0%  1.73Mi LOAD #3 [RW]
-       0.0%       0  58.0%  1.00Mi .bss
-      59.6%   442Ki  25.0%   442Ki .data
-      40.1%   297Ki  16.8%   297Ki .data.rel.ro
-       0.2%  1.69Ki   0.1%  1.69Ki .got.plt
-       0.1%     560   0.0%     560 .dynamic
-       0.0%     200   0.0%     200 .got
-       0.0%      72   0.0%      72 .init_array
-       0.0%       8   0.0%       8 .fini_array
-       0.0%       8   0.0%       8 [LOAD #3 [RW]]
-   0.0%  2.44Ki   0.0%       0 [ELF Headers]
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  78.5%  21.3Mi   0.0%       0    [Unmapped]
+    39.1%  8.32Mi   NAN%       0    .debug_info
+    28.1%  5.97Mi   NAN%       0    .debug_loc
+    17.4%  3.71Mi   NAN%       0    .debug_str
+     7.4%  1.57Mi   NAN%       0    .debug_line
+     4.3%   928Ki   NAN%       0    .debug_ranges
+     2.0%   442Ki   NAN%       0    .strtab
+     1.0%   218Ki   NAN%       0    .symtab
+     0.6%   135Ki   NAN%       0    .debug_abbrev
+     0.0%  5.50Ki   NAN%       0    [Unmapped]
+     0.0%     386   NAN%       0    .shstrtab
+     0.0%     131   NAN%       0    .debug_macinfo
+     0.0%      82   NAN%       0    .comment
+  10.9%  2.95Mi  43.4%  2.95Mi    LOAD #4 [R]
+    89.3%  2.64Mi  89.3%  2.64Mi    .rodata
+     7.8%   235Ki   7.8%   235Ki    .eh_frame
+     1.7%  51.8Ki   1.7%  51.8Ki    .gcc_except_table
+     1.2%  37.8Ki   1.2%  37.8Ki    .eh_frame_hdr
+     0.0%       7   0.0%       7    [LOAD #4 [R]]
+   7.0%  1.89Mi  27.8%  1.89Mi    LOAD #3 [RX]
+    99.8%  1.89Mi  99.8%  1.89Mi    .text
+     0.2%  3.16Ki   0.2%  3.16Ki    .plt
+     0.0%      23   0.0%      23    .init
+     0.0%      12   0.0%      12    [LOAD #3 [RX]]
+     0.0%       9   0.0%       9    .fini
+   1.6%   441Ki  21.1%  1.44Mi    LOAD #5 [RW]
+     0.0%       0  70.0%  1.01Mi    .bss
+    99.1%   437Ki  29.7%   437Ki    .data
+     0.4%  1.59Ki   0.1%  1.59Ki    .got.plt
+     0.3%  1.34Ki   0.1%  1.34Ki    .data.rel.ro
+     0.1%     544   0.0%     544    .dynamic
+     0.1%     360   0.0%     360    .init_array
+     0.0%      32   0.0%      32    .got
+     0.0%      16   0.0%      16    .tdata
+     0.0%       8   0.0%       8    .fini_array
+     0.0%       8   0.0%       8    [LOAD #5 [RW]]
+   2.0%   542Ki   7.8%   542Ki    LOAD #2 [R]
+    66.7%   361Ki  66.7%   361Ki    .dynstr
+    22.8%   123Ki  22.8%   123Ki    .dynsym
+     7.4%  39.9Ki   7.4%  39.9Ki    .gnu.hash
+     1.9%  10.3Ki   1.9%  10.3Ki    .gnu.version
+     0.9%  4.71Ki   0.9%  4.71Ki    .rela.plt
+     0.2%  1.01Ki   0.2%  1.01Ki    .rela.dyn
+     0.1%     743   0.1%     743    [LOAD #2 [R]]
+     0.1%     368   0.1%     368    .gnu.version_r
+     0.0%      36   0.0%      36    .note.gnu.build-id
+     0.0%      32   0.0%      32    .note.ABI-tag
+     0.0%      28   0.0%      28    .interp
+   0.0%  2.44Ki   0.0%       0    [ELF Headers]
+    46.2%  1.12Ki   NAN%       0    [18 Others]
+     5.1%     128   NAN%       0    [ELF Headers]
+     2.6%      64   NAN%       0    .comment
+     2.6%      64   NAN%       0    .data
+     2.6%      64   NAN%       0    .data.rel.ro
+     2.6%      64   NAN%       0    .debug_abbrev
+     2.6%      64   NAN%       0    .debug_info
+     2.6%      64   NAN%       0    .debug_line
+     2.6%      64   NAN%       0    .debug_loc
+     2.6%      64   NAN%       0    .debug_macinfo
+     2.6%      64   NAN%       0    .debug_ranges
+     2.6%      64   NAN%       0    .debug_str
+     2.6%      64   NAN%       0    .dynamic
+     2.6%      64   NAN%       0    .dynstr
+     2.6%      64   NAN%       0    .dynsym
+     2.6%      64   NAN%       0    .eh_frame
+     2.6%      64   NAN%       0    .eh_frame_hdr
+     2.6%      64   NAN%       0    .fini
+     2.6%      64   NAN%       0    .fini_array
+     2.6%      64   NAN%       0    .gcc_except_table
+     2.6%      64   NAN%       0    .gnu.hash
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 Bloaty displays a maximum of 20 lines for each level; other
@@ -404,11 +428,13 @@ There are usually just a few segments: one for each set of
 $ ./bloaty -d segments bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  71.4%  11.9Mi   0.0%       0 [Unmapped]
-  24.3%  4.03Mi  70.0%  4.03Mi LOAD #2 [RX]
-   4.4%   742Ki  30.0%  1.73Mi LOAD #3 [RW]
-   0.0%  2.44Ki   0.0%       0 [ELF Headers]
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  78.5%  21.3Mi   0.0%       0    [Unmapped]
+  10.9%  2.95Mi  43.4%  2.95Mi    LOAD #4 [R]
+   7.0%  1.89Mi  27.8%  1.89Mi    LOAD #3 [RX]
+   1.6%   441Ki  21.1%  1.44Mi    LOAD #5 [RW]
+   2.0%   542Ki   7.8%   542Ki    LOAD #2 [R]
+   0.0%  2.44Ki   0.0%       0    [ELF Headers]
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 Here we see one segment mapped `[RX]` (read/execute) and
@@ -424,13 +450,13 @@ This gives us a break-down sort of like real segments.
 $ ./bloaty -d segments CMakeFiles/libbloaty.dir/src/bloaty.cc.o
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  90.6%  1.19Mi   0.0%       0 Section []
-   6.0%  80.9Ki  78.9%  80.9Ki Section [AX]
-   1.7%  22.8Ki   0.0%       0 [ELF Headers]
-   1.6%  20.9Ki  20.4%  20.9Ki Section [A]
-   0.1%     796   0.0%       0 [Unmapped]
-   0.0%     656   0.7%     725 Section [AW]
- 100.0%  1.31Mi 100.0%   102Ki TOTAL
+  87.1%   906Ki   0.0%       0    Section []
+   8.4%  87.3Ki  78.2%  87.3Ki    Section [AX]
+   2.3%  24.3Ki  21.8%  24.3Ki    Section [A]
+   2.1%  21.8Ki   0.0%       0    [ELF Headers]
+   0.1%     785   0.0%       0    [Unmapped]
+   0.0%      24   0.1%      72    Section [AW]
+ 100.0%  1.02Mi 100.0%   111Ki    TOTAL
 ```
 
 ## Sections
@@ -444,28 +470,28 @@ its own section.  Bloaty's default output is sections.
 $ ./bloaty -d sections bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  34.6%  5.75Mi   0.0%       0 .debug_info
-  14.3%  2.37Mi   0.0%       0 .debug_loc
-  13.2%  2.20Mi  38.1%  2.20Mi .rodata
-  11.1%  1.84Mi   0.0%       0 .debug_str
-   7.4%  1.23Mi  21.4%  1.23Mi .text
-   0.0%       0  17.4%  1.00Mi .bss
-   5.8%   993Ki   0.0%       0 .debug_ranges
-   3.0%   504Ki   0.0%       0 .debug_line
-   2.6%   442Ki   7.5%   442Ki .data
-   1.8%   304Ki   5.2%   304Ki .rela.dyn
-   1.7%   297Ki   5.0%   297Ki .data.rel.ro
-   1.1%   187Ki   0.0%       0 .strtab
-   0.7%   123Ki   0.0%       0 .debug_abbrev
-   0.7%   114Ki   0.0%       0 .symtab
-   0.6%   109Ki   1.9%   109Ki .eh_frame
-   0.6%  97.7Ki   1.7%  97.7Ki .dynstr
-   0.3%  43.4Ki   0.7%  43.4Ki .dynsym
-   0.2%  34.3Ki   0.5%  27.9Ki [22 Others]
-   0.1%  17.9Ki   0.3%  17.9Ki .eh_frame_hdr
-   0.1%  17.8Ki   0.3%  17.8Ki .gcc_except_table
-   0.1%  13.0Ki   0.0%       0 .debug_aranges
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  30.7%  8.32Mi   0.0%       0    .debug_info
+  22.0%  5.97Mi   0.0%       0    .debug_loc
+  13.7%  3.71Mi   0.0%       0    .debug_str
+   9.7%  2.64Mi  38.7%  2.64Mi    .rodata
+   7.0%  1.89Mi  27.7%  1.89Mi    .text
+   5.8%  1.57Mi   0.0%       0    .debug_line
+   0.0%       0  14.8%  1.01Mi    .bss
+   3.3%   928Ki   0.0%       0    .debug_ranges
+   1.6%   442Ki   0.0%       0    .strtab
+   1.6%   437Ki   6.3%   437Ki    .data
+   1.3%   361Ki   5.2%   361Ki    .dynstr
+   0.8%   235Ki   3.4%   235Ki    .eh_frame
+   0.8%   219Ki   0.0%       0    .symtab
+   0.5%   135Ki   0.0%       0    .debug_abbrev
+   0.4%   123Ki   1.8%   123Ki    .dynsym
+   0.2%  51.9Ki   0.7%  51.8Ki    .gcc_except_table
+   0.1%  39.9Ki   0.6%  39.9Ki    .gnu.hash
+   0.1%  37.8Ki   0.5%  37.8Ki    .eh_frame_hdr
+   0.1%  15.9Ki   0.2%  14.0Ki    [24 Others]
+   0.0%  10.3Ki   0.1%  10.3Ki    .gnu.version
+   0.0%  5.50Ki   0.0%       0    [Unmapped]
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 ## Symbols
@@ -477,28 +503,28 @@ functions or variables.
 $ ./bloaty -d symbols bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  34.6%  5.75Mi   0.0%       0 [section .debug_info]
-  14.9%  2.48Mi  37.7%  2.17Mi [3725 Others]
-  14.3%  2.37Mi   0.0%       0 [section .debug_loc]
-  11.1%  1.84Mi   0.0%       0 [section .debug_str]
-   7.9%  1.31Mi  22.7%  1.31Mi insns
-   0.0%      44  17.4%  1024Ki g_instruction_table
-   5.8%   993Ki   0.0%       0 [section .debug_ranges]
-   3.0%   504Ki   0.0%       0 [section .debug_line]
-   1.3%   218Ki   3.7%   218Ki ARMInsts
-   1.2%   209Ki   3.5%   208Ki insn_name_maps
-   1.0%   175Ki   3.0%   175Ki insn_ops
-   0.8%   140Ki   2.4%   140Ki x86DisassemblerTwoByteOpcodes
-   0.7%   123Ki   0.0%       0 [section .debug_abbrev]
-   0.7%   119Ki   2.0%   118Ki AArch64_printInst
-   0.6%   101Ki   1.7%   101Ki Sparc_printInst
-   0.5%  79.9Ki   1.4%  79.8Ki PPC_printInst
-   0.4%  74.0Ki   1.3%  74.0Ki x86DisassemblerThreeByte38Opcodes
-   0.3%  55.9Ki   0.9%  55.8Ki DecoderTable32
-   0.3%  54.0Ki   0.9%  54.0Ki x86DisassemblerThreeByte3AOpcodes
-   0.3%  46.8Ki   0.8%  46.6Ki reg_name_maps
-   0.2%  40.0Ki   0.7%  39.9Ki printInstruction
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  30.7%  8.32Mi   0.0%       0    [section .debug_info]
+  22.0%  5.97Mi   0.0%       0    [section .debug_loc]
+  13.7%  3.71Mi   0.0%       0    [section .debug_str]
+  13.7%  3.70Mi  44.9%  3.06Mi    [5966 Others]
+   5.8%  1.57Mi   0.0%       0    [section .debug_line]
+   4.8%  1.31Mi  19.2%  1.31Mi    insns
+   0.0%      44  14.7%  1024Ki    g_instruction_table
+   3.3%   928Ki   0.0%       0    [section .debug_ranges]
+   0.9%   246Ki   3.5%   245Ki    printAliasInstr
+   0.9%   237Ki   3.4%   237Ki    [section .rodata]
+   0.6%   175Ki   2.5%   175Ki    insn_ops
+   0.6%   153Ki   2.2%   153Ki    ARMInsts
+   0.5%   140Ki   2.0%   140Ki    x86DisassemblerTwoByteOpcodes
+   0.5%   135Ki   0.0%       0    [section .debug_abbrev]
+   0.4%   110Ki   1.6%   109Ki    printInstruction.OpInfo
+   0.3%  94.3Ki   1.3%  94.2Ki    printInstruction.OpInfo2
+   0.3%  85.1Ki   1.2%  84.8Ki    insn_name_maps
+   0.3%  74.0Ki   1.1%  74.0Ki    x86DisassemblerThreeByte38Opcodes
+   0.2%  59.7Ki   0.9%  59.4Ki    printInstruction.AsmStrs
+   0.2%  55.9Ki   0.8%  55.8Ki    DecoderTable32
+   0.2%  54.0Ki   0.8%  54.0Ki    x86DisassemblerThreeByte3AOpcodes
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 You can control how symbols are demangled with the `-C MODE`
@@ -529,16 +555,16 @@ source will let you break it down by input file:
 $ ./bloaty -d inputfiles CMakeFiles/libbloaty.dir/src/*.o
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  37.6%  1.31Mi  34.1%   102Ki CMakeFiles/libbloaty.dir/src/bloaty.cc.o
-  18.9%   672Ki  14.2%  42.7Ki CMakeFiles/libbloaty.dir/src/dwarf.cc.o
-   9.7%   344Ki  12.7%  38.2Ki CMakeFiles/libbloaty.dir/src/elf.cc.o
-   9.3%   331Ki  12.8%  38.5Ki CMakeFiles/libbloaty.dir/src/bloaty.pb.cc.o
-   8.1%   289Ki   8.9%  26.8Ki CMakeFiles/libbloaty.dir/src/macho.cc.o
-   5.8%   206Ki   4.6%  13.9Ki CMakeFiles/libbloaty.dir/src/webassembly.cc.o
-   4.2%   149Ki   6.2%  18.7Ki CMakeFiles/libbloaty.dir/src/demangle.cc.o
-   3.8%   137Ki   4.0%  11.9Ki CMakeFiles/libbloaty.dir/src/range_map.cc.o
-   2.6%  93.5Ki   2.4%  7.06Ki CMakeFiles/libbloaty.dir/src/disassemble.cc.o
- 100.0%  3.48Mi 100.0%   300Ki TOTAL
+  42.2%  1.02Mi  37.3%   111Ki    CMakeFiles/libbloaty.dir/src/bloaty.cc.o
+  16.0%   394Ki  15.6%  46.7Ki    CMakeFiles/libbloaty.dir/src/dwarf.cc.o
+  10.5%   257Ki  10.2%  30.6Ki    CMakeFiles/libbloaty.dir/src/bloaty.pb.cc.o
+   8.8%   217Ki   9.9%  29.7Ki    CMakeFiles/libbloaty.dir/src/elf.cc.o
+   8.0%   198Ki   8.9%  26.8Ki    CMakeFiles/libbloaty.dir/src/macho.cc.o
+   4.4%   107Ki   4.4%  13.0Ki    CMakeFiles/libbloaty.dir/src/webassembly.cc.o
+   4.2%   103Ki   7.6%  22.9Ki    CMakeFiles/libbloaty.dir/src/demangle.cc.o
+   3.4%  83.8Ki   3.4%  10.2Ki    CMakeFiles/libbloaty.dir/src/range_map.cc.o
+   2.5%  62.4Ki   2.6%  7.91Ki    CMakeFiles/libbloaty.dir/src/disassemble.cc.o
+ 100.0%  2.41Mi 100.0%   299Ki    TOTAL
 ```
 
 ## Archive Members
@@ -551,28 +577,28 @@ archive.
 $ ./bloaty -d armembers liblibbloaty.a
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  25.9%  1.31Mi  21.6%   102Ki bloaty.cc.o
-  19.7%  1019Ki  19.2%  90.8Ki cxa_demangle.cpp.o
-  13.0%   672Ki   9.0%  42.7Ki dwarf.cc.o
-   6.6%   344Ki   8.1%  38.2Ki elf.cc.o
-   6.4%   331Ki   8.1%  38.5Ki bloaty.pb.cc.o
-   5.6%   289Ki   5.7%  26.8Ki macho.cc.o
-   4.0%   206Ki   2.9%  13.9Ki webassembly.cc.o
-   2.9%   149Ki   3.9%  18.7Ki demangle.cc.o
-   2.6%   137Ki   2.5%  11.9Ki range_map.cc.o
-   2.1%   110Ki   3.7%  17.7Ki charconv_bigint.cc.o
-   1.8%  93.5Ki   1.5%  7.06Ki disassemble.cc.o
-   1.7%  88.1Ki   2.9%  13.6Ki escaping.cc.o
-   1.4%  72.6Ki   2.1%  10.0Ki [8 Others]
-   1.3%  66.7Ki   2.4%  11.5Ki numbers.cc.o
-   1.2%  61.8Ki   0.0%       0 [AR Symbol Table]
-   1.0%  52.9Ki   2.9%  13.8Ki charconv.cc.o
-   0.8%  40.7Ki   1.2%  5.58Ki str_cat.cc.o
-   0.6%  29.4Ki   0.8%  3.66Ki string_view.cc.o
-   0.5%  26.2Ki   0.5%  2.25Ki ascii.cc.o
-   0.5%  24.8Ki   0.6%  3.01Ki throw_delegate.cc.o
-   0.5%  24.2Ki   0.3%  1.58Ki str_split.cc.o
- 100.0%  5.06Mi 100.0%   473Ki TOTAL
+  28.1%  1.11Mi  23.1%   112Ki    cxa_demangle.cpp.o
+  25.7%  1.02Mi  22.8%   111Ki    bloaty.cc.o
+   9.7%   394Ki   9.5%  46.7Ki    dwarf.cc.o
+   6.4%   257Ki   6.3%  30.6Ki    bloaty.pb.cc.o
+   5.4%   217Ki   6.1%  29.7Ki    elf.cc.o
+   4.9%   198Ki   5.5%  26.8Ki    macho.cc.o
+   2.6%   107Ki   2.7%  13.0Ki    webassembly.cc.o
+   2.5%   103Ki   4.7%  22.9Ki    demangle.cc.o
+   2.1%  83.8Ki   2.1%  10.2Ki    range_map.cc.o
+   1.9%  77.8Ki   3.2%  15.7Ki    charconv_bigint.cc.o
+   1.8%  72.7Ki   3.0%  14.6Ki    escaping.cc.o
+   1.5%  62.4Ki   1.6%  7.91Ki    disassemble.cc.o
+   1.4%  57.9Ki   0.0%       0    [AR Symbol Table]
+   1.2%  46.9Ki   1.3%  6.60Ki    [8 Others]
+   1.1%  43.9Ki   2.4%  11.7Ki    charconv.cc.o
+   1.0%  38.7Ki   2.0%  9.74Ki    numbers.cc.o
+   0.7%  29.9Ki   1.2%  5.71Ki    str_cat.cc.o
+   0.6%  24.6Ki   0.9%  4.25Ki    string_view.cc.o
+   0.5%  21.1Ki   0.7%  3.21Ki    throw_delegate.cc.o
+   0.4%  17.7Ki   0.4%  2.17Ki    ascii.cc.o
+   0.3%  13.7Ki   0.7%  3.52Ki    charconv_parse.cc.o
+ 100.0%  3.95Mi 100.0%   489Ki    TOTAL
 ```
 
 You are free to use this data source even for non-`.a`
@@ -588,28 +614,28 @@ corresponding source file) each bit of the binary came from.
 $ ./bloaty -d compileunits bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  36.3%  6.03Mi  31.8%  1.83Mi [119 Others]
-   9.5%  1.59Mi   7.1%   416Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c
-   1.8%   310Ki  18.3%  1.05Mi ../third_party/capstone/arch/M68K/M68KDisassembler.c
-   5.7%   974Ki  14.6%   863Ki ../third_party/capstone/arch/X86/X86Mapping.c
-   4.4%   756Ki   2.2%   127Ki ../src/bloaty.cc
-   3.5%   590Ki   0.7%  41.6Ki ../third_party/re2/re2/dfa.cc
-   3.5%   589Ki   0.7%  41.7Ki ../third_party/re2/re2/re2.cc
-   3.2%   543Ki   0.7%  42.5Ki ../third_party/re2/re2/regexp.cc
-   3.2%   538Ki   7.3%   431Ki ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
-   3.1%   529Ki   1.6%  91.5Ki ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
-   2.9%   490Ki   1.5%  88.8Ki ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
-   2.8%   484Ki   2.9%   170Ki ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c
-   2.8%   483Ki   1.8%   104Ki ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
-   2.6%   442Ki   1.1%  67.4Ki ../third_party/capstone/arch/Mips/MipsDisassembler.c
-   2.4%   402Ki   0.6%  38.1Ki ../third_party/re2/re2/parse.cc
-   2.2%   374Ki   0.9%  53.9Ki ../src/dwarf.cc
-   2.1%   362Ki   0.5%  28.9Ki ../third_party/re2/re2/compile.cc
-   2.1%   357Ki   0.4%  23.1Ki ../third_party/re2/re2/prog.cc
-   2.0%   334Ki   1.7%   100Ki ../third_party/capstone/arch/ARM/ARMInstPrinter.c
-   2.0%   334Ki   1.9%   110Ki ../third_party/capstone/arch/PowerPC/PPCInstPrinter.c
-   1.9%   323Ki   1.7%   101Ki ../third_party/capstone/arch/X86/X86IntelInstPrinter.c
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  34.7%  9.38Mi  39.4%  2.68Mi    [153 Others]
+  16.9%  4.58Mi   4.9%   341Ki    ../third_party/protobuf/src/google/protobuf/descriptor.cc
+   8.9%  2.42Mi   4.3%   301Ki    ../third_party/protobuf/src/google/protobuf/descriptor.pb.cc
+   4.1%  1.11Mi   4.5%   311Ki    ../third_party/capstone/arch/ARM/ARMDisassembler.c
+   1.5%   415Ki  15.6%  1.07Mi    ../third_party/capstone/arch/M68K/M68KDisassembler.c
+   3.4%   944Ki   1.3%  92.9Ki    ../third_party/protobuf/src/google/protobuf/generated_message_reflection.cc
+   3.3%   925Ki   1.3%  87.7Ki    ../third_party/protobuf/src/google/protobuf/text_format.cc
+   3.3%   923Ki  11.8%   820Ki    ../third_party/capstone/arch/X86/X86Mapping.c
+   2.6%   716Ki   0.6%  44.6Ki    ../third_party/protobuf/src/google/protobuf/descriptor_database.cc
+   2.4%   676Ki   1.0%  73.1Ki    ../third_party/protobuf/src/google/protobuf/extension_set.cc
+   2.2%   619Ki   0.6%  41.7Ki    ../third_party/protobuf/src/google/protobuf/generated_message_util.cc
+   2.1%   584Ki   1.6%   113Ki    ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
+   2.1%   582Ki   0.7%  48.4Ki    ../third_party/protobuf/src/google/protobuf/message.cc
+   1.9%   533Ki   1.9%   131Ki    ../src/bloaty.cc
+   1.9%   529Ki   6.1%   427Ki    ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
+   1.6%   439Ki   0.5%  35.1Ki    ../third_party/protobuf/src/google/protobuf/wire_format.cc
+   1.4%   394Ki   0.5%  31.5Ki    ../third_party/re2/re2/regexp.cc
+   1.4%   392Ki   0.4%  28.6Ki    ../third_party/re2/re2/dfa.cc
+   1.4%   383Ki   1.4%  99.4Ki    ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
+   1.3%   373Ki   1.0%  73.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
+   1.3%   370Ki   0.5%  34.6Ki    ../third_party/re2/re2/re2.cc
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 ## Inlines
@@ -625,28 +651,28 @@ line as you're tracing through a program.
 $ ./bloaty -d inlines bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  34.6%  5.75Mi   0.0%       0 [section .debug_info]
-  14.3%  2.37Mi   0.0%       0 [section .debug_loc]
-  13.2%  2.20Mi  38.1%  2.20Mi [section .rodata]
-  11.1%  1.84Mi   0.0%       0 [section .debug_str]
-   7.5%  1.24Mi  21.2%  1.22Mi [34614 Others]
-   0.0%       0  17.4%  1.00Mi [section .bss]
-   5.8%   993Ki   0.0%       0 [section .debug_ranges]
-   3.0%   504Ki   0.0%       0 [section .debug_line]
-   2.6%   442Ki   7.5%   442Ki [section .data]
-   1.8%   304Ki   5.2%   304Ki [section .rela.dyn]
-   1.7%   297Ki   5.0%   297Ki [section .data.rel.ro]
-   1.1%   187Ki   0.0%       0 [section .strtab]
-   0.7%   123Ki   0.0%       0 [section .debug_abbrev]
-   0.7%   114Ki   0.0%       0 [section .symtab]
-   0.6%   109Ki   1.9%   109Ki [section .eh_frame]
-   0.6%  97.7Ki   1.7%  97.7Ki [section .dynstr]
-   0.3%  43.4Ki   0.7%  43.4Ki [section .dynsym]
-   0.1%  21.6Ki   0.4%  21.6Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c:115
-   0.1%  18.5Ki   0.3%  18.5Ki /usr/include/c++/7/bits/basic_string.h:220
-   0.1%  17.9Ki   0.3%  17.9Ki [section .eh_frame_hdr]
-   0.1%  17.8Ki   0.3%  17.8Ki [section .gcc_except_table]
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  30.7%  8.32Mi   0.0%       0    [section .debug_info]
+  22.0%  5.97Mi   0.0%       0    [section .debug_loc]
+  13.7%  3.71Mi   0.0%       0    [section .debug_str]
+   9.7%  2.64Mi  38.7%  2.64Mi    [section .rodata]
+   6.9%  1.86Mi  27.3%  1.86Mi    [43370 Others]
+   5.8%  1.57Mi   0.0%       0    [section .debug_line]
+   0.0%       0  14.8%  1.01Mi    [section .bss]
+   3.3%   928Ki   0.0%       0    [section .debug_ranges]
+   1.6%   442Ki   0.0%       0    [section .strtab]
+   1.6%   437Ki   6.3%   437Ki    [section .data]
+   1.3%   361Ki   5.2%   361Ki    [section .dynstr]
+   0.8%   235Ki   3.4%   235Ki    [section .eh_frame]
+   0.8%   219Ki   0.0%       0    [section .symtab]
+   0.5%   135Ki   0.0%       0    [section .debug_abbrev]
+   0.4%   123Ki   1.8%   123Ki    [section .dynsym]
+   0.2%  51.9Ki   0.7%  51.8Ki    [section .gcc_except_table]
+   0.1%  39.9Ki   0.6%  39.9Ki    [section .gnu.hash]
+   0.1%  37.8Ki   0.5%  37.8Ki    [section .eh_frame_hdr]
+   0.1%  25.2Ki   0.4%  25.2Ki    /usr/bin/../lib/gcc/x86_64-linux-gnu/8/../../../../include/c++/8/bits/basic_string.h:176
+   0.1%  16.8Ki   0.2%  16.8Ki    /usr/bin/../lib/gcc/x86_64-linux-gnu/8/../../../../include/c++/8/bits/basic_string.h:172
+   0.1%  15.4Ki   0.2%  15.4Ki    /usr/bin/../lib/gcc/x86_64-linux-gnu/8/../../../../include/c++/8/ext/new_allocator.h:125
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 # Custom Data Sources
@@ -660,28 +686,28 @@ together:
 $ ./bloaty -d compileunits bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  36.3%  6.03Mi  31.8%  1.83Mi [119 Others]
-   9.5%  1.59Mi   7.1%   416Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c
-   1.8%   310Ki  18.3%  1.05Mi ../third_party/capstone/arch/M68K/M68KDisassembler.c
-   5.7%   974Ki  14.6%   863Ki ../third_party/capstone/arch/X86/X86Mapping.c
-   4.4%   756Ki   2.2%   127Ki ../src/bloaty.cc
-   3.5%   590Ki   0.7%  41.6Ki ../third_party/re2/re2/dfa.cc
-   3.5%   589Ki   0.7%  41.7Ki ../third_party/re2/re2/re2.cc
-   3.2%   543Ki   0.7%  42.5Ki ../third_party/re2/re2/regexp.cc
-   3.2%   538Ki   7.3%   431Ki ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
-   3.1%   529Ki   1.6%  91.5Ki ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
-   2.9%   490Ki   1.5%  88.8Ki ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
-   2.8%   484Ki   2.9%   170Ki ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c
-   2.8%   483Ki   1.8%   104Ki ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
-   2.6%   442Ki   1.1%  67.4Ki ../third_party/capstone/arch/Mips/MipsDisassembler.c
-   2.4%   402Ki   0.6%  38.1Ki ../third_party/re2/re2/parse.cc
-   2.2%   374Ki   0.9%  53.9Ki ../src/dwarf.cc
-   2.1%   362Ki   0.5%  28.9Ki ../third_party/re2/re2/compile.cc
-   2.1%   357Ki   0.4%  23.1Ki ../third_party/re2/re2/prog.cc
-   2.0%   334Ki   1.7%   100Ki ../third_party/capstone/arch/ARM/ARMInstPrinter.c
-   2.0%   334Ki   1.9%   110Ki ../third_party/capstone/arch/PowerPC/PPCInstPrinter.c
-   1.9%   323Ki   1.7%   101Ki ../third_party/capstone/arch/X86/X86IntelInstPrinter.c
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  34.7%  9.38Mi  39.4%  2.68Mi    [153 Others]
+  16.9%  4.58Mi   4.9%   341Ki    ../third_party/protobuf/src/google/protobuf/descriptor.cc
+   8.9%  2.42Mi   4.3%   301Ki    ../third_party/protobuf/src/google/protobuf/descriptor.pb.cc
+   4.1%  1.11Mi   4.5%   311Ki    ../third_party/capstone/arch/ARM/ARMDisassembler.c
+   1.5%   415Ki  15.6%  1.07Mi    ../third_party/capstone/arch/M68K/M68KDisassembler.c
+   3.4%   944Ki   1.3%  92.9Ki    ../third_party/protobuf/src/google/protobuf/generated_message_reflection.cc
+   3.3%   925Ki   1.3%  87.7Ki    ../third_party/protobuf/src/google/protobuf/text_format.cc
+   3.3%   923Ki  11.8%   820Ki    ../third_party/capstone/arch/X86/X86Mapping.c
+   2.6%   716Ki   0.6%  44.6Ki    ../third_party/protobuf/src/google/protobuf/descriptor_database.cc
+   2.4%   676Ki   1.0%  73.1Ki    ../third_party/protobuf/src/google/protobuf/extension_set.cc
+   2.2%   619Ki   0.6%  41.7Ki    ../third_party/protobuf/src/google/protobuf/generated_message_util.cc
+   2.1%   584Ki   1.6%   113Ki    ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
+   2.1%   582Ki   0.7%  48.4Ki    ../third_party/protobuf/src/google/protobuf/message.cc
+   1.9%   533Ki   1.9%   131Ki    ../src/bloaty.cc
+   1.9%   529Ki   6.1%   427Ki    ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
+   1.6%   439Ki   0.5%  35.1Ki    ../third_party/protobuf/src/google/protobuf/wire_format.cc
+   1.4%   394Ki   0.5%  31.5Ki    ../third_party/re2/re2/regexp.cc
+   1.4%   392Ki   0.4%  28.6Ki    ../third_party/re2/re2/dfa.cc
+   1.4%   383Ki   1.4%  99.4Ki    ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
+   1.3%   373Ki   1.0%  73.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
+   1.3%   370Ki   0.5%  34.6Ki    ../third_party/re2/re2/re2.cc
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 If we want to bucket all of these by which library they came
@@ -716,28 +742,28 @@ Then use the data source like so:
 $ ./bloaty -c bloaty_package.bloaty -d bloaty_package bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  58.5%  9.73Mi  83.3%  4.80Mi third_party/capstone
-  24.2%  4.02Mi   5.4%   318Ki third_party/re2
-  11.6%  1.92Mi   6.4%   377Ki src
-   2.9%   490Ki   1.5%  88.8Ki third_party/demumble
-   1.5%   254Ki   1.7%  98.4Ki third_party/abseil
-   0.3%  52.7Ki   0.0%       0 [section .debug_str]
-   0.2%  36.3Ki   0.6%  36.3Ki [section .rodata]
-   0.1%  19.6Ki   0.0%       0 [section .strtab]
-   0.1%  17.8Ki   0.3%  17.8Ki [section .gcc_except_table]
-   0.1%  16.4Ki   0.0%       0 [section .debug_loc]
-   0.1%  15.1Ki   0.0%       0 [section .symtab]
-   0.1%  13.0Ki   0.0%       0 [section .debug_aranges]
-   0.1%  12.3Ki   0.2%  12.3Ki [section .gnu.hash]
-   0.1%  11.3Ki   0.1%  8.01Ki [26 Others]
-   0.1%  9.80Ki   0.2%  9.80Ki [section .dynstr]
-   0.0%  6.56Ki   0.1%  6.56Ki [section .data]
-   0.0%  6.12Ki   0.1%  6.12Ki [section .dynsym]
-   0.0%  5.08Ki   0.0%       0 [section .debug_ranges]
-   0.0%  4.04Ki   0.1%  4.04Ki [section .text]
-   0.0%  3.62Ki   0.1%  3.62Ki [section .gnu.version]
-   0.0%  3.49Ki   0.0%       0 [Unmapped]
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  53.0%  14.3Mi  19.3%  1.32Mi    third_party/protobuf
+  28.1%  7.60Mi  64.2%  4.37Mi    third_party/capstone
+   9.1%  2.47Mi   3.6%   253Ki    third_party/re2
+   5.0%  1.34Mi   4.7%   326Ki    src
+   2.1%   584Ki   1.6%   113Ki    third_party/demumble
+   0.7%   199Ki   1.2%  84.0Ki    third_party/abseil
+   0.7%   194Ki   2.8%   194Ki    [section .rodata]
+   0.2%  68.4Ki   0.0%       0    [section .debug_str]
+   0.2%  51.8Ki   0.7%  51.8Ki    [section .gcc_except_table]
+   0.2%  43.5Ki   0.0%       0    [section .symtab]
+   0.1%  39.9Ki   0.6%  39.9Ki    [section .gnu.hash]
+   0.1%  37.0Ki   0.5%  37.0Ki    [section .text]
+   0.1%  31.2Ki   0.0%       0    [section .debug_loc]
+   0.1%  27.8Ki   0.0%       0    [section .strtab]
+   0.1%  15.0Ki   0.2%  15.0Ki    [section .dynstr]
+   0.1%  14.3Ki   0.2%  11.4Ki    [28 Others]
+   0.0%  10.3Ki   0.1%  10.3Ki    [section .gnu.version]
+   0.0%  8.34Ki   0.1%  8.34Ki    [section .dynsym]
+   0.0%  5.92Ki   0.0%       0    [section .debug_ranges]
+   0.0%  5.50Ki   0.0%       0    [Unmapped]
+   0.0%  4.18Ki   0.1%  4.18Ki    [section .eh_frame]
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 We can get an even richer report by combining the
@@ -748,91 +774,112 @@ source:
 $ ./bloaty -c config.bloaty -d bloaty_package,compileunits bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  58.5%  9.73Mi  83.3%  4.80Mi third_party/capstone
-      16.3%  1.59Mi   8.5%   416Ki ../third_party/capstone/arch/ARM/ARMDisassembler.c
-      14.8%  1.44Mi   6.6%   325Ki [36 Others]
-       3.1%   310Ki  22.0%  1.05Mi ../third_party/capstone/arch/M68K/M68KDisassembler.c
-       9.8%   974Ki  17.6%   863Ki ../third_party/capstone/arch/X86/X86Mapping.c
-       5.4%   538Ki   8.8%   431Ki ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
-       5.3%   529Ki   1.9%  91.5Ki ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
-       4.9%   484Ki   3.5%   170Ki ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c
-       4.9%   483Ki   2.1%   104Ki ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
-       4.4%   442Ki   1.4%  67.4Ki ../third_party/capstone/arch/Mips/MipsDisassembler.c
-       3.4%   334Ki   2.0%   100Ki ../third_party/capstone/arch/ARM/ARMInstPrinter.c
-       3.4%   334Ki   2.2%   110Ki ../third_party/capstone/arch/PowerPC/PPCInstPrinter.c
-       3.2%   323Ki   2.1%   101Ki ../third_party/capstone/arch/X86/X86IntelInstPrinter.c
-       3.1%   309Ki   2.3%   110Ki ../third_party/capstone/arch/Sparc/SparcInstPrinter.c
-       3.0%   295Ki   0.7%  35.9Ki ../third_party/capstone/arch/PowerPC/PPCDisassembler.c
-       2.8%   281Ki   4.8%   237Ki ../third_party/capstone/arch/AArch64/AArch64Mapping.c
-       2.6%   260Ki   4.3%   213Ki ../third_party/capstone/arch/ARM/ARMMapping.c
-       2.4%   237Ki   0.6%  27.2Ki ../third_party/capstone/arch/SystemZ/SystemZDisassembler.c
-       2.0%   200Ki   3.3%   160Ki ../third_party/capstone/arch/PowerPC/PPCMapping.c
-       2.0%   199Ki   3.1%   152Ki ../third_party/capstone/arch/Mips/MipsMapping.c
-       1.8%   181Ki   0.6%  29.8Ki ../third_party/capstone/arch/X86/X86Disassembler.c
-       1.4%   137Ki   1.7%  83.3Ki ../third_party/capstone/arch/SystemZ/SystemZMapping.c
-  24.2%  4.02Mi   5.4%   318Ki third_party/re2
-      14.4%   590Ki  13.0%  41.6Ki ../third_party/re2/re2/dfa.cc
-      14.3%   589Ki  13.1%  41.7Ki ../third_party/re2/re2/re2.cc
-      13.2%   543Ki  13.4%  42.5Ki ../third_party/re2/re2/regexp.cc
-       9.8%   402Ki  12.0%  38.1Ki ../third_party/re2/re2/parse.cc
-       8.8%   362Ki   9.1%  28.9Ki ../third_party/re2/re2/compile.cc
-       8.7%   357Ki   7.3%  23.1Ki ../third_party/re2/re2/prog.cc
-       7.1%   292Ki   8.2%  26.0Ki ../third_party/re2/re2/simplify.cc
-       6.5%   267Ki   5.7%  18.3Ki ../third_party/re2/re2/nfa.cc
-       4.1%   168Ki   2.5%  7.94Ki ../third_party/re2/re2/tostring.cc
-       3.8%   157Ki   2.4%  7.54Ki ../third_party/re2/re2/onepass.cc
-       3.4%   139Ki   2.8%  8.93Ki ../third_party/re2/re2/bitstate.cc
-       1.9%  80.1Ki   5.7%  18.1Ki ../third_party/re2/re2/unicode_groups.cc
-       1.1%  45.3Ki   1.1%  3.38Ki ../third_party/re2/re2/perl_groups.cc
-       1.0%  41.9Ki   0.8%  2.40Ki ../third_party/re2/re2/stringpiece.cc
-       0.9%  36.8Ki   0.7%  2.30Ki ../third_party/re2/util/strutil.cc
-       0.8%  33.5Ki   2.1%  6.58Ki ../third_party/re2/re2/unicode_casefold.cc
-       0.1%  4.88Ki   0.4%  1.18Ki ../third_party/re2/util/rune.cc
-  11.6%  1.92Mi   6.4%   377Ki src
-      38.4%   756Ki  33.8%   127Ki ../src/bloaty.cc
-      19.0%   374Ki  14.3%  53.9Ki ../src/dwarf.cc
-       8.4%   164Ki  13.7%  51.8Ki src/bloaty.pb.cc
-       7.7%   151Ki  10.5%  39.5Ki ../src/elf.cc
-       7.5%   147Ki   0.8%  3.17Ki ../src/main.cc
-       5.7%   111Ki   7.9%  29.7Ki ../src/macho.cc
-       4.5%  89.1Ki   4.5%  16.8Ki ../src/webassembly.cc
-       4.0%  78.9Ki   9.0%  33.9Ki ../src/demangle.cc
-       2.9%  58.0Ki   3.6%  13.7Ki ../src/range_map.cc
-       1.9%  36.9Ki   1.9%  7.13Ki ../src/disassemble.cc
-   2.9%   490Ki   1.5%  88.8Ki third_party/demumble
-     100.0%   490Ki 100.0%  88.8Ki ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
-   1.5%   254Ki   1.7%  98.4Ki third_party/abseil
-      21.3%  54.2Ki  23.0%  22.6Ki ../third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
-      18.4%  47.0Ki  14.9%  14.7Ki ../third_party/abseil-cpp/absl/strings/escaping.cc
-      11.6%  29.6Ki  14.5%  14.2Ki ../third_party/abseil-cpp/absl/strings/charconv.cc
-      11.6%  29.5Ki  12.5%  12.2Ki ../third_party/abseil-cpp/absl/strings/numbers.cc
-       6.9%  17.7Ki   6.6%  6.46Ki ../third_party/abseil-cpp/absl/strings/str_cat.cc
-       6.7%  17.2Ki   7.6%  7.46Ki ../third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
-       5.6%  14.4Ki   4.8%  4.76Ki ../third_party/abseil-cpp/absl/strings/string_view.cc
-       4.0%  10.2Ki   1.9%  1.85Ki ../third_party/abseil-cpp/absl/strings/ascii.cc
-       3.4%  8.60Ki   3.3%  3.26Ki ../third_party/abseil-cpp/absl/base/internal/raw_logging.cc
-       3.1%  7.88Ki   4.4%  4.29Ki ../third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
-       3.0%  7.54Ki   2.8%  2.78Ki ../third_party/abseil-cpp/absl/strings/substitute.cc
-       2.9%  7.28Ki   2.0%  1.95Ki ../third_party/abseil-cpp/absl/strings/str_split.cc
-       1.3%  3.29Ki   1.6%  1.53Ki ../third_party/abseil-cpp/absl/strings/internal/memutil.cc
-       0.2%     628   0.2%     230 ../third_party/abseil-cpp/absl/strings/internal/utf8.cc
-   0.3%  52.7Ki   0.0%       0 [section .debug_str]
-   0.2%  36.3Ki   0.6%  36.3Ki [section .rodata]
-   0.1%  19.6Ki   0.0%       0 [section .strtab]
-   0.1%  17.8Ki   0.3%  17.8Ki [section .gcc_except_table]
-   0.1%  16.4Ki   0.0%       0 [section .debug_loc]
-   0.1%  15.1Ki   0.0%       0 [section .symtab]
-   0.1%  13.0Ki   0.0%       0 [section .debug_aranges]
-   0.1%  12.3Ki   0.2%  12.3Ki [section .gnu.hash]
-   0.1%  11.3Ki   0.1%  8.01Ki [26 Others]
-   0.1%  9.80Ki   0.2%  9.80Ki [section .dynstr]
-   0.0%  6.56Ki   0.1%  6.56Ki [section .data]
-   0.0%  6.12Ki   0.1%  6.12Ki [section .dynsym]
-   0.0%  5.08Ki   0.0%       0 [section .debug_ranges]
-   0.0%  4.04Ki   0.1%  4.04Ki [section .text]
-   0.0%  3.62Ki   0.1%  3.62Ki [section .gnu.version]
-   0.0%  3.49Ki   0.0%       0 [Unmapped]
- 100.0%  16.6Mi 100.0%  5.76Mi TOTAL
+  53.0%  14.3Mi  19.3%  1.32Mi    third_party/protobuf
+    31.9%  4.58Mi  25.4%   341Ki    ../third_party/protobuf/src/google/protobuf/descriptor.cc
+    16.9%  2.42Mi  22.4%   301Ki    ../third_party/protobuf/src/google/protobuf/descriptor.pb.cc
+     6.4%   944Ki   6.9%  92.9Ki    ../third_party/protobuf/src/google/protobuf/generated_message_reflection.cc
+     6.3%   925Ki   6.5%  87.7Ki    ../third_party/protobuf/src/google/protobuf/text_format.cc
+     4.9%   716Ki   3.3%  44.6Ki    ../third_party/protobuf/src/google/protobuf/descriptor_database.cc
+     4.6%   676Ki   5.4%  73.1Ki    ../third_party/protobuf/src/google/protobuf/extension_set.cc
+     4.2%   619Ki   3.1%  41.7Ki    ../third_party/protobuf/src/google/protobuf/generated_message_util.cc
+     4.0%   582Ki   3.6%  48.4Ki    ../third_party/protobuf/src/google/protobuf/message.cc
+     3.7%   538Ki   4.1%  54.7Ki    [13 Others]
+     3.0%   439Ki   2.6%  35.1Ki    ../third_party/protobuf/src/google/protobuf/wire_format.cc
+     2.3%   331Ki   2.7%  35.9Ki    ../third_party/protobuf/src/google/protobuf/map_field.cc
+     1.9%   281Ki   2.5%  33.4Ki    ../third_party/protobuf/src/google/protobuf/stubs/strutil.cc
+     1.9%   277Ki   1.4%  18.7Ki    ../third_party/protobuf/src/google/protobuf/dynamic_message.cc
+     1.8%   262Ki   1.5%  19.6Ki    ../third_party/protobuf/src/google/protobuf/extension_set_heavy.cc
+     1.3%   194Ki   3.1%  41.7Ki    ../third_party/protobuf/src/google/protobuf/io/tokenizer.cc
+     1.2%   175Ki   1.5%  20.3Ki    ../third_party/protobuf/src/google/protobuf/wire_format_lite.cc
+     0.9%   129Ki   0.8%  10.6Ki    ../third_party/protobuf/src/google/protobuf/unknown_field_set.cc
+     0.9%   128Ki   0.5%  7.41Ki    ../third_party/protobuf/src/google/protobuf/reflection_ops.cc
+     0.8%   123Ki   0.9%  11.7Ki    ../third_party/protobuf/src/google/protobuf/stubs/common.cc
+     0.6%  95.2Ki   1.0%  13.0Ki    ../third_party/protobuf/src/google/protobuf/message_lite.cc
+     0.5%  77.2Ki   0.9%  12.8Ki    ../third_party/protobuf/src/google/protobuf/io/coded_stream.cc
+  28.1%  7.60Mi  64.2%  4.37Mi    third_party/capstone
+    15.6%  1.19Mi   7.1%   319Ki    [36 Others]
+    14.6%  1.11Mi   7.0%   311Ki    ../third_party/capstone/arch/ARM/ARMDisassembler.c
+     5.3%   415Ki  24.4%  1.07Mi    ../third_party/capstone/arch/M68K/M68KDisassembler.c
+    11.9%   923Ki  18.3%   820Ki    ../third_party/capstone/arch/X86/X86Mapping.c
+     6.8%   529Ki   9.6%   427Ki    ../third_party/capstone/arch/X86/X86DisassemblerDecoder.c
+     4.9%   383Ki   2.2%  99.4Ki    ../third_party/capstone/arch/X86/X86ATTInstPrinter.c
+     4.8%   373Ki   1.6%  73.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
+     4.3%   333Ki   1.2%  54.2Ki    ../third_party/capstone/arch/Mips/MipsDisassembler.c
+     3.7%   290Ki   3.4%   150Ki    ../third_party/capstone/arch/AArch64/AArch64InstPrinter.c
+     3.2%   249Ki   1.9%  83.6Ki    ../third_party/capstone/arch/ARM/ARMInstPrinter.c
+     3.2%   245Ki   4.9%   220Ki    ../third_party/capstone/arch/AArch64/AArch64Mapping.c
+     2.9%   222Ki   4.4%   196Ki    ../third_party/capstone/arch/ARM/ARMMapping.c
+     2.8%   221Ki   2.2%  98.6Ki    ../third_party/capstone/arch/X86/X86IntelInstPrinter.c
+     2.6%   201Ki   2.1%  95.9Ki    ../third_party/capstone/arch/PowerPC/PPCInstPrinter.c
+     2.1%   166Ki   3.0%   133Ki    ../third_party/capstone/arch/Mips/MipsMapping.c
+     2.0%   157Ki   0.4%  18.6Ki    ../third_party/capstone/arch/X86/X86Disassembler.c
+     2.0%   156Ki   0.6%  28.8Ki    ../third_party/capstone/arch/PowerPC/PPCDisassembler.c
+     2.0%   155Ki   2.8%   126Ki    ../third_party/capstone/arch/PowerPC/PPCMapping.c
+     2.0%   154Ki   2.0%  90.9Ki    ../third_party/capstone/arch/Sparc/SparcInstPrinter.c
+     1.7%   131Ki   0.4%  17.8Ki    ../third_party/capstone/arch/TMS320C64x/TMS320C64xDisassembler.c
+     1.6%   121Ki   0.4%  19.8Ki    ../third_party/capstone/arch/SystemZ/SystemZDisassembler.c
+   9.1%  2.47Mi   3.6%   253Ki    third_party/re2
+    15.6%   394Ki  12.4%  31.5Ki    ../third_party/re2/re2/regexp.cc
+    15.5%   392Ki  11.3%  28.6Ki    ../third_party/re2/re2/dfa.cc
+    14.7%   370Ki  13.6%  34.6Ki    ../third_party/re2/re2/re2.cc
+    12.0%   304Ki  29.9%  76.0Ki    ../third_party/re2/re2/parse.cc
+    11.7%   295Ki   8.8%  22.4Ki    ../third_party/re2/re2/prog.cc
+     9.3%   234Ki   8.6%  21.8Ki    ../third_party/re2/re2/compile.cc
+     4.6%   114Ki   4.8%  12.1Ki    ../third_party/re2/re2/simplify.cc
+     4.1%   103Ki   3.5%  8.91Ki    ../third_party/re2/re2/nfa.cc
+     3.5%  89.1Ki   1.7%  4.42Ki    ../third_party/re2/re2/onepass.cc
+     2.9%  74.3Ki   1.4%  3.46Ki    ../third_party/re2/re2/tostring.cc
+     2.1%  52.5Ki   1.8%  4.61Ki    ../third_party/re2/re2/bitstate.cc
+     1.2%  29.3Ki   0.7%  1.90Ki    ../third_party/re2/re2/stringpiece.cc
+     1.0%  24.7Ki   0.8%  2.08Ki    ../third_party/re2/util/strutil.cc
+     0.9%  23.2Ki   0.0%       0    ../third_party/re2/re2/unicode_groups.cc
+     0.4%  9.36Ki   0.0%       0    ../third_party/re2/re2/perl_groups.cc
+     0.3%  8.51Ki   0.0%       0    ../third_party/re2/re2/unicode_casefold.cc
+     0.2%  5.13Ki   0.5%  1.38Ki    ../third_party/re2/util/rune.cc
+   5.0%  1.34Mi   4.7%   326Ki    src
+    38.8%   533Ki  40.2%   131Ki    ../src/bloaty.cc
+    14.1%   193Ki  15.0%  49.0Ki    ../src/dwarf.cc
+    10.4%   142Ki   0.5%  1.53Ki    ../src/main.cc
+     9.0%   123Ki  11.4%  37.1Ki    src/bloaty.pb.cc
+     7.4%   102Ki   8.0%  26.1Ki    ../src/elf.cc
+     7.2%  99.6Ki  10.1%  33.0Ki    ../src/macho.cc
+     4.8%  65.4Ki   6.0%  19.6Ki    ../src/demangle.cc
+     3.5%  48.5Ki   4.0%  13.2Ki    ../src/webassembly.cc
+     2.8%  38.6Ki   2.8%  9.19Ki    ../src/range_map.cc
+     1.9%  25.6Ki   2.0%  6.61Ki    ../src/disassemble.cc
+   2.1%   584Ki   1.6%   113Ki    third_party/demumble
+   100.0%   584Ki 100.0%   113Ki    ../third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
+   0.7%   199Ki   1.2%  84.0Ki    third_party/abseil
+    20.0%  40.0Ki  18.7%  15.7Ki    ../third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
+    19.6%  39.2Ki  14.5%  12.2Ki    ../third_party/abseil-cpp/absl/strings/escaping.cc
+    19.5%  38.9Ki  30.8%  25.9Ki    ../third_party/abseil-cpp/absl/strings/charconv.cc
+     9.8%  19.6Ki  10.6%  8.94Ki    ../third_party/abseil-cpp/absl/strings/numbers.cc
+     7.4%  14.9Ki   6.1%  5.11Ki    ../third_party/abseil-cpp/absl/strings/str_cat.cc
+     6.7%  13.3Ki   5.6%  4.74Ki    ../third_party/abseil-cpp/absl/strings/string_view.cc
+     3.6%  7.18Ki   1.8%  1.54Ki    ../third_party/abseil-cpp/absl/strings/ascii.cc
+     3.0%  6.07Ki   3.1%  2.58Ki    ../third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
+     3.0%  5.99Ki   2.1%  1.73Ki    ../third_party/abseil-cpp/absl/strings/str_split.cc
+     2.6%  5.17Ki   2.3%  1.94Ki    ../third_party/abseil-cpp/absl/strings/substitute.cc
+     2.0%  4.00Ki   2.1%  1.77Ki    ../third_party/abseil-cpp/absl/base/internal/raw_logging.cc
+     1.2%  2.42Ki   1.5%  1.23Ki    ../third_party/abseil-cpp/absl/strings/internal/memutil.cc
+     1.2%  2.33Ki   0.5%     441    ../third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+     0.3%     634   0.3%     233    ../third_party/abseil-cpp/absl/strings/internal/utf8.cc
+   0.7%   194Ki   2.8%   194Ki    [section .rodata]
+   0.2%  68.4Ki   0.0%       0    [section .debug_str]
+   0.2%  51.8Ki   0.7%  51.8Ki    [section .gcc_except_table]
+   0.2%  43.5Ki   0.0%       0    [section .symtab]
+   0.1%  39.9Ki   0.6%  39.9Ki    [section .gnu.hash]
+   0.1%  37.0Ki   0.5%  37.0Ki    [section .text]
+   0.1%  31.2Ki   0.0%       0    [section .debug_loc]
+   0.1%  27.8Ki   0.0%       0    [section .strtab]
+   0.1%  15.0Ki   0.2%  15.0Ki    [section .dynstr]
+   0.1%  14.3Ki   0.2%  11.4Ki    [28 Others]
+   0.0%  10.3Ki   0.1%  10.3Ki    [section .gnu.version]
+   0.0%  8.34Ki   0.1%  8.34Ki    [section .dynsym]
+   0.0%  5.92Ki   0.0%       0    [section .debug_ranges]
+   0.0%  5.50Ki   0.0%       0    [Unmapped]
+   0.0%  4.18Ki   0.1%  4.18Ki    [section .eh_frame]
+ 100.0%  27.1Mi 100.0%  6.81Mi    TOTAL
 ```
 
 # Future Work

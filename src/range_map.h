@@ -84,7 +84,9 @@ class RangeMap {
   // Looks for a range within this map that contains |addr|.  If found, returns
   // true and sets |label| to the corresponding label, and |offset| to the
   // offset from the beginning of this range.
-  bool TryGetLabel(uint64_t addr, std::string* label, uint64_t* offset) const;
+  bool TryGetLabel(uint64_t addr, std::string* label) const;
+  bool TryGetLabelForRange(uint64_t addr, uint64_t size,
+                           std::string* label) const;
 
   // Looks for a range that starts exactly on |addr|.  If it exists, returns
   // true and sets |size| to its size.

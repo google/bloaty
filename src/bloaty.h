@@ -147,6 +147,7 @@ class RangeSink {
 
   DataSource data_source() const { return data_source_; }
   const InputFile& input_file() const { return *file_; }
+  bool IsBaseMap() const { return translator_ == nullptr; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
@@ -166,10 +167,16 @@ class RangeSink {
   // Like AddFileRange(), but the label is whatever label was previously
   // assigned to VM address |label_from_vmaddr|.  If no existing label is
   // assigned to |label_from_vmaddr|, this function does nothing.
-  void AddFileRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
-                       absl::string_view file_range);
-  void AddVMRangeFor(const char* analyzer, uint64_t label_from_vmaddr,
-                     uint64_t addr, uint64_t size);
+  void AddFileRangeForVMAddr(const char* analyzer, uint64_t label_from_vmaddr,
+                             absl::string_view file_range);
+  void AddVMRangeForVMAddr(const char* analyzer, uint64_t label_from_vmaddr,
+                           uint64_t addr, uint64_t size);
+
+  // Applies this label from |from_file_range| to |file_range|, but only if the
+  // entire |from_file_range| has a single label.  If not, this does nothing.
+  void AddFileRangeForFileRange(const char* analyzer,
+                                absl::string_view from_file_range,
+                                absl::string_view file_range);
 
   void AddFileRange(const char* analyzer, absl::string_view name,
                     absl::string_view file_range) {

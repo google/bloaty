@@ -246,7 +246,7 @@ class BloatyTest : public ::testing::Test {
       } else if (expected_vm > 0) {
         EXPECT_GE(child.vmsize, expected_vm);
         // Allow some overhead.
-        EXPECT_LE(child.vmsize, (expected_vm * 1.1) + 40);
+        EXPECT_LE(child.vmsize, (expected_vm * 1.1) + 100);
       } else {
         ASSERT_TRUE(false);
       }
@@ -258,7 +258,7 @@ class BloatyTest : public ::testing::Test {
       if (expected_file != kUnknown) {
         EXPECT_GE(child.filesize, expected_file);
         // Allow some overhead.
-        EXPECT_LE(child.filesize, (expected_file * 1.2) + 70);
+        EXPECT_LE(child.filesize, (expected_file * 1.2) + 180);
       }
 
       if (++i == children.size()) {

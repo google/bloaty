@@ -1,0 +1,13 @@
+custom_data_source: {
+  name: "bloaty_package"
+  base_data_source: "compileunits"
+
+  rewrite: {
+    pattern: "^(\\.\\./)?src"
+    replacement: "src"
+  }
+  rewrite: {
+    pattern: "^(\\.\\./)?(third_party/\\w+)"
+    replacement: "\\2"
+  }
+}

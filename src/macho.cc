@@ -459,8 +459,8 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
 
     // Capture the trailing NULL.
     name = string_view(name.data(), name.size() + 1);
-    sink->AddFileRangeFor("macho_symtab_name", sym->n_value, name);
-    sink->AddFileRangeFor("macho_symtab_sym", sym->n_value, sym_range);
+    sink->AddFileRangeForVMAddr("macho_symtab_name", sym->n_value, name);
+    sink->AddFileRangeForVMAddr("macho_symtab_sym", sym->n_value, sym_range);
   }
 }
 
