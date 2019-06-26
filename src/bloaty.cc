@@ -717,7 +717,7 @@ void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
          << SiPrint(row.vmsize, diff_mode_) << " ";
   }
 
-  *out << row.name << "\n";
+  *out << "   " << row.name << "\n";
 }
 
 bool RollupOutput::IsSame(const std::string& a, const std::string& b) {
@@ -749,7 +749,7 @@ void RollupOutput::PrettyPrintTree(const RollupRow& row, size_t indent,
   }
 
   for (const auto& child : row.sorted_children) {
-    PrettyPrintTree(child, indent + 4, options, out);
+    PrettyPrintTree(child, indent + 2, options, out);
   }
 }
 
