@@ -342,10 +342,16 @@ class Rollup {
     RollupRow* row = &output->toplevel_row_;
     row->vmsize = vm_total_;
     row->filesize = file_total_;
+    row->filtered_vmsize = filtered_vm_total_;
+    row->filtered_filesize = filtered_file_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
     output->diff_mode_ = true;
     CreateRows(row, base, options, true);
+  }
+
+  void SetFilterRegex(const RE2* regex) {
+    filter_regex_ = regex;
   }
 
   // Subtract the values in "other" from this.
@@ -377,12 +383,17 @@ class Rollup {
   }
 
   int64_t file_total() const { return file_total_; }
+  int64_t filtered_file_total() const { return filtered_file_total_; }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(Rollup);
 
   int64_t vm_total_ = 0;
   int64_t file_total_ = 0;
+  int64_t filtered_vm_total_ = 0;
+  int64_t filtered_file_total_ = 0;
+
+  const RE2* filter_regex_ = nullptr;
 
   // Putting Rollup by value seems to work on some compilers/libs but not
   // others.
@@ -401,11 +412,36 @@ class Rollup {
   // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
   void AddInternal(const std::vector<std::string>& names, size_t i,
                    uint64_t size, bool is_vmsize) {
+    if (filter_regex_ != nullptr) {
+      // filter_regex_ is only set in the root rollup, which checks the full
+      // label hierarchy for a match to determine whether a region should be
+      // considered.
+      bool any_matched = false;
+
+      for (const auto& name : names) {
+        if (RE2::PartialMatch(name, *filter_regex_)) {
+          any_matched = true;
+          break;
+        }
+      }
+
+      if (!any_matched) {
+        // Ignore this region in the rollup and don't visit sub-rollups.
+        if (is_vmsize) {
+          CheckedAdd(&filtered_vm_total_, size);
+        } else {
+          CheckedAdd(&filtered_file_total_, size);
+        }
+        return;
+      }
+    }
+
     if (is_vmsize) {
       CheckedAdd(&vm_total_, size);
     } else {
       CheckedAdd(&file_total_, size);
     }
+
     if (i < names.size()) {
       auto& child = children_[names[i]];
       if (child.get() == nullptr) {
@@ -781,6 +817,19 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
   // The "TOTAL" row comes after all other rows.
   PrettyPrintRow(toplevel_row_, 0, options, out);
+
+  uint64_t filtered = 0;
+  if (ShowFile(options)) {
+    filtered += toplevel_row_.filtered_filesize;
+  }
+  if (ShowVM(options)) {
+    filtered += toplevel_row_.filtered_vmsize;
+  }
+
+  if (filtered > 0) {
+    *out << "Filtering enabled (source_filter); omitted"
+         << SiPrint(filtered, /*force_sign=*/false) << " of entries\n";
+  }
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
@@ -1567,7 +1616,8 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
   maps.ComputeRollup(rollup);
 
   // The ObjectFile implementation must guarantee this.
-  int64_t filesize = rollup->file_total() - filesize_before;
+  int64_t filesize = rollup->file_total() +
+      rollup->filtered_file_total() - filesize_before;
   (void)filesize;
   assert(filesize == file->file_data().data().size());
 
@@ -1595,7 +1645,14 @@ void Bloaty::ScanAndRollupFiles(
   std::vector<std::thread> threads(num_threads);
   ThreadSafeIterIndex index(files.size());
 
+  std::unique_ptr<RE2> regex = nullptr;
+  if (options_.has_source_filter()) {
+    regex = absl::make_unique<RE2>(options_.source_filter());
+  }
+
   for (int i = 0; i < num_threads; i++) {
+    thread_data[i].rollup.SetFilterRegex(regex.get());
+
     threads[i] = std::thread([this, &index, &files](PerThreadData* data) {
       try {
         int j;
@@ -1728,6 +1785,8 @@ Options:
   -w                 Wide output; don't truncate long labels.
   --help             Display this message and exit.
   --list-sources     Show a list of available sources and exit.
+  --source-filter=PATTERN
+                     Only show keys with names matching this pattern.
 
 Options for debugging Bloaty:
 
@@ -1925,6 +1984,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       } else {
         THROWF("unknown value for -s: $0", option);
       }
+    } else if (args.TryParseOption("--source-filter", &option)) {
+      options->set_source_filter(std::string(option));
     } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
     } else if (args.TryParseFlag("-vv")) {
@@ -2024,6 +2085,13 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   for (const auto& data_source : options.data_source()) {
     bloaty.AddDataSource(data_source);
+  }
+
+  if (options.has_source_filter()) {
+    RE2 re(options.source_filter());
+    if (!re.ok()) {
+      THROW("invalid regex for source_filter");
+    }
   }
 
   verbose_level = options.verbose_level();

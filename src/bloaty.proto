@@ -69,6 +69,9 @@ message Options {
 
   // Disassemble this function.
   optional string disassemble_function = 9;
+
+  // Regex with which to filter names in the data sources.
+  optional string source_filter = 13;
 }
 
 // A custom data source allows users to create their own label space by
