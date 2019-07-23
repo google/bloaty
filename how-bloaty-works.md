@@ -1,20 +1,28 @@
 
 # How Bloaty Works
 
-At a high level, Bloaty's goal is to create a map of the binary where every byte
-has a label attached to it.  Every byte starts out as unknown (unattributed).
-As we scan data structures in the binary we assign labels to various ranges of
-the binary.  For example, if the user selected the "symbols" data source we scan
-the symbol table.  For each symbol, we find the corresponding section of the
-binary and "paint" it with the label of that symbol.
+At a high level, Bloaty's goal is to create a map of the binary where every
+byte has a label attached to it.  Every byte starts out as unknown
+(unattributed).  As we scan the binary we assign labels to different ranges of
+the file.  For example, if the user selected the "symbols" data source we scan
+the symbol table and use the symbol name as the label for each range.
+
+Ideally these labeled ranges will cover the entire file by the time we are
+done.  In practice we usually can't achieve perfect 100% coverage.  To
+compensate for this, we have various kinds of "fallback" labels we attach to
+mystery regions of the file.  This is how we guarantee an important invariant
+of Bloaty: the totals given in Bloaty's output will always match the total size
+of the file.  This ensures that we always account for the entire file, even if
+we don't have detailed information for every byte.
 
 The ELF/Mach-O/etc. data structures we are traversing were not designed to
 enable size profiling.  They were designed to assist linkers, loaders,
-debuggers, stack unwinders, etc. to run and debug the binary.  This means
-that Bloaty is inherently an unconventional use of ELF/Mach-O structures,
-and has to be clever about how to use the available information to
-achieve its goal.  This can pose a challenge, but also makes Bloaty fun
-to work on.
+debuggers, stack unwinders, etc. to run and debug the binary.  This means that
+Bloaty's size analysis is inherently an unconventional use of ELF/Mach-O
+metadata.  Bloaty has to be clever about how to use the available information to
+achieve its goal.  This can pose a challenge, but also makes Bloaty fun to work
+on.  Getting the coverage close to 100% requires a lot of ingenuity (and some
+heuristics).
 
 ## Range Map
 
@@ -55,11 +63,27 @@ struct DualMap {
 };
 ```
 
-We populate these two maps simultaneously as we scan the file.  We must do this
-even in the case where we only ultimately care about one of them, because almost
-all of the data structures we are scanning specify locations in either file
-space *or* VM space, but not both.  So we must be able to translate one domain
-to the other to get the benefit of all the metadata in the binary.
+We populate these two maps simultaneously as we scan the file.  We must populate
+both maps even if we only care about one of them, because most of the metadata we're
+scanning gives us VM addresses *or* file offsets, not both.  For example,
+debug info always refers to VM addresses, because it's intended for debugging at
+runtime.  Even if we only care about file size, we still have to scan VM addresses
+and translate them to file offsets.
+
+Bloaty's overall analysis algorithm (in pseudo-code) is:
+
+```c++
+for (auto f : files) {
+  // Always start by creating the base map.
+  DualMap base_map = ScanBaseMap(f);
+
+  // Scan once for every data source the user selected with '-d'.
+  std::vector<DualMap> maps;
+  for (auto s : data_sources) {
+    maps.push_back(ScanDataSource(f, s));
+  }
+}
+```
 
 ## Base Map
 
@@ -73,10 +97,10 @@ meaning:
 
 This means that the base map must be exhaustive, and must also provide
 translation for any entity that exists in both VM and file space.  For example,
-if we see in the symbol table that address `0x12345` corresponds to
-symbol `foo`, we will add that to VM map immediately, but we will
-also use the base map to translate address `0x12355` to a file
-offset so we can add that range to the file map.
+suppose we are scanning the "symbols" data source and we see in the symbol
+table that address `0x12345` corresponds to symbol `foo`.  We will add that to
+VM map immediately, but we will also use the base map to translate address
+`0x12355` to a file offset so we can add that range to the file map.
 
 How does the base map store translation info?  I left one thing out about
 `RangeMap` above.  In addition to storing a label for every region, it can also
