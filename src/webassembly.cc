@@ -118,22 +118,20 @@ class Section {
 
     ret.id = ReadVarUInt7(&data);
     uint32_t size = ReadVarUInt32(&data);
-    string_view next_section = data.substr(size);
-    data = data.substr(0, size);
-    size_t header_size = data.data() - section_data.data();
+    ret.contents = ReadPiece(size, &data);
+    size_t header_size = ret.contents.data() - section_data.data();
     ret.data = section_data.substr(0, size + header_size);
 
     if (ret.id == 0) {
-      uint32_t name_len = ReadVarUInt32(&data);
-      ret.name = std::string(ReadPiece(name_len, &data));
+      uint32_t name_len = ReadVarUInt32(&ret.contents);
+      ret.name = std::string(ReadPiece(name_len, &ret.contents));
     } else if (ret.id <= 11) {
       ret.name = names[ret.id];
     } else {
       THROWF("Unknown section id: $0", ret.id);
     }
 
-    ret.contents = data;
-    *data_param = next_section;
+    *data_param = data;
     return ret;
   }
 
