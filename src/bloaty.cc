@@ -148,7 +148,7 @@ void CheckedAdd(A* accum, B val) {
 #endif
 }
 
-std::string CSVEscape(string_view str) {
+static std::string CSVEscape(string_view str) {
   bool need_escape = false;
 
   for (char ch : str) {
@@ -801,7 +801,12 @@ void RollupOutput::PrintRowToCSV(const RollupRow& row,
 void RollupOutput::PrintTreeToCSV(const RollupRow& row,
                                   std::vector<std::string> parent_labels,
                                   std::ostream* out, bool tabs) const {
-  parent_labels.push_back(row.name);
+  if (tabs) {
+    parent_labels.push_back(row.name);
+  } else {
+    parent_labels.push_back(CSVEscape(row.name));
+  }
+
   if (row.sorted_children.size() > 0) {
     for (const auto& child_row : row.sorted_children) {
       PrintTreeToCSV(child_row, parent_labels, out, tabs);
