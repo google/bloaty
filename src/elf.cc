@@ -787,6 +787,9 @@ static uint64_t ToVMAddr(size_t addr, long ndx, bool is_object) {
     if (ndx >= 1 << 24) {
       THROW("ndx overflow: too many sections");
     }
+    if (addr >= 1 << 40) {
+      THROW("address overflow: section too big");
+    }
     return (ndx << 40) | addr;
   } else {
     return addr;
