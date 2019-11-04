@@ -87,13 +87,19 @@ void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
 }
 
-string_view ReadNullTerminated(string_view data) {
+string_view ReadNullTerminated(string_view data, size_t offset) {
+  if (offset >= data.size()) {
+    THROW("Invalid Mach-O string table offset.");
+  }
+
+  data = data.substr(offset);
+
   const char* nullz =
       static_cast<const char*>(memchr(data.data(), '\0', data.size()));
 
   // Return false if not NULL-terminated.
   if (nullz == NULL) {
-    THROW("DWARF string was not NULL-terminated");
+    THROW("Mach-O string was not NULL-terminated");
   }
 
   size_t len = nullz - data.data();
@@ -445,7 +451,7 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
       continue;
     }
 
-    string_view name = ReadNullTerminated(strtab.substr(sym->n_un.n_strx));
+    string_view name = ReadNullTerminated(strtab, sym->n_un.n_strx);
 
     if (sink->data_source() >= DataSource::kSymbols) {
       sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
