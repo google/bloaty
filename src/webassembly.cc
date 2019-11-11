@@ -125,7 +125,7 @@ class Section {
     if (ret.id == 0) {
       uint32_t name_len = ReadVarUInt32(&ret.contents);
       ret.name = std::string(ReadPiece(name_len, &ret.contents));
-    } else if (ret.id <= 11) {
+    } else if (ret.id <= 13) {
       ret.name = names[ret.id];
     } else {
       THROWF("Unknown section id: $0", ret.id);
@@ -147,6 +147,8 @@ class Section {
     kElement   = 9,
     kCode      = 10,
     kData      = 11,
+    kDataCount = 12,
+    kEvent     = 13,
   };
 
   static const char* names[];
@@ -165,6 +167,8 @@ const char* Section::names[] = {
   "Element",   // 9
   "Code",      // 10
   "Data",      // 11
+  "DataCount", // 12
+  "Event",     // 13
 };
 
 struct ExternalKind {
