@@ -73,7 +73,7 @@ $ ./bloaty bloaty
   11.3%  2.39Mi  39.5%  2.39Mi    .rodata
    9.4%  1.98Mi   0.0%       0    .debug_str
    6.8%  1.43Mi   0.0%       0    .debug_ranges
-   5.8%  1.24Mi  20.5%  1.24Mi    .text
+   5.9%  1.24Mi  20.5%  1.24Mi    .text
    5.8%  1.24Mi   0.0%       0    .debug_line
    0.0%       0  16.6%  1.00Mi    .bss
    2.0%   440Ki   7.1%   440Ki    .data
@@ -85,7 +85,7 @@ $ ./bloaty bloaty
    0.6%   120Ki   1.9%   120Ki    .eh_frame
    0.5%   100Ki   1.6%   100Ki    .dynstr
    0.2%  43.6Ki   0.7%  43.5Ki    .dynsym
-   0.2%  35.6Ki   0.4%  27.9Ki    [24 Others]
+   0.2%  35.2Ki   0.4%  27.9Ki    [24 Others]
    0.1%  20.3Ki   0.3%  20.2Ki    .eh_frame_hdr
    0.1%  19.8Ki   0.3%  19.8Ki    .gcc_except_table
    0.1%  13.3Ki   0.0%       0    .debug_aranges
@@ -119,7 +119,7 @@ $ ./bloaty bloaty -d compileunits
    4.4%   957Ki   1.3%  79.0Ki    ../third_party/capstone/arch/SystemZ/SystemZDisassembler.c
    4.1%   898Ki   1.5%  91.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
    3.9%   853Ki   0.7%  42.0Ki    ../third_party/re2/re2/re2.cc
-   3.7%   801Ki   2.0%   125Ki    ../src/bloaty.cc
+   3.7%   802Ki   2.0%   126Ki    ../src/bloaty.cc
    3.6%   772Ki   0.6%  38.6Ki    ../third_party/re2/re2/dfa.cc
    3.3%   705Ki   0.6%  39.8Ki    ../third_party/re2/re2/regexp.cc
    3.1%   662Ki   1.1%  67.8Ki    ../third_party/capstone/arch/Mips/MipsDisassembler.c
@@ -252,7 +252,7 @@ $ ./bloaty -d segments,sections bloaty
      0.8%   138Ki   NAN%       0    .debug_abbrev
      0.7%   121Ki   NAN%       0    .symtab
      0.1%  13.2Ki   NAN%       0    .debug_aranges
-     0.0%  6.12Ki   NAN%       0    [Unmapped]
+     0.0%  5.65Ki   NAN%       0    [Unmapped]
      0.0%     383   NAN%       0    .shstrtab
      0.0%      28   NAN%       0    .comment
   12.0%  2.54Mi  42.1%  2.54Mi    LOAD #4 [R]
@@ -261,7 +261,7 @@ $ ./bloaty -d segments,sections bloaty
      0.8%  20.2Ki   0.8%  20.2Ki    .eh_frame_hdr
      0.8%  19.8Ki   0.8%  19.8Ki    .gcc_except_table
      0.0%       4   0.0%       4    [LOAD #4 [R]]
-   3.6%   772Ki  29.1%  1.76Mi    LOAD #5 [RW]
+   3.6%   772Ki  29.0%  1.76Mi    LOAD #5 [RW]
      0.0%       0  57.1%  1.00Mi    .bss
     57.0%   440Ki  24.4%   440Ki    .data
     42.7%   329Ki  18.3%   329Ki    .data.rel.ro
@@ -432,7 +432,7 @@ $ ./bloaty -d segments bloaty
  --------------  -------------- 
   76.1%  16.1Mi   0.0%       0    [Unmapped]
   12.0%  2.54Mi  42.1%  2.54Mi    LOAD #4 [R]
-   3.6%   772Ki  29.1%  1.76Mi    LOAD #5 [RW]
+   3.6%   772Ki  29.0%  1.76Mi    LOAD #5 [RW]
    5.9%  1.24Mi  20.5%  1.24Mi    LOAD #3 [RX]
    2.4%   517Ki   8.4%   517Ki    LOAD #2 [R]
    0.0%  2.44Ki   0.0%       0    [ELF Headers]
@@ -453,12 +453,12 @@ $ ./bloaty -d segments CMakeFiles/libbloaty.dir/src/bloaty.cc.o
     FILE SIZE        VM SIZE    
  --------------  -------------- 
   90.8%  1.27Mi   0.0%       0    Section []
-   5.7%  81.2Ki  76.7%  81.2Ki    Section [AX]
-   1.7%  24.0Ki   0.0%       0    [ELF Headers]
+   5.7%  81.6Ki  76.7%  81.6Ki    Section [AX]
    1.7%  24.0Ki  22.6%  24.0Ki    Section [A]
-   0.1%     998   0.0%       0    [Unmapped]
+   1.7%  24.0Ki   0.0%       0    [ELF Headers]
+   0.1%     991   0.0%       0    [Unmapped]
    0.0%     656   0.7%     725    Section [AW]
- 100.0%  1.39Mi 100.0%   105Ki    TOTAL
+ 100.0%  1.40Mi 100.0%   106Ki    TOTAL
 ```
 
 ## Sections
@@ -477,7 +477,7 @@ $ ./bloaty -d sections bloaty
   11.3%  2.39Mi  39.5%  2.39Mi    .rodata
    9.4%  1.98Mi   0.0%       0    .debug_str
    6.8%  1.43Mi   0.0%       0    .debug_ranges
-   5.8%  1.24Mi  20.5%  1.24Mi    .text
+   5.9%  1.24Mi  20.5%  1.24Mi    .text
    5.8%  1.24Mi   0.0%       0    .debug_line
    0.0%       0  16.6%  1.00Mi    .bss
    2.0%   440Ki   7.1%   440Ki    .data
@@ -489,7 +489,7 @@ $ ./bloaty -d sections bloaty
    0.6%   120Ki   1.9%   120Ki    .eh_frame
    0.5%   100Ki   1.6%   100Ki    .dynstr
    0.2%  43.6Ki   0.7%  43.5Ki    .dynsym
-   0.2%  35.6Ki   0.4%  27.9Ki    [24 Others]
+   0.2%  35.2Ki   0.4%  27.9Ki    [24 Others]
    0.1%  20.3Ki   0.3%  20.2Ki    .eh_frame_hdr
    0.1%  19.8Ki   0.3%  19.8Ki    .gcc_except_table
    0.1%  13.3Ki   0.0%       0    .debug_aranges
@@ -557,16 +557,16 @@ source will let you break it down by input file:
 $ ./bloaty -d inputfiles CMakeFiles/libbloaty.dir/src/*.o
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  37.4%  1.39Mi  33.5%   105Ki    CMakeFiles/libbloaty.dir/src/bloaty.cc.o
-  18.4%   702Ki  14.3%  45.0Ki    CMakeFiles/libbloaty.dir/src/dwarf.cc.o
+  37.4%  1.40Mi  33.6%   106Ki    CMakeFiles/libbloaty.dir/src/bloaty.cc.o
+  18.4%   702Ki  14.2%  45.0Ki    CMakeFiles/libbloaty.dir/src/dwarf.cc.o
   10.4%   395Ki  13.3%  42.1Ki    CMakeFiles/libbloaty.dir/src/bloaty.pb.cc.o
    9.8%   374Ki  12.7%  40.2Ki    CMakeFiles/libbloaty.dir/src/elf.cc.o
    7.8%   298Ki   8.5%  26.8Ki    CMakeFiles/libbloaty.dir/src/macho.cc.o
    5.9%   226Ki   4.8%  15.1Ki    CMakeFiles/libbloaty.dir/src/webassembly.cc.o
    3.8%   146Ki   4.0%  12.5Ki    CMakeFiles/libbloaty.dir/src/range_map.cc.o
-   3.7%   142Ki   6.5%  20.4Ki    CMakeFiles/libbloaty.dir/src/demangle.cc.o
+   3.7%   142Ki   6.4%  20.4Ki    CMakeFiles/libbloaty.dir/src/demangle.cc.o
    2.7%   103Ki   2.4%  7.66Ki    CMakeFiles/libbloaty.dir/src/disassemble.cc.o
- 100.0%  3.73Mi 100.0%   315Ki    TOTAL
+ 100.0%  3.73Mi 100.0%   316Ki    TOTAL
 ```
 
 ## Archive Members
@@ -579,13 +579,13 @@ archive.
 $ ./bloaty -d armembers liblibbloaty.a
     FILE SIZE        VM SIZE    
  --------------  -------------- 
-  25.5%  1.39Mi  21.3%   105Ki    bloaty.cc.o
+  25.5%  1.40Mi  21.4%   106Ki    bloaty.cc.o
   20.1%  1.10Mi  19.1%  95.0Ki    cxa_demangle.cpp.o
   12.5%   702Ki   9.1%  45.0Ki    dwarf.cc.o
    7.1%   395Ki   8.5%  42.1Ki    bloaty.pb.cc.o
    6.7%   374Ki   8.1%  40.2Ki    elf.cc.o
    5.3%   298Ki   5.4%  26.8Ki    macho.cc.o
-   4.0%   226Ki   3.1%  15.1Ki    webassembly.cc.o
+   4.0%   226Ki   3.0%  15.1Ki    webassembly.cc.o
    2.6%   146Ki   2.5%  12.5Ki    range_map.cc.o
    2.5%   142Ki   4.1%  20.4Ki    demangle.cc.o
    2.2%   122Ki   3.0%  14.8Ki    escaping.cc.o
@@ -600,7 +600,7 @@ $ ./bloaty -d armembers liblibbloaty.a
    0.5%  28.0Ki   0.5%  2.36Ki    ascii.cc.o
    0.5%  26.3Ki   0.7%  3.26Ki    string_view.cc.o
    0.4%  25.1Ki   0.3%  1.50Ki    str_split.cc.o
- 100.0%  5.47Mi 100.0%   496Ki    TOTAL
+ 100.0%  5.48Mi 100.0%   496Ki    TOTAL
 ```
 
 You are free to use this data source even for non-`.a`
@@ -623,7 +623,7 @@ $ ./bloaty -d compileunits bloaty
    4.4%   957Ki   1.3%  79.0Ki    ../third_party/capstone/arch/SystemZ/SystemZDisassembler.c
    4.1%   898Ki   1.5%  91.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
    3.9%   853Ki   0.7%  42.0Ki    ../third_party/re2/re2/re2.cc
-   3.7%   801Ki   2.0%   125Ki    ../src/bloaty.cc
+   3.7%   802Ki   2.0%   126Ki    ../src/bloaty.cc
    3.6%   772Ki   0.6%  38.6Ki    ../third_party/re2/re2/dfa.cc
    3.3%   705Ki   0.6%  39.8Ki    ../third_party/re2/re2/regexp.cc
    3.1%   662Ki   1.1%  67.8Ki    ../third_party/capstone/arch/Mips/MipsDisassembler.c
@@ -658,7 +658,7 @@ $ ./bloaty -d inlines bloaty
   11.3%  2.39Mi  39.5%  2.39Mi    [section .rodata]
    9.4%  1.98Mi   0.0%       0    [section .debug_str]
    6.8%  1.43Mi   0.0%       0    [section .debug_ranges]
-   5.9%  1.25Mi  20.3%  1.23Mi    [35359 Others]
+   5.9%  1.25Mi  20.3%  1.23Mi    [35364 Others]
    5.8%  1.24Mi   0.0%       0    [section .debug_line]
    0.0%       0  16.6%  1.00Mi    [section .bss]
    2.0%   440Ki   7.1%   440Ki    [section .data]
@@ -673,7 +673,7 @@ $ ./bloaty -d inlines bloaty
    0.1%  20.3Ki   0.3%  20.2Ki    [section .eh_frame_hdr]
    0.1%  20.1Ki   0.3%  20.1Ki    ../third_party/capstone/arch/ARM/ARMDisassembler.c:115
    0.1%  19.8Ki   0.3%  19.8Ki    [section .gcc_except_table]
-   0.1%  15.9Ki   0.3%  15.9Ki    /usr/include/c++/8/bits/basic_string.h:220
+   0.1%  16.0Ki   0.3%  16.0Ki    /usr/include/c++/8/bits/basic_string.h:220
  100.0%  21.2Mi 100.0%  6.05Mi    TOTAL
 ```
 
@@ -695,7 +695,7 @@ $ ./bloaty -d compileunits bloaty
    4.4%   957Ki   1.3%  79.0Ki    ../third_party/capstone/arch/SystemZ/SystemZDisassembler.c
    4.1%   898Ki   1.5%  91.2Ki    ../third_party/capstone/arch/AArch64/AArch64Disassembler.c
    3.9%   853Ki   0.7%  42.0Ki    ../third_party/re2/re2/re2.cc
-   3.7%   801Ki   2.0%   125Ki    ../src/bloaty.cc
+   3.7%   802Ki   2.0%   126Ki    ../src/bloaty.cc
    3.6%   772Ki   0.6%  38.6Ki    ../third_party/re2/re2/dfa.cc
    3.3%   705Ki   0.6%  39.8Ki    ../third_party/re2/re2/regexp.cc
    3.1%   662Ki   1.1%  67.8Ki    ../third_party/capstone/arch/Mips/MipsDisassembler.c
@@ -746,7 +746,7 @@ $ ./bloaty -c bloaty_package.bloaty -d bloaty_package bloaty
  --------------  -------------- 
   58.4%  12.4Mi  84.0%  5.08Mi    third_party/capstone
   25.7%  5.44Mi   4.8%   295Ki    third_party/re2
-   9.8%  2.07Mi   6.3%   389Ki    src
+   9.8%  2.07Mi   6.3%   390Ki    src
    2.5%   544Ki   1.5%  92.6Ki    third_party/demumble
    1.3%   281Ki   0.0%       0    [section .debug_loc]
    1.3%   279Ki   1.6%   100Ki    third_party/abseil
@@ -760,9 +760,9 @@ $ ./bloaty -c bloaty_package.bloaty -d bloaty_package bloaty
    0.1%  12.4Ki   0.2%  12.4Ki    [section .gnu.hash]
    0.0%  9.50Ki   0.2%  9.50Ki    [section .dynstr]
    0.0%  6.54Ki   0.1%  6.54Ki    [section .data]
-   0.0%  6.12Ki   0.0%       0    [Unmapped]
    0.0%  5.98Ki   0.1%  5.98Ki    [section .dynsym]
    0.0%  5.92Ki   0.0%       0    [section .debug_ranges]
+   0.0%  5.65Ki   0.0%       0    [Unmapped]
    0.0%  4.25Ki   0.1%  4.25Ki    [section .text]
    0.0%  4.06Ki   0.1%  4.06Ki    [section .eh_frame]
  100.0%  21.2Mi 100.0%  6.05Mi    TOTAL
@@ -816,13 +816,13 @@ $ ./bloaty -c config.bloaty -d bloaty_package,compileunits bloaty
      0.1%  7.53Ki   2.3%  6.71Ki    ../third_party/re2/re2/unicode_casefold.cc
      0.1%  5.68Ki   0.4%  1.17Ki    ../third_party/re2/util/rune.cc
      0.1%  4.92Ki   1.1%  3.38Ki    ../third_party/re2/re2/perl_groups.cc
-   9.8%  2.07Mi   6.3%   389Ki    src
-    37.9%   801Ki  32.3%   125Ki    ../src/bloaty.cc
+   9.8%  2.07Mi   6.3%   390Ki    src
+    37.9%   802Ki  32.4%   126Ki    ../src/bloaty.cc
     18.5%   392Ki  14.2%  55.4Ki    ../src/dwarf.cc
      9.1%   191Ki  14.3%  55.7Ki    src/bloaty.pb.cc
      7.8%   166Ki  10.5%  40.9Ki    ../src/elf.cc
      7.7%   163Ki   1.9%  7.30Ki    ../src/main.cc
-     5.6%   118Ki   7.7%  29.8Ki    ../src/macho.cc
+     5.6%   118Ki   7.6%  29.8Ki    ../src/macho.cc
      4.6%  97.6Ki   4.4%  17.1Ki    ../src/webassembly.cc
      3.9%  82.9Ki   9.4%  36.6Ki    ../src/demangle.cc
      2.9%  62.1Ki   3.5%  13.7Ki    ../src/range_map.cc
@@ -856,9 +856,9 @@ $ ./bloaty -c config.bloaty -d bloaty_package,compileunits bloaty
    0.1%  12.4Ki   0.2%  12.4Ki    [section .gnu.hash]
    0.0%  9.50Ki   0.2%  9.50Ki    [section .dynstr]
    0.0%  6.54Ki   0.1%  6.54Ki    [section .data]
-   0.0%  6.12Ki   0.0%       0    [Unmapped]
    0.0%  5.98Ki   0.1%  5.98Ki    [section .dynsym]
    0.0%  5.92Ki   0.0%       0    [section .debug_ranges]
+   0.0%  5.65Ki   0.0%       0    [Unmapped]
    0.0%  4.25Ki   0.1%  4.25Ki    [section .text]
    0.0%  4.06Ki   0.1%  4.06Ki    [section .eh_frame]
  100.0%  21.2Mi 100.0%  6.05Mi    TOTAL
@@ -893,19 +893,19 @@ directory.
 $ ./bloaty -c config.bloaty -d bloaty_package,compileunits --source-filter src bloaty
     FILE SIZE        VM SIZE    
  --------------  -------------- 
- 100.0%  2.07Mi 100.0%   389Ki    src
-    37.9%   801Ki  32.3%   125Ki    ../src/bloaty.cc
+ 100.0%  2.07Mi 100.0%   390Ki    src
+    37.9%   802Ki  32.4%   126Ki    ../src/bloaty.cc
     18.5%   392Ki  14.2%  55.4Ki    ../src/dwarf.cc
      9.1%   191Ki  14.3%  55.7Ki    src/bloaty.pb.cc
      7.8%   166Ki  10.5%  40.9Ki    ../src/elf.cc
      7.7%   163Ki   1.9%  7.30Ki    ../src/main.cc
-     5.6%   118Ki   7.7%  29.8Ki    ../src/macho.cc
+     5.6%   118Ki   7.6%  29.8Ki    ../src/macho.cc
      4.6%  97.6Ki   4.4%  17.1Ki    ../src/webassembly.cc
      3.9%  82.9Ki   9.4%  36.6Ki    ../src/demangle.cc
      2.9%  62.1Ki   3.5%  13.7Ki    ../src/range_map.cc
      1.9%  40.9Ki   1.9%  7.32Ki    ../src/disassemble.cc
- 100.0%  2.07Mi 100.0%   389Ki    TOTAL
-Filtering enabled (source_filter); omitted 24.8Mi of entries
+ 100.0%  2.07Mi 100.0%   390Ki    TOTAL
+Filtering enabled (source_filter); omitted file = 19.1Mi, vm = 5.67Mi of entries
 ```
 
 # Future Work

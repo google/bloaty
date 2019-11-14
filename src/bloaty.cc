@@ -818,18 +818,31 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
   // The "TOTAL" row comes after all other rows.
   PrettyPrintRow(toplevel_row_, 0, options, out);
 
-  uint64_t filtered = 0;
+  uint64_t file_filtered = 0;
+  uint64_t vm_filtered = 0;
   if (ShowFile(options)) {
-    filtered += toplevel_row_.filtered_filesize;
+    file_filtered = toplevel_row_.filtered_filesize;
   }
   if (ShowVM(options)) {
-    filtered += toplevel_row_.filtered_vmsize;
+    vm_filtered = toplevel_row_.filtered_vmsize;
   }
 
-  if (filtered > 0) {
-    *out << "Filtering enabled (source_filter); omitted"
-         << SiPrint(filtered, /*force_sign=*/false) << " of entries\n";
+  if (vm_filtered == 0 && file_filtered == 0) {
+    return;
   }
+
+  *out << "Filtering enabled (source_filter); omitted";
+
+  if (file_filtered > 0 && vm_filtered > 0) {
+    *out << " file =" << SiPrint(file_filtered, /*force_sign=*/false)
+         << ", vm =" << SiPrint(vm_filtered, /*force_sign=*/false);
+  } else if (file_filtered > 0) {
+    *out << SiPrint(file_filtered, /*force_sign=*/false);
+  } else {
+    *out << SiPrint(vm_filtered, /*force_sign=*/false);
+  }
+
+   *out << " of entries\n";
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
