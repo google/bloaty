@@ -96,13 +96,6 @@ void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
 }
 
-template <class T>
-const T* GetStructPointerAndAdvance(string_view* data) {
-  const T* ret = GetStructPointer<T>(*data);
-  AdvancePastStruct<T>(data);
-  return ret;
-}
-
 static string_view StrictSubstr(string_view data, size_t off, size_t n) {
   uint64_t end = CheckedAdd(off, n);
   if (end > data.size()) {
@@ -201,7 +194,8 @@ class ElfFile {
 
   class NoteIter {
    public:
-    NoteIter(const Section& section) : remaining_(section.contents()) {
+    NoteIter(const Section& section)
+        : elf_(&section.elf()), remaining_(section.contents()) {
       Next();
     }
 
@@ -210,27 +204,10 @@ class ElfFile {
     string_view name() const { return name_; }
     string_view descriptor() const { return descriptor_; }
 
-    void Next() {
-      if (remaining_.empty()) {
-        done_ = true;
-        return;
-      }
-
-      auto ptr = GetStructPointerAndAdvance<Elf_Note>(&remaining_);
-      type_ = ptr->n_type;
-      name_ = StrictSubstr(remaining_, 0, ptr->n_namesz);
-
-      // Size might include NULL terminator.
-      if (name_[name_.size() - 1] == 0) {
-        name_ = name_.substr(0, name_.size() - 1);
-      }
-
-      remaining_ = StrictSubstr(remaining_, AlignUp(ptr->n_namesz, 4));
-      descriptor_ = StrictSubstr(remaining_, 0, ptr->n_descsz);
-      remaining_ = StrictSubstr(remaining_, AlignUp(ptr->n_descsz, 4));
-    }
+    void Next();
 
    public:
+    const ElfFile* elf_;
     string_view name_;
     string_view descriptor_;
     string_view remaining_;
@@ -402,6 +379,15 @@ struct RelaMunger {
   }
 };
 
+struct NoteMunger {
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Nhdr* to, Func func) {
+    to->n_namesz = func(from.n_namesz);
+    to->n_descsz = func(from.n_descsz);
+    to->n_type   = func(from.n_type);
+  }
+};
+
 template <class T32, class T64, class Munger>
 void ElfFile::StructReader::ReadFallback(uint64_t offset,
                                          absl::string_view* range,
@@ -478,6 +464,32 @@ void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
   size_t offset = header_.sh_entsize * index;
   elf_->ReadStruct<Elf32_Rela>(contents(), offset, RelaMunger(), file_range,
                                rela);
+}
+
+void ElfFile::NoteIter::Next() {
+  if (remaining_.empty()) {
+    done_ = true;
+    return;
+  }
+
+  Elf_Note note;
+  elf_->ReadStruct<Elf_Note>(remaining_, 0, NoteMunger(), nullptr, &note);
+
+  // 32-bit and 64-bit note are the same size, so we don't have to treat
+  // them separately when advancing.
+  AdvancePastStruct<Elf_Note>(&remaining_);
+
+  type_ = note.n_type;
+  name_ = StrictSubstr(remaining_, 0, note.n_namesz);
+
+  // Size might include NULL terminator.
+  if (name_[name_.size() - 1] == 0) {
+    name_ = name_.substr(0, name_.size() - 1);
+  }
+
+  remaining_ = StrictSubstr(remaining_, AlignUp(note.n_namesz, 4));
+  descriptor_ = StrictSubstr(remaining_, 0, note.n_descsz);
+  remaining_ = StrictSubstr(remaining_, AlignUp(note.n_descsz, 4));
 }
 
 bool ElfFile::Initialize() {
