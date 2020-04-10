@@ -626,6 +626,7 @@ enum PointerEncoding {
   DW_EH_PE_udata2      = 0x02,
   DW_EH_PE_udata4      = 0x03,
   DW_EH_PE_udata8      = 0x04,
+  DW_EH_PE_sabsptr     = 0x08,
   DW_EH_PE_sleb128     = 0x09,
   DW_EH_PE_sdata2      = 0x0A,
   DW_EH_PE_sdata4      = 0x0B,

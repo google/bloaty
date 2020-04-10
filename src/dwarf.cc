@@ -1687,6 +1687,13 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
     case DW_EH_PE_udata8:
       value = dwarf::ReadMemcpy<uint64_t>(data);
       break;
+    case DW_EH_PE_sabsptr:
+      if (is_64bit) {
+        value = dwarf::ReadMemcpy<int64_t>(data);
+      } else {
+        value = dwarf::ReadMemcpy<int32_t>(data);
+      }
+      break;
     case DW_EH_PE_sleb128:
       value = dwarf::ReadLEB128<int64_t>(data);
       break;
@@ -1723,6 +1730,15 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
       THROWF("Unimplemented eh_frame application value: $0", application);
   }
 
+  if (encoding & DW_EH_PE_indirect && format == DW_EH_PE_sabsptr) {
+      // Inspired by comment in https://github.com/gnustep/libobjc2/blob/master/dwarf_eh.h#L196
+      // The quote:
+      // "If this is an indirect value, then it is really the address of the real
+      // value
+      // TODO: Check whether this should really always be a pointer - it seems to
+      // be a GCC extensions, so not properly documented..."
+      return value;
+  }
   if (encoding & DW_EH_PE_indirect) {
     string_view location = sink->TranslateVMToFile(value);
     if (is_64bit) {
