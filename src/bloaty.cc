@@ -741,6 +741,15 @@ std::string PercentString(double percent, bool diff_mode) {
 void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
                                   const OutputOptions& options,
                                   std::ostream* out) const {
+  if (&row != &toplevel_row_) {
+    // Avoid printing this row if it is only zero.
+    // This can happen when using --domain if the row is zero for this domain.
+    if ((!ShowFile(options) && row.vmsize == 0) ||
+        (!ShowVM(options) && row.filesize == 0)) {
+      return;
+    }
+  }
+
   *out << FixedWidthString("", indent) << " ";
 
   if (ShowFile(options)) {
