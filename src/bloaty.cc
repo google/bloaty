@@ -1389,8 +1389,12 @@ class Bloaty {
   std::vector<ConfiguredDataSource*> sources_;
   std::vector<std::string> source_names_;
 
-  std::vector<std::pair<std::string, std::string>> input_files_;
-  std::vector<std::pair<std::string, std::string>> base_files_;
+  struct InputFileInfo {
+    std::string filename_;
+    std::string build_id_;
+  };
+  std::vector<InputFileInfo> input_files_;
+  std::vector<InputFileInfo> base_files_;
   std::map<std::string, std::string> debug_files_;
 };
 
@@ -1424,9 +1428,9 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
   std::string build_id = object_file->GetBuildId();
 
   if (is_base) {
-    base_files_.emplace_back(filename, build_id);
+    base_files_.push_back({filename, build_id});
   } else {
-    input_files_.emplace_back(filename, build_id);
+    input_files_.push_back({filename, build_id});
   }
 }
 
@@ -1725,16 +1729,16 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   Rollup rollup;
   std::vector<std::string> build_ids;
   std::vector<std::string> input_filenames;
-  for (const auto& pair : input_files_) {
-     input_filenames.push_back(pair.first);
+  for (const auto& file_info : input_files_) {
+     input_filenames.push_back(file_info.filename_);
   }
   ScanAndRollupFiles(input_filenames, &build_ids, &rollup);
 
   if (!base_files_.empty()) {
     Rollup base;
     std::vector<std::string> base_filenames;
-    for (const auto& pair : base_files_) {
-      base_filenames.push_back(pair.first);
+    for (const auto& file_info : base_files_) {
+      base_filenames.push_back(file_info.filename_);
     }
     ScanAndRollupFiles(base_filenames, &build_ids, &base);
     rollup.Subtract(base);
@@ -1758,15 +1762,15 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
           pair.second.c_str());
     }
 
-    for (const auto& pair : input_files_) {
+    for (const auto& file_info : input_files_) {
       input_files += absl::Substitute(
-          "$0   $1\n", absl::BytesToHexString(pair.second).c_str(),
-          pair.first.c_str());
+          "$0   $1\n", absl::BytesToHexString(file_info.build_id_).c_str(),
+          file_info.filename_.c_str());
     }
-    for (const auto& pair : base_files_) {
+    for (const auto& file_info : base_files_) {
       input_files += absl::Substitute(
-          "$0   $1\n", absl::BytesToHexString(pair.second).c_str(),
-          pair.first.c_str());
+          "$0   $1\n", absl::BytesToHexString(file_info.build_id_).c_str(),
+          file_info.filename_.c_str());
     }
     THROWF(
         "Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
@@ -1777,8 +1781,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
 void Bloaty::DisassembleFunction(string_view function, const Options& options,
                                  RollupOutput* output) {
   DisassemblyInfo info;
-  for (const auto& pair : input_files_) {
-    auto file = GetObjectFile(pair.first, true);
+  for (const auto& file_info : input_files_) {
+    auto file = GetObjectFile(file_info.filename_, true);
     if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
                                  &info)) {
       output->SetDisassembly(::bloaty::DisassembleFunction(info));
