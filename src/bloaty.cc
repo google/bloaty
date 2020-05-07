@@ -1600,7 +1600,8 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
     }
   }
 
-  int64_t filesize_before = rollup->file_total();
+  int64_t filesize_before = rollup->file_total() +
+      rollup->filtered_file_total();
   file->ProcessFile(sink_ptrs);
 
   // kInputFile source: Copy the base map to the filename sink(s).
