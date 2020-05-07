@@ -1373,8 +1373,7 @@ class Bloaty {
   void ScanAndRollupFile(const std::string& filename, Rollup* rollup,
                          std::vector<std::string>* out_build_ids) const;
 
-  std::unique_ptr<ObjectFile> GetObjectFile(const std::string& filename,
-                                            bool allow_web_assembly) const;
+  std::unique_ptr<ObjectFile> GetObjectFile(const std::string& filename) const;
 
   const InputFileFactory& file_factory_;
   const Options options_;
@@ -1403,8 +1402,7 @@ Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
   AddBuiltInSources(data_sources, options);
 }
 
-std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(const std::string& filename,
-                                                  bool allow_web_assembly) const {
+std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(const std::string& filename) const {
   std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
   auto object_file = TryOpenELFFile(file);
 
@@ -1424,7 +1422,7 @@ std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(const std::string& filename,
 }
 
 void Bloaty::AddFilename(const std::string& filename, bool is_base) {
-  auto object_file = GetObjectFile(filename, true);
+  auto object_file = GetObjectFile(filename);
   std::string build_id = object_file->GetBuildId();
 
   if (is_base) {
@@ -1435,7 +1433,7 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
 }
 
 void Bloaty::AddDebugFilename(const std::string& filename) {
-  auto object_file = GetObjectFile(filename, false);
+  auto object_file = GetObjectFile(filename);
   std::string build_id = object_file->GetBuildId();
   if (build_id.size() == 0) {
     THROWF("File '$0' has no build ID, cannot be used as a debug file",
@@ -1562,7 +1560,7 @@ struct DualMaps {
 
 void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
                                std::vector<std::string>* out_build_ids) const {
-  auto file = GetObjectFile(filename, true);
+  auto file = GetObjectFile(filename);
 
   DualMaps maps;
   std::vector<std::unique_ptr<RangeSink>> sinks;
@@ -1598,7 +1596,7 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   if (!build_id.empty()) {
     auto iter = debug_files_.find(build_id);
     if (iter != debug_files_.end()) {
-      debug_file = GetObjectFile(iter->second, false);
+      debug_file = GetObjectFile(iter->second);
       file->set_debug_file(debug_file.get());
       out_build_ids->push_back(build_id);
     }
@@ -1782,7 +1780,7 @@ void Bloaty::DisassembleFunction(string_view function, const Options& options,
                                  RollupOutput* output) {
   DisassemblyInfo info;
   for (const auto& file_info : input_files_) {
-    auto file = GetObjectFile(file_info.filename_, true);
+    auto file = GetObjectFile(file_info.filename_);
     if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
                                  &info)) {
       output->SetDisassembly(::bloaty::DisassembleFunction(info));
