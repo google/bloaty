@@ -451,7 +451,7 @@ class Rollup {
     }
   }
 
-  static double Percent(ssize_t part, size_t whole) {
+  static double Percent(int64_t part, int64_t whole) {
     if (whole == 0) {
       if (part == 0) {
         return NAN;
@@ -674,7 +674,7 @@ std::string DoubleStringPrintf(const char *fmt, double d) {
   return std::string(buf);
 }
 
-std::string SiPrint(ssize_t size, bool force_sign) {
+std::string SiPrint(int64_t size, bool force_sign) {
   const char *prefixes[] = {"", "Ki", "Mi", "Gi", "Ti"};
   size_t num_prefixes = 5;
   size_t n = 0;
@@ -687,7 +687,7 @@ std::string SiPrint(ssize_t size, bool force_sign) {
   std::string ret;
 
   if (fabs(size_d) > 100 || n == 0) {
-    ret = std::to_string(static_cast<ssize_t>(size_d)) + prefixes[n];
+    ret = std::to_string(static_cast<int64_t>(size_d)) + prefixes[n];
     if (force_sign && size > 0) {
       ret = "+" + ret;
     }
