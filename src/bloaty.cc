@@ -1402,7 +1402,8 @@ Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
   AddBuiltInSources(data_sources, options);
 }
 
-std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(const std::string& filename) const {
+std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(
+    const std::string& filename) const {
   std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
   auto object_file = TryOpenELFFile(file);
 
@@ -1728,7 +1729,7 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
   std::vector<std::string> build_ids;
   std::vector<std::string> input_filenames;
   for (const auto& file_info : input_files_) {
-     input_filenames.push_back(file_info.filename_);
+    input_filenames.push_back(file_info.filename_);
   }
   ScanAndRollupFiles(input_filenames, &build_ids, &rollup);
 
