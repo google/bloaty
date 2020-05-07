@@ -1371,7 +1371,7 @@ class Bloaty {
                           std::vector<std::string>* build_ids,
                           Rollup* rollup) const;
   void ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
-                         std::string* out_build_id) const;
+                         std::vector<std::string>* out_build_ids) const;
 
   const InputFileFactory& file_factory_;
   const Options options_;
@@ -1556,7 +1556,7 @@ struct DualMaps {
 };
 
 void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
-                               std::string* out_build_id) const {
+                               std::vector<std::string>* out_build_ids) const {
   DualMaps maps;
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
@@ -1591,7 +1591,7 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     auto iter = debug_files_.find(build_id);
     if (iter != debug_files_.end()) {
       file->set_debug_file(iter->second.get());
-      *out_build_id = build_id;
+      out_build_ids->push_back(build_id);
     }
   }
 
@@ -1660,7 +1660,7 @@ void Bloaty::ScanAndRollupFiles(
 
   struct PerThreadData {
     Rollup rollup;
-    std::string build_id;
+    std::vector<std::string> build_ids;
   };
 
   std::vector<PerThreadData> thread_data(num_threads);
@@ -1679,7 +1679,7 @@ void Bloaty::ScanAndRollupFiles(
       try {
         int j;
         while (index.TryGetNext(&j)) {
-          ScanAndRollupFile(files[j].get(), &data->rollup, &data->build_id);
+          ScanAndRollupFile(files[j].get(), &data->rollup, &data->build_ids);
         }
       } catch (const bloaty::Error& e) {
         index.Abort(e.what());
@@ -1696,9 +1696,9 @@ void Bloaty::ScanAndRollupFiles(
       rollup->Add(data->rollup);
     }
 
-    if (!data->build_id.empty()) {
-      build_ids->push_back(data->build_id);
-    }
+    build_ids->insert(build_ids->end(),
+                      data->build_ids.begin(),
+                      data->build_ids.end());
   }
 
   std::string error;
