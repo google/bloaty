@@ -1411,7 +1411,7 @@ std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(
     object_file = TryOpenMachOFile(file);
   }
 
-  if (!object_file.get() && allow_web_assembly) {
+  if (!object_file.get()) {
     object_file = TryOpenWebAssemblyFile(file);
   }
 
