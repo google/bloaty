@@ -1367,11 +1367,14 @@ class Bloaty {
     }
   }
 
-  void ScanAndRollupFiles(const std::vector<std::unique_ptr<ObjectFile>>& files,
+  void ScanAndRollupFiles(const std::vector<std::string>& filenames,
                           std::vector<std::string>* build_ids,
                           Rollup* rollup) const;
-  void ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
+  void ScanAndRollupFile(const std::string& filename, Rollup* rollup,
                          std::vector<std::string>* out_build_ids) const;
+
+  std::unique_ptr<ObjectFile> GetObjectFile(const std::string& filename,
+                                            bool allow_web_assembly) const;
 
   const InputFileFactory& file_factory_;
   const Options options_;
@@ -1386,9 +1389,9 @@ class Bloaty {
   std::vector<ConfiguredDataSource*> sources_;
   std::vector<std::string> source_names_;
 
-  std::vector<std::unique_ptr<ObjectFile>> input_files_;
-  std::vector<std::unique_ptr<ObjectFile>> base_files_;
-  std::map<std::string, std::unique_ptr<ObjectFile>> debug_files_;
+  std::vector<std::pair<std::string, std::string>> input_files_;
+  std::vector<std::pair<std::string, std::string>> base_files_;
+  std::map<std::string, std::string> debug_files_;
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
@@ -1396,7 +1399,8 @@ Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
   AddBuiltInSources(data_sources, options);
 }
 
-void Bloaty::AddFilename(const std::string& filename, bool is_base) {
+std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(const std::string& filename,
+                                                  bool allow_web_assembly) const {
   std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
   auto object_file = TryOpenELFFile(file);
 
@@ -1404,7 +1408,7 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
     object_file = TryOpenMachOFile(file);
   }
 
-  if (!object_file.get()) {
+  if (!object_file.get() && allow_web_assembly) {
     object_file = TryOpenWebAssemblyFile(file);
   }
 
@@ -1412,31 +1416,28 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
     THROWF("unknown file type for file '$0'", filename.c_str());
   }
 
+  return object_file;
+}
+
+void Bloaty::AddFilename(const std::string& filename, bool is_base) {
+  auto object_file = GetObjectFile(filename, true);
+  std::string build_id = object_file->GetBuildId();
+
   if (is_base) {
-    base_files_.push_back(std::move(object_file));
+    base_files_.emplace_back(filename, build_id);
   } else {
-    input_files_.push_back(std::move(object_file));
+    input_files_.emplace_back(filename, build_id);
   }
 }
 
 void Bloaty::AddDebugFilename(const std::string& filename) {
-  std::unique_ptr<InputFile> file(file_factory_.OpenFile(filename));
-  auto object_file = TryOpenELFFile(file);
-
-  if (!object_file.get()) {
-    object_file = TryOpenMachOFile(file);
-  }
-
-  if (!object_file.get()) {
-    THROWF("unknown file type for file '$0'", filename);
-  }
-
+  auto object_file = GetObjectFile(filename, false);
   std::string build_id = object_file->GetBuildId();
   if (build_id.size() == 0) {
     THROWF("File '$0' has no build ID, cannot be used as a debug file",
            filename);
   }
-  debug_files_[build_id] = std::move(object_file);
+  debug_files_[build_id] = filename;
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
@@ -1555,8 +1556,10 @@ struct DualMaps {
   std::vector<std::unique_ptr<DualMap>> maps_;
 };
 
-void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
+void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
                                std::vector<std::string>* out_build_ids) const {
+  auto file = GetObjectFile(filename, true);
+
   DualMaps maps;
   std::vector<std::unique_ptr<RangeSink>> sinks;
   std::vector<RangeSink*> sink_ptrs;
@@ -1586,11 +1589,13 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
     }
   }
 
+  std::unique_ptr<ObjectFile> debug_file;
   std::string build_id = file->GetBuildId();
   if (!build_id.empty()) {
     auto iter = debug_files_.find(build_id);
     if (iter != debug_files_.end()) {
-      file->set_debug_file(iter->second.get());
+      debug_file = GetObjectFile(iter->second, false);
+      file->set_debug_file(debug_file.get());
       out_build_ids->push_back(build_id);
     }
   }
@@ -1652,11 +1657,11 @@ void Bloaty::ScanAndRollupFile(ObjectFile* file, Rollup* rollup,
 }
 
 void Bloaty::ScanAndRollupFiles(
-    const std::vector<std::unique_ptr<ObjectFile>>& files,
+    const std::vector<std::string>& filenames,
     std::vector<std::string>* build_ids,
     Rollup * rollup) const {
   int num_cpus = std::thread::hardware_concurrency();
-  int num_threads = std::min(num_cpus, static_cast<int>(files.size()));
+  int num_threads = std::min(num_cpus, static_cast<int>(filenames.size()));
 
   struct PerThreadData {
     Rollup rollup;
@@ -1665,7 +1670,7 @@ void Bloaty::ScanAndRollupFiles(
 
   std::vector<PerThreadData> thread_data(num_threads);
   std::vector<std::thread> threads(num_threads);
-  ThreadSafeIterIndex index(files.size());
+  ThreadSafeIterIndex index(filenames.size());
 
   std::unique_ptr<RE2> regex = nullptr;
   if (options_.has_source_filter()) {
@@ -1675,11 +1680,11 @@ void Bloaty::ScanAndRollupFiles(
   for (int i = 0; i < num_threads; i++) {
     thread_data[i].rollup.SetFilterRegex(regex.get());
 
-    threads[i] = std::thread([this, &index, &files](PerThreadData* data) {
+    threads[i] = std::thread([this, &index, &filenames](PerThreadData* data) {
       try {
         int j;
         while (index.TryGetNext(&j)) {
-          ScanAndRollupFile(files[j].get(), &data->rollup, &data->build_ids);
+          ScanAndRollupFile(filenames[j], &data->rollup, &data->build_ids);
         }
       } catch (const bloaty::Error& e) {
         index.Abort(e.what());
@@ -1718,11 +1723,19 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
 
   Rollup rollup;
   std::vector<std::string> build_ids;
-  ScanAndRollupFiles(input_files_, &build_ids, &rollup);
+  std::vector<std::string> input_filenames;
+  for (const auto& pair : input_files_) {
+     input_filenames.push_back(pair.first);
+  }
+  ScanAndRollupFiles(input_filenames, &build_ids, &rollup);
 
   if (!base_files_.empty()) {
     Rollup base;
-    ScanAndRollupFiles(base_files_, &build_ids, &base);
+    std::vector<std::string> base_filenames;
+    for (const auto& pair : base_files_) {
+      base_filenames.push_back(pair.first);
+    }
+    ScanAndRollupFiles(base_filenames, &build_ids, &base);
     rollup.Subtract(base);
     rollup.CreateDiffModeRollupOutput(&base, options, output);
   } else {
@@ -1740,19 +1753,19 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
     for (const auto& pair : debug_files_) {
       unused_debug += absl::Substitute(
           "$0   $1\n",
-          absl::BytesToHexString(pair.second->GetBuildId()).c_str(),
-          pair.second->file_data().filename().c_str());
+          absl::BytesToHexString(pair.first).c_str(),
+          pair.second.c_str());
     }
 
-    for (const auto& file : input_files_) {
+    for (const auto& pair : input_files_) {
       input_files += absl::Substitute(
-          "$0   $1\n", absl::BytesToHexString(file->GetBuildId()).c_str(),
-          file->file_data().filename().c_str());
+          "$0   $1\n", absl::BytesToHexString(pair.second).c_str(),
+          pair.first.c_str());
     }
-    for (const auto& file : base_files_) {
+    for (const auto& pair : base_files_) {
       input_files += absl::Substitute(
-          "$0   $1\n", absl::BytesToHexString(file->GetBuildId()).c_str(),
-          file->file_data().filename().c_str());
+          "$0   $1\n", absl::BytesToHexString(pair.second).c_str(),
+          pair.first.c_str());
     }
     THROWF(
         "Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
@@ -1763,7 +1776,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
 void Bloaty::DisassembleFunction(string_view function, const Options& options,
                                  RollupOutput* output) {
   DisassemblyInfo info;
-  for (auto& file : input_files_) {
+  for (const auto& pair : input_files_) {
+    auto file = GetObjectFile(pair.first, true);
     if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
                                  &info)) {
       output->SetDisassembly(::bloaty::DisassembleFunction(info));
