@@ -882,6 +882,8 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
     case DW_FORM_ref_sig8:
     case DW_FORM_ref8:
       return AttrValue(ReadMemcpy<uint64_t>(data));
+    case DW_FORM_ref_udata:
+      return AttrValue(ReadLEB128<uint64_t>(data));
     case DW_FORM_addr:
     address_size:
       switch (reader.unit_sizes().address_size()) {
