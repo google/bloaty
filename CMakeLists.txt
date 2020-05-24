@@ -249,7 +249,7 @@ else()
     enable_testing()
 
     if(BUILD_TESTING)
-      set(INSTALL_GTEST OFF)
+      option(INSTALL_GTEST "" OFF)
       add_subdirectory(third_party/googletest)
       include_directories(third_party/googletest/googletest/include)
       include_directories(third_party/googletest/googlemock/include)
