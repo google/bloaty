@@ -1,6 +1,7 @@
-cmake_minimum_required (VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0048 NEW)
 project (Bloaty VERSION 1.0)
+set(CMAKE_CXX_STANDARD 11)
 
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
@@ -160,18 +161,20 @@ add_library(libbloaty
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
     third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+    third_party/abseil-cpp/absl/numeric/int128.cc
     third_party/abseil-cpp/absl/strings/ascii.cc
     third_party/abseil-cpp/absl/strings/charconv.cc
     third_party/abseil-cpp/absl/strings/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
+    third_party/abseil-cpp/absl/strings/internal/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/match.cc
     third_party/abseil-cpp/absl/strings/numbers.cc
     third_party/abseil-cpp/absl/strings/str_cat.cc
-    third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/string_view.cc
+    third_party/abseil-cpp/absl/strings/str_split.cc
     third_party/abseil-cpp/absl/strings/substitute.cc
     third_party/abseil-cpp/absl/types/bad_optional_access.cc
     # One source file, no special build system needed.
