@@ -149,7 +149,7 @@ endif(${PROTOC_FOUND})
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty_package.bloaty
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
-add_library(libbloaty
+add_library(libbloaty STATIC
     src/bloaty.cc
     src/demangle.cc
     src/disassemble.cc
