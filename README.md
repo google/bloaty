@@ -13,7 +13,7 @@ attribute every byte of the binary to the symbol or
 compileunit that produced it. It will even disassemble the
 binary looking for references to anonymous data. For more
 information about the analysis performed by Bloaty, please
-see [docs/how-bloaty-works.md](docs/how-bloaty-works.md).
+see [doc/how-bloaty-works.md](doc/how-bloaty-works.md).
 
 Bloaty works on binaries, shared objects, object files, and
 static libraries (`.a` files).  The following file formats
