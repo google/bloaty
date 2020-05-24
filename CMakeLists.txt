@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0048 NEW)
 project (Bloaty VERSION 1.0)
+project (Bloaty VERSION 1.1)
 set(CMAKE_CXX_STANDARD 11)
 
 # Options we define for users.
@@ -167,7 +168,6 @@ add_library(libbloaty
     third_party/abseil-cpp/absl/strings/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
-    third_party/abseil-cpp/absl/strings/internal/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/match.cc
@@ -249,6 +249,7 @@ else()
     enable_testing()
 
     if(BUILD_TESTING)
+      set(INSTALL_GTEST OFF)
       add_subdirectory(third_party/googletest)
       include_directories(third_party/googletest/googletest/include)
       include_directories(third_party/googletest/googlemock/include)
