@@ -1,11 +1,11 @@
 # Change Log
 
-## 1.1 2020-05-23
+## [Bloaty McBloatface v1.1](https://github.com/google/bloaty/releases/tag/v1.1) (2020-05-23)
 
 ### Added
 
 * **Source Filtering**: Bloaty can now filter the results based on a regex
-  match. See "Source filter" in [README.md] for details. (#177)
+  match. See "Source filter" in [README.md](README.md) for details. (#177)
 * **Show only File or VM**: It is possible to restrict the output to show only
   "VM SIZE" or "FILE SIZE" by passing `--domain=vm` or `--domain=file`. (#165)
 
@@ -34,8 +34,26 @@
 * **File size column moved left**: In the default output, the file size now
   appears on the left. This means that all numbers are now on the left, which
   leads to more readable output when viewing in a proportional font or in a
-  limited-width window. This shouldn't break any software, as anything consuming
-  Bloaty's output programmatically should be using `--csv` or `--tsv`. (#165)
+  limited-width window.
+
+  Old:
+  ```
+       VM SIZE                         FILE SIZE
+   --------------                   --------------
+     0.0%       0 .debug_info        7.97Mi  29.5%
+     0.0%       0 .debug_loc         6.40Mi  23.7%
+  ```
+
+  New:
+  ```
+      FILE SIZE        VM SIZE    
+   --------------  -------------- 
+    30.0%  8.85Mi   0.0%       0    .debug_info
+    24.7%  7.29Mi   0.0%       0    .debug_loc
+  ```
+
+  This shouldn't cause breakage, as anything consuming Bloaty's output
+  programmatically should be using `--csv` or `--tsv`. (#165)
 * **ELF Segment labels now contain index**: Previously ELF segment labels looked
   like `LOAD [RW]` with segment flags only. Now they also contain the segment
   index, eg. `LOAD #1 [RW]`, so the output can distinguish between different
@@ -54,7 +72,7 @@ found by fuzzing.
 
 * **Fixed crash bugs found by fuzzing** (#173, #175)
 
-## 1.0 2018-08-07
+## [Bloaty McBloatface v1.0](https://github.com/google/bloaty/releases/tag/v1.0) (2018-08-07)
 
 This is the first formal release of Bloaty.
 
