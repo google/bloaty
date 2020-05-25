@@ -92,8 +92,9 @@ every byte of the file, otherwise Bloaty's totals would not match the file size.
 Also notice that there is an entry in the VM map that says `[-- Nothing mapped
 --]`. This is calling attention to the fact that there is a gap in the address
 space here. Since nothing is mapped, these regions of the VM space don't
-actually need to be mapped. However, unless this unused space aligns with page
-boundaries, it will probably end up getting mapped anyway.
+actually need to accessible in the target process image. However, unless this
+unused space aligns with page boundaries, it will probably end up getting
+mapped anyway.
 
 Sometimes we know a region's start but not its end.  For example, Mach-O
 symbols have an address but not a size (whereas ELF symbols have both).
