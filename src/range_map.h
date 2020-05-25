@@ -74,8 +74,20 @@ class RangeMap {
                                const RangeMap& translator, bool verbose,
                                RangeMap* other);
 
+  // Collapses adjacent ranges with the same label. This reduces memory usage
+  // and removes redundant noise from the output when dumping a full memory map
+  // (in normal Bloaty output it makes no difference, because all labels with
+  // the same name are added together).
+  //
+  // TODO(haberman): see if we can do this at insertion time instead, so it
+  // doesn't require a second pass.
+  void Compress();
+
   // Returns whether this RangeMap fully covers the given range.
   bool CoversRange(uint64_t addr, uint64_t size) const;
+
+  // Returns the maximum address contained in this map.
+  uint64_t GetMaxAddress() const;
 
   // Translates |addr| into the other domain, returning |true| if this was
   // successful.

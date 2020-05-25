@@ -288,6 +288,21 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
   return total_size == size;
 }
 
+void RangeMap::Compress() {
+  auto prev = mappings_.begin();
+  auto it = prev;
+  while (it != mappings_.end()) {
+    if (prev->first + prev->second.size == it->first &&
+        prev->second.label == it->second.label) {
+      prev->second.size += it->second.size;
+      mappings_.erase(it++);
+    } else {
+      prev = it;
+      ++it;
+    }
+  }
+}
+
 bool RangeMap::CoversRange(uint64_t addr, uint64_t size) const {
   auto it = FindContaining(addr);
   uint64_t end = addr + size;
@@ -301,6 +316,15 @@ bool RangeMap::CoversRange(uint64_t addr, uint64_t size) const {
     }
     addr = RangeEnd(it);
     it++;
+  }
+}
+
+uint64_t RangeMap::GetMaxAddress() const {
+  if (mappings_.empty()) {
+    return 0;
+  } else {
+    auto& entry = *mappings_.rbegin();
+    return entry.first + entry.second.size;
   }
 }
 
