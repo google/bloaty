@@ -4,8 +4,8 @@
 At a high level, Bloaty's goal is to create a map of the binary where every
 byte has a label attached to it.  Every byte starts out as unknown
 (unattributed).  As we scan the binary we assign labels to different ranges of
-the file.  For example, if the user selected the "symbols" data source we scan
-the symbol table and use the symbol name as the label for each range.
+the file.  For example, if the user selected the "sections" data source we scan
+the section table and use the section name as the label for each range.
 
 Ideally these labeled ranges will cover the entire file by the time we are
 done.  In practice we usually can't achieve perfect 100% coverage.  To
@@ -30,6 +30,70 @@ RangeMap (as defined in [range_map.h](https://github.com/google/bloaty/blob/mast
 is the core data structure of Bloaty.  It is a sparse map of
 `[start, end) -> std::string` that associates regions of VM or file space to
 a label.
+
+By the time Bloaty is finished, it has built a complete map of both VM and file
+space for the binary. You can view these maps by running Bloaty with '-v':
+
+```
+$ ./bloaty bloaty -v -d sections
+FILE MAP:
+0000000-00002e0         736             [LOAD #2 [R]]
+00002e0-00002fc          28             .interp
+00002fc-0000320          36             .note.gnu.build-id
+0000320-0000340          32             .note.ABI-tag
+0000340-0000510         464             .gnu.hash
+0000510-0001db8        6312             .dynsym
+0001db8-0003c8d        7893             .dynstr
+0003c8d-0003c8e           1             [LOAD #2 [R]]
+0003c8e-0003e9c         526             .gnu.version
+0003e9c-0003ea0           4             [LOAD #2 [R]]
+0003ea0-0004020         384             .gnu.version_r
+0004020-0066f30      405264             .rela.dyn
+0066f30-00680b8        4488             .rela.plt
+00680b8-0069000        3912             [Unmapped]
+0069000-0069017          23             .init
+0069017-0069020           9             [LOAD #3 [RX]]
+0069020-0069be0        3008             .plt
+0069be0-0069c40          96             .plt.got
+0069c40-02874d1     2218129             .text
+[...]
+
+VM MAP:
+000000-0002e0           736             [LOAD #2 [R]]
+0002e0-0002fc            28             .interp
+0002fc-000320            36             .note.gnu.build-id
+000320-000340            32             .note.ABI-tag
+000340-000510           464             .gnu.hash
+000510-001db8          6312             .dynsym
+001db8-003c8d          7893             .dynstr
+003c8d-003c8e             1             [LOAD #2 [R]]
+003c8e-003e9c           526             .gnu.version
+003e9c-003ea0             4             [LOAD #2 [R]]
+003ea0-004020           384             .gnu.version_r
+004020-066f30        405264             .rela.dyn
+066f30-0680b8          4488             .rela.plt
+0680b8-069000          3912             [-- Nothing mapped --]
+069000-069017            23             .init
+069017-069020             9             [LOAD #3 [RX]]
+[...]
+```
+
+The file map refers to file offsets starting with zero, and the VM map refers to
+VM addresses. VM addresses do not necessarily start at zero if the binary was
+linked to be loaded at a fixed address. However with this position-independent
+binary, the VM addresses start at zero also.
+
+Note that some of the regions in the map have labels like `[LOAD #2 [R]]`
+instead of a true section name. This is because the section table does not
+always cover every byte of the file. Bloaty gives these regions a fallback label
+that contains the segment name instead. We must attach some kind of label to
+every byte of the file, otherwise Bloaty's totals would not match the file size.
+
+Also notice that there is an entry in the VM map that says `[-- Nothing mapped
+--]`. This is calling attention to the fact that there is a gap in the address
+space here. Since nothing is mapped, these regions of the VM space don't
+actually need to be mapped. However, unless this unused space aligns with page
+boundaries, it will probably end up getting mapped anyway.
 
 Sometimes we know a region's start but not its end.  For example, Mach-O
 symbols have an address but not a size (whereas ELF symbols have both).
