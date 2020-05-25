@@ -7,6 +7,14 @@ Ever wondered what's making your binary big?  Bloaty
 McBloatface will show you a size profile of the binary so
 you can understand what's taking up space inside.
 
+Bloaty performs a deep analysis of the binary. Using custom
+ELF, DWARF, and Mach-O parsers, Bloaty aims to accurately
+attribute every byte of the binary to the symbol or
+compileunit that produced it. It will even disassemble the
+binary looking for references to anonymous data. For more
+information about the analysis performed by Bloaty, please
+see [doc/how-bloaty-works.md](doc/how-bloaty-works.md).
+
 Bloaty works on binaries, shared objects, object files, and
 static libraries (`.a` files).  The following file formats
 are supported:
@@ -497,6 +505,15 @@ $ ./bloaty -d sections bloaty
    0.0%  3.30Ki   0.0%  3.23Ki    .plt
  100.0%  29.5Mi 100.0%  6.69Mi    TOTAL
 ```
+
+Sections are regions of the binary that are the linker
+treats as atomic when linking. The linker will never break
+apart or rearrange the data within a section. This is why it
+is necessary to compile with `-ffunction-sections` and
+`-fdata-sections` if you want the linker to strip out
+individual functions or variables that have no references.
+However the linker will often combine many input sections
+into a single output section.
 
 ## Symbols
 
