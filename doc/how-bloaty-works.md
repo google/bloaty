@@ -216,14 +216,31 @@ many non-segment load commands such as the symbol table (`LC_SYMTAB`,
 have zero or more sections, so in Mach-O files the 1:many nature of segments
 and sections is enforced by the file format.
 
-For `segments` and `sections` Bloaty makes a conscious choice to report the
-ELF/Mach-O headers separately.
+For `segments` and `sections` we have to decide how to attribute the regions of
+the file that correspond to the segment/section headers themselves. Bloaty's
+general philosophy is to include the metadata with the data, so each label
+shows the true weight of everything associated with that label. This would
+suggest that the `.text` label should include the `.text` section as well as
+the section header entry for the `.text` section. However this would hide the
+overhead of the ELF headers, which can be significant if there are many
+sections. Bloaty currently has no higher-level data source that could show the
+ELF headers separately from the ELF data, and even if there was such a data
+source it would have narrow usefulness so people would probably not think to
+use it very often.
+
+There is not an easy answer to this question.  At the moment Bloaty will
+include section headers with the corresponding section, but will *not* include
+segment headers with the corresponding segment.  This may or may not be the
+best solution to this problem, and this may change if another solution proves
+to work better.
 
 ### Symbols
 
-The `symbols` data source requires a lot of deep analysis of the binary to give
-good coverage. For example, take the following data from running Bloaty on
-itself:
+The `symbols` data source is where Bloaty's deep parsing of the binary delivers
+the most benefit, as it provides detailed information that you cannot get
+from a linker map or symbol table.
+
+For example, take the following data from running Bloaty on itself:
 
 ```
 $ ./bloaty bloaty -d symbols,sections
@@ -246,11 +263,9 @@ $ ./bloaty bloaty -d symbols,sections
 ```
 
 I excerpted two symbols from the report. Between these two symbols, Bloaty has
-found seven distinct kinds of sections that contributed to these two symbols. If
+found seven distinct kinds of data that contributed to these two symbols. If
 you wrote a tool that naively just parsed the symbol table, you would only find
-one of those seven.
-
-Let's take a survey of what Bloaty has found here.
+the first of these seven:
 
 1. `.text.`/`.data.rel.ro`: this is the data we obtain by simply following the
    symbol table entry. This is the primary code or data emitted by the function
@@ -307,7 +322,10 @@ Let's take a survey of what Bloaty has found here.
    Sometimes data doesn't get its own symbol table entry, for whatever reason.
    Bloaty can attribute anonymous data to the function that uses it by
    disassembling the binary looking for instructions that reference a different
-   part of the binary.
+   part of the binary. If the same anonymous data is used by more than one
+   function, then the first one scanned will "win" and assume the whole cost,
+   as Bloaty has no concept of sharing the cost. Every byte of the file must
+   have exactly one label associated with it.
 
 Note that this is more granular information than you can get from a linker map
 file. A linker map file will break down some of these sections by compile unit,
@@ -352,4 +370,4 @@ file, a linker map can often give good data about which parts of the binary came
 from which translation units. However Bloaty is able to derive this data without
 needing a linker map file, which may be tricky to obtain. The `compileunits`
 data source is also useful when combined with other data sources in hierarchical
-profiles, as seen above.
+profiles.
