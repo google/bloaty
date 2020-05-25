@@ -78,10 +78,10 @@ VM MAP:
 [...]
 ```
 
-The file map refers to file offsets starting with zero, and the VM map refers to
-VM addresses. VM addresses do not necessarily start at zero if the binary was
-linked to be loaded at a fixed address. However with this position-independent
-binary, the VM addresses start at zero also.
+The file map refers to file offsets, and these always run from 0 to the size of
+the file. The VM map refers to VM addresses; these start at 0 for shared
+libraries and position-independent binaries, but these will start at some
+non-zero address if the binary was linked to be loaded at a fixed address.
 
 Note that some of the regions in the map have labels like `[LOAD #2 [R]]`
 instead of a true section name. This is because the section table does not
@@ -169,8 +169,9 @@ VM map immediately, but we will also use the base map to translate address
 
 How does the base map store translation info?  I left one thing out about
 `RangeMap` above.  In addition to storing a label for every region, it can also
-(optionally) store a member called `other_start`.  This is the offset in the
-other space where this range maps to.
+(optionally) store a member called `other_start`.  This stores the
+corresponding offset in the other space, and lets you translate addresses from
+one to the other. The `other_start` member is only used in the base map.
 
 We build the base map by scanning either the segments (program headers) or
 sections of the binary.  These give both VM address and file offset for regions
@@ -185,31 +186,6 @@ we can't find any information about it.
 Once we have built the base map, we can get on to the meat of Bloaty's work.
 We can now scan the binary according to whatever data source(s) the user has
 selected.
-
-We must do more than just scan a single table though.  For example, if the user
-asked us to scan symbols we can't simply scan the symbol table, add all the
-symbol table entries to a `RangeMap`, and call it a day.  The first prerelease
-version of Bloaty did just that and I got very understandable complaints that
-Bloaty's coverage was low, and very large parts of the binary would show up as
-`[None]`.
-
-The problem is that the symbol table only describes the actual machine code of
-the function.  But a function can emit far more artifacts into a binary than
-just the machine code.  It can also emit:
-
-* unwind info into `.eh_frame`
-* relocations into `.rela.dyn`, etc.
-* debugging information into various `.debug_*` sections.
-* the symbol table entries themselves (yes, these do take up space!)
-
-If we want to achieve high coverage of the binary, we have to scan all of these
-different sections and attribute them as best we can to individual
-symbols/compileunits/etc.
-
-All of this means that we have to delve deep into ELF, DWARF, Mach-O, etc. to
-get good coverage. Bloaty includes custom ELF/DWARF/Mach-O parsers to not only
-extract every bit of data we can, but also to track where exactly in the files
-each bit of data lives.
 
 ### Segments and Sections
 
@@ -232,13 +208,16 @@ ELF segments do not have names. To distinguish between different `PT_LOAD`
 segments, we include both a segment offset and the segment flags in the label,
 eg. `LOAD #2 [R]`.
 
-For Mach-O, segments are contained within a file-level table of "load commands."
-Each load command has a type, and technically speaking, segments are a subset of
-all load commands. However Bloaty can parse non-segment load commands such as
-the symbol table (`LC_SYMTAB`, `LC_DYSYMTAB`), code signature
-(`LC_CODE_SIGNATURE`), and more. Segments can have zero or more sections, so in
-Mach-O files the 1:many nature of segments and sections is enforced by the file
-format.
+For Mach-O, segments are contained within a file-level table of "load
+commands." Each load command has a type, and technically speaking, segments are
+a subset of all load commands. However Bloaty's `segments` data source reports
+many non-segment load commands such as the symbol table (`LC_SYMTAB`,
+`LC_DYSYMTAB`), code signature (`LC_CODE_SIGNATURE`), and more. Segments can
+have zero or more sections, so in Mach-O files the 1:many nature of segments
+and sections is enforced by the file format.
+
+For `segments` and `sections` Bloaty makes a conscious choice to report the
+ELF/Mach-O headers separately.
 
 ### Symbols
 
