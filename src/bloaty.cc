@@ -1493,6 +1493,10 @@ struct DualMaps {
   }
 
   void ComputeRollup(Rollup* rollup) {
+    for (auto& map : maps_) {
+      map->vm_map.Compress();
+      map->file_map.Compress();
+    }
     RangeMap::ComputeRollup(VmMaps(), [=](const std::vector<std::string>& keys,
                                           uint64_t addr, uint64_t end) {
       return rollup->AddSizes(keys, end - addr, true);
@@ -1506,14 +1510,17 @@ struct DualMaps {
 
   void PrintMaps(const std::vector<const RangeMap*> maps) {
     uint64_t last = 0;
+    uint64_t max = maps[0]->GetMaxAddress();
+    int hex_digits = std::ceil(std::log2(max) / 4);
     RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
                                       uint64_t addr, uint64_t end) {
       if (addr > last) {
-        PrintMapRow("NO ENTRY", last, addr);
+        PrintMapRow("[-- Nothing mapped --]", last, addr, hex_digits);
       }
-      PrintMapRow(KeysToString(keys), addr, end);
+      PrintMapRow(KeysToString(keys), addr, end, hex_digits);
       last = end;
     });
+    printf("\n");
   }
 
   void PrintFileMaps() { PrintMaps(FileMaps()); }
@@ -1522,9 +1529,10 @@ struct DualMaps {
   std::string KeysToString(const std::vector<std::string>& keys) {
     std::string ret;
 
-    for (size_t i = 0; i < keys.size(); i++) {
-      if (i > 0) {
-        ret += ", ";
+    // Start at offset 1 to skip the base map.
+    for (size_t i = 1; i < keys.size(); i++) {
+      if (i > 1) {
+        ret += "\t";
       }
       ret += keys[i];
     }
@@ -1532,9 +1540,10 @@ struct DualMaps {
     return ret;
   }
 
-  void PrintMapRow(string_view str, uint64_t start, uint64_t end) {
-    printf("[%" PRIx64 ", %" PRIx64 "] %.*s\n", start, end, (int)str.size(),
-           str.data());
+  void PrintMapRow(string_view str, uint64_t start, uint64_t end, int hex_digits) {
+    printf("%.*" PRIx64 "-%.*" PRIx64 "\t %s\t\t%.*s\n", hex_digits, start,
+           hex_digits, end, LeftPad(std::to_string(end - start), 10).c_str(),
+           (int)str.size(), str.data());
   }
 
   DualMap* base_map() { return maps_[0].get(); }
