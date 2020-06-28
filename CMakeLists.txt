@@ -186,6 +186,7 @@ endif(UNIX)
 
 add_subdirectory(third_party/abseil-cpp)
 set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} absl::strings)
+set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} absl::optional)
 
 if(UNIX)
   if(${RE2_FOUND})
