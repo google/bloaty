@@ -159,24 +159,6 @@ add_library(libbloaty STATIC
     src/macho.cc
     src/range_map.cc
     src/webassembly.cc
-    # Until Abseil has a proper CMake build system
-    third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
-    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
-    third_party/abseil-cpp/absl/numeric/int128.cc
-    third_party/abseil-cpp/absl/strings/ascii.cc
-    third_party/abseil-cpp/absl/strings/charconv.cc
-    third_party/abseil-cpp/absl/strings/escaping.cc
-    third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
-    third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
-    third_party/abseil-cpp/absl/strings/internal/memutil.cc
-    third_party/abseil-cpp/absl/strings/internal/utf8.cc
-    third_party/abseil-cpp/absl/strings/match.cc
-    third_party/abseil-cpp/absl/strings/numbers.cc
-    third_party/abseil-cpp/absl/strings/str_cat.cc
-    third_party/abseil-cpp/absl/strings/string_view.cc
-    third_party/abseil-cpp/absl/strings/str_split.cc
-    third_party/abseil-cpp/absl/strings/substitute.cc
-    third_party/abseil-cpp/absl/types/bad_optional_access.cc
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
@@ -201,6 +183,9 @@ if(UNIX)
 else(UNIX)
     set(LIBBLOATY_LIBS libbloaty libprotoc re2 capstone-static)
 endif(UNIX)
+
+add_subdirectory(third_party/abseil-cpp)
+set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} absl::strings)
 
 if(UNIX)
   if(${RE2_FOUND})
