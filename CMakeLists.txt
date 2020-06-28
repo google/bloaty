@@ -244,26 +244,6 @@ add_library(libbloaty STATIC
     src/util.cc
     src/util.h
     src/webassembly.cc
-    # Until Abseil has a proper CMake build system
-    third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
-    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
-    third_party/abseil-cpp/absl/debugging/internal/demangle.cc
-    third_party/abseil-cpp/absl/numeric/int128.cc
-    third_party/abseil-cpp/absl/strings/ascii.cc
-    third_party/abseil-cpp/absl/strings/charconv.cc
-    third_party/abseil-cpp/absl/strings/escaping.cc
-    third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
-    third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
-    third_party/abseil-cpp/absl/strings/internal/escaping.cc
-    third_party/abseil-cpp/absl/strings/internal/memutil.cc
-    third_party/abseil-cpp/absl/strings/internal/utf8.cc
-    third_party/abseil-cpp/absl/strings/match.cc
-    third_party/abseil-cpp/absl/strings/numbers.cc
-    third_party/abseil-cpp/absl/strings/str_cat.cc
-    third_party/abseil-cpp/absl/strings/string_view.cc
-    third_party/abseil-cpp/absl/strings/str_split.cc
-    third_party/abseil-cpp/absl/strings/substitute.cc
-    third_party/abseil-cpp/absl/types/bad_optional_access.cc
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
@@ -315,6 +295,8 @@ if(UNIX OR MINGW)
   endif()
 endif()
 
+add_subdirectory(third_party/abseil-cpp)
+list(APPEND LIBBLOATY_LIBS absl::strings)
 list(APPEND LIBBLOATY_LIBS Threads::Threads)
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
