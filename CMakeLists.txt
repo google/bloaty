@@ -297,6 +297,7 @@ endif()
 
 add_subdirectory(third_party/abseil-cpp)
 list(APPEND LIBBLOATY_LIBS absl::strings)
+list(APPEND LIBBLOATY_LIBS absl::optional)
 list(APPEND LIBBLOATY_LIBS Threads::Threads)
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
