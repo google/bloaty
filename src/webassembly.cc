@@ -380,6 +380,33 @@ void AddWebAssemblyFallback(RangeSink* sink) {
                      StrictSubstr(sink->input_file().data(), 0, 8));
 }
 
+static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
+  ForEachSection(file.data(),
+                 [dwarf](const Section& section) {
+                   if (section.name == ".debug_info") {
+                     dwarf->debug_info = section.contents;
+                   } else if (section.name == ".debug_aranges") {
+                     dwarf->debug_aranges = section.contents;
+                   } else if (section.name == ".debug_str") {
+                     dwarf->debug_str = section.contents;
+                   } else if (section.name == ".debug_types") {
+                     dwarf->debug_types = section.contents;
+                   } else if (section.name == ".debug_abbrev") {
+                     dwarf->debug_abbrev = section.contents;
+                   } else if (section.name == ".debug_line") {
+                     dwarf->debug_line = section.contents;
+                   } else if (section.name == ".debug_loc") {
+                     dwarf->debug_loc = section.contents;
+                   } else if (section.name == ".debug_pubnames") {
+                     dwarf->debug_pubnames = section.contents;
+                   } else if (section.name == ".debug_pubtypes") {
+                     dwarf->debug_pubtypes = section.contents;
+                   } else if (section.name == ".debug_ranges") {
+                     dwarf->debug_ranges = section.contents;
+                   }
+                 });
+}
+
 class WebAssemblyObjectFile : public ObjectFile {
  public:
   WebAssemblyObjectFile(std::unique_ptr<InputFile> file_data)
@@ -403,8 +430,16 @@ class WebAssemblyObjectFile : public ObjectFile {
         case DataSource::kFullSymbols:
           ParseSymbols(sink);
           break;
+        case DataSource::kCompileUnits: {
+          // TODO: do we need to fill these in?
+          SymbolTable symtab;
+          DualMap symbol_map;
+          dwarf::File dwarf;
+          ReadDWARFSections(sink->input_file(), &dwarf);
+          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          break;
+        }
         case DataSource::kArchiveMembers:
-        case DataSource::kCompileUnits:
         case DataSource::kInlines:
         default:
           THROW("WebAssembly doesn't support this data source");
