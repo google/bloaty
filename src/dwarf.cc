@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stack>
 #include <unordered_map>
@@ -60,6 +61,20 @@ int DivRoundUp(int n, int d) {
   return (n + (d - 1)) / d;
 }
 
+namespace {
+
+// uint64/32 max is a tombstone value added by https://reviews.llvm.org/D81784.
+bool IsValidDwarfAddress(uint64_t addr, uint8_t address_size) {
+  if (addr == 0)
+    return false;
+  if (address_size == 4 && addr == std::numeric_limits<uint32_t>::max())
+    return false;
+  if (address_size == 8 && addr == std::numeric_limits<uint64_t>::max())
+    return false;
+  return true;
+}
+
+}  // namespace
 
 // Low-level Parsing Routines //////////////////////////////////////////////////
 
@@ -404,6 +419,8 @@ class AddressRanges {
   // Advance to the next compilation unit.  The unit offset will be available in
   // debug_info_offset().  Must call this once before reading the first unit.
   bool NextUnit();
+
+  bool address_size() const { return sizes_.address_size(); }
 
  private:
   CompilationUnitSizes sizes_;
@@ -1387,7 +1404,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
     std::string filename = map.GetFilename(ranges.debug_info_offset());
 
     while (ranges.NextRange()) {
-      if (ranges.address() != 0) {
+      if (dwarf::IsValidDwarfAddress(ranges.address(), ranges.address_size())) {
         sink->AddVMRangeIgnoreDuplicate("dwarf_aranges", ranges.address(),
                                         ranges.length(), filename);
       }
@@ -1534,7 +1551,8 @@ void AddDIE(const dwarf::File& file, const std::string& name,
             RangeSink* sink) {
   // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
   // functions).
-  if (die.has_low_pc() && die.has_high_pc() && die.low_pc() != 0) {
+  if (die.has_low_pc() && die.has_high_pc() &&
+      dwarf::IsValidDwarfAddress(die.low_pc(), sizes.address_size())) {
     uint64_t high_pc = die.high_pc();
 
     // It appears that some compilers make high_pc a size, and others make it an
