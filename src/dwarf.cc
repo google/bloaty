@@ -420,7 +420,7 @@ class AddressRanges {
   // debug_info_offset().  Must call this once before reading the first unit.
   bool NextUnit();
 
-  bool address_size() const { return sizes_.address_size(); }
+  uint8_t address_size() const { return sizes_.address_size(); }
 
  private:
   CompilationUnitSizes sizes_;
