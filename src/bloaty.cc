@@ -1454,7 +1454,7 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
   auto iter = all_known_sources_.find(source.base_data_source());
 
   if (iter == all_known_sources_.end()) {
-    THROWF("custom data source '$0': no such base source '$1'", source.name(),
+    THROWF("custom data source '$0': no such base source '$1'.\nTry --list-sources to see valid sources.", source.name(),
            source.base_data_source());
   } else if (!iter->second->munger->IsEmpty()) {
     THROWF("custom data source '$0' tries to depend on custom data source '$1'",
@@ -1473,7 +1473,7 @@ void Bloaty::AddDataSource(const std::string& name) {
   source_names_.emplace_back(name);
   auto it = all_known_sources_.find(name);
   if (it == all_known_sources_.end()) {
-    THROWF("no such data source: $0", name);
+    THROWF("no such data source: $0.\nTry --list-sources to see valid sources.", name);
   }
 
   sources_.emplace_back(it->second.get());

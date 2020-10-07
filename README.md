@@ -34,13 +34,27 @@ This is not an official Google product.
 
 ## Building Bloaty
 
-Building Bloaty requires CMake and ``protoc``, the protobuf compiler. On Ubuntu, install them with:
+Building Bloaty requires CMake.  On Ubuntu, install this with:
 
 ```
-$ sudo apt install cmake protobuf-compiler
+$ sudo apt install cmake
 ```
 
-Bloaty bundles ``libprotobuf``, ``re2``, ``capstone``, and ``pkg-config`` as Git submodules, but it will prefer the system's versions of those dependencies if available. All other dependencies are included as Git submodules. To build, run:
+and on macOS, this can be installed using homebrew with:
+```
+$ brew install cmake
+```
+
+
+Bloaty bundles ``libprotobuf``, ``re2``, ``capstone``, and ``pkg-config`` as Git submodules, and uses ``protoc`` build from libprotobuf, but it will prefer the system's versions of those dependencies if available. All other dependencies are included as Git submodules.
+
+If the Git repository hasn't been cloned with the `--recursive`, the submodules can be checked out with:
+
+```
+$ git submodule update --init --recursive
+```
+
+To build, run:
 
 ```
 $ cmake .
