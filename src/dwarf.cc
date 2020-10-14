@@ -599,6 +599,11 @@ class DIEReader {
     return *current_abbrev_;
   }
 
+  // Returns the current read offset within the current compilation unit.
+  int64_t GetReadOffset() const { return remaining_.data() - start_; }
+
+  int GetDepth() const { return depth_; }
+
   // Returns the tag of the current DIE.
   // Requires that ReadCode() has been called at least once.
   uint16_t GetTag() const { return GetAbbrev().tag; }
@@ -659,6 +664,7 @@ class DIEReader {
 
   bool ReadCompilationUnitHeader();
   bool ReadCode();
+  void SkipNullEntries();
 
   enum class State {
     kReadyToReadAttributes,
@@ -670,6 +676,7 @@ class DIEReader {
 
   const File& dwarf_;
   RangeSink* strp_sink_ = nullptr;
+  const char *start_ = nullptr;
 
   // Abbreviation for the current entry.
   const AbbrevTable::Abbrev* current_abbrev_;
@@ -710,20 +717,21 @@ class DIEReader {
   uint64_t unit_type_offset_;
 };
 
+void DIEReader::SkipNullEntries() {
+  while (!remaining_.empty() && remaining_[0] == 0) {
+    // null entry terminates a chain of sibling entries.
+    remaining_.remove_prefix(1);
+    depth_--;
+  }
+}
+
 bool DIEReader::ReadCode() {
-  uint32_t code;
-again:
+  SkipNullEntries();
   if (remaining_.empty()) {
     state_ = State::kEof;
     return false;
   }
-  code = ReadLEB128<uint32_t>(&remaining_);
-  if (code == 0) {
-    // null entry terminates a chain of sibling entries.
-    depth_--;
-    goto again;
-  }
-
+  uint32_t code = ReadLEB128<uint32_t>(&remaining_);
   if (!unit_abbrev_->GetAbbrev(code, &current_abbrev_)) {
     THROW("couldn't find abbreviation for code");
   }
@@ -759,6 +767,7 @@ bool DIEReader::SeekToCompilationUnit(Section section, uint64_t offset) {
     next_unit_ = dwarf_.debug_types;
   }
 
+  start_ = next_unit_.data();
   SkipBytes(offset, &next_unit_);
   return ReadCompilationUnitHeader();
 }
@@ -1006,6 +1015,7 @@ bool DIEReader::SkipChildren() {
 
   int target_depth = depth_ - 1;
   dwarf::AttrReader<void> attr_reader;
+  SkipNullEntries();
   while (depth_ > target_depth) {
     // TODO(haberman): use DW_AT_sibling to optimize skipping when it is
     // available.
@@ -1013,6 +1023,7 @@ bool DIEReader::SkipChildren() {
       return false;
     }
     attr_reader.ReadAttributes(this, nullptr);
+    SkipNullEntries();
   }
   return true;
 }
@@ -1545,6 +1556,8 @@ class InlinesDIE {
   uint64_t stmt_list_ = 0;
 };
 
+// To view DIEs for a given file, try:
+//   readelf --debug-dump=info foo.bin
 void AddDIE(const dwarf::File& file, const std::string& name,
             const GeneralDIE& die, const SymbolTable& symtab,
             const DualMap& symbol_map, const dwarf::CompilationUnitSizes& sizes,
@@ -1600,8 +1613,8 @@ void AddDIE(const dwarf::File& file, const std::string& name,
         if (verbose_level > 0) {
           fprintf(stderr,
                   "bloaty: warning: couldn't find DWARF location in symbol "
-                  "table, address: %" PRIx64 "\n",
-                  addr);
+                  "table, address: %" PRIx64 ", name: %s\n",
+                  addr, name.c_str());
         }
       }
     }
