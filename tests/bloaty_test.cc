@@ -187,12 +187,9 @@ TEST_F(BloatyTest, SimpleSharedObjectFile) {
   RunBloaty({"bloaty", "-d", "symbols", "-n", "50", file});
   AssertChildren(*top_row_, {
     std::make_tuple("bar_x", 4000, 4000),
-    std::make_tuple("foo_x", 4000, 0),
+    std::make_tuple("foo_x", 4000, kUnknown),
     std::make_tuple("bar_func", kUnknown, kSameAsVM),
     std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    std::make_tuple("bar_y", 4, 4),
-    std::make_tuple("bar_z", 4, 0),
-    std::make_tuple("foo_y", 4, 0)
   });
 }
 

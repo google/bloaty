@@ -293,7 +293,8 @@ void RangeMap::Compress() {
   auto it = prev;
   while (it != mappings_.end()) {
     if (prev->first + prev->second.size == it->first &&
-        prev->second.label == it->second.label) {
+        (prev->second.label == it->second.label ||
+         (!prev->second.HasFallbackLabel() && it->second.IsShortFallback()))) {
       prev->second.size += it->second.size;
       mappings_.erase(it++);
     } else {

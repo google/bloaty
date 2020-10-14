@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0048 NEW)
-project (Bloaty VERSION 1.0)
 project (Bloaty VERSION 1.1)
+include(CTest)
 set(CMAKE_CXX_STANDARD 11)
 
 # Options we define for users.
