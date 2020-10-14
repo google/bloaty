@@ -164,6 +164,12 @@ class RangeMap {
     uint64_t other_start;  // kNoTranslation if there is no mapping.
 
     bool HasTranslation() const { return other_start != kNoTranslation; }
+    bool HasFallbackLabel() const { return !label.empty() && label[0] == '['; }
+
+    // We assume that short regions that were unattributed (have fallback
+    // labels) are actually padding. We could probably make this heuristic
+    // a bit more robust.
+    bool IsShortFallback() const { return size <= 16 && HasFallbackLabel(); }
   };
 
   typedef std::map<uint64_t, Entry> Map;
