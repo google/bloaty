@@ -308,18 +308,17 @@ if(UNIX)
   endif()
 endif()
 
+list(APPEND LIBBLOATY_LIBS Threads::Threads)
+
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
   message("LIB_FUZZING_ENGINE set, building fuzz_target instead of Bloaty")
   add_executable(fuzz_target tests/fuzz_target.cc)
-  target_link_libraries(fuzz_target ${LIBBLOATY_LIBS} Threads::Threads $ENV{LIB_FUZZING_ENGINE})
+  target_link_libraries(fuzz_target ${LIBBLOATY_LIBS} $ENV{LIB_FUZZING_ENGINE})
 else()
   add_executable(bloaty src/main.cc)
   target_link_libraries(bloaty ${LIBBLOATY_LIBS})
 
   set_property(TARGET bloaty PROPERTY FOLDER "bloaty")
-
-  # All of this is to add -pthread, which is required by re2 (not us).
-  target_link_libraries(bloaty Threads::Threads)
 
   if(BLOATY_ENABLE_CMAKETARGETS)
     install(
@@ -352,12 +351,12 @@ else()
 
       foreach(target ${TEST_TARGETS})
         add_executable(${target} tests/${target}.cc)
-        target_link_libraries(${target} ${LIBBLOATY_LIBS} gtest_main gmock Threads::Threads)
+        target_link_libraries(${target} ${LIBBLOATY_LIBS} gtest_main gmock)
         set_property(TARGET ${target} PROPERTY FOLDER "tests")
       endforeach(target)
 
       add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
-      target_link_libraries(fuzz_test ${LIBBLOATY_LIBS} Threads::Threads)
+      target_link_libraries(fuzz_test ${LIBBLOATY_LIBS})
       set_property(TARGET fuzz_test PROPERTY FOLDER "tests")
 
       foreach(testlib gmock gmock_main gtest gtest_main)
