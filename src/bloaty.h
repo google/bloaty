@@ -34,10 +34,10 @@
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 #include "capstone/capstone.h"
-#include "re2/re2.h"
 
 #include "bloaty.pb.h"
 #include "range_map.h"
+#include "re.h"
 
 #define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
   class_name(const class_name&) = delete; \
@@ -262,14 +262,13 @@ class NameMunger {
   // Adds a regex that will be applied to all names.  All regexes will be
   // applied in sequence.
   void AddRegex(const std::string& regex, const std::string& replacement);
-
   std::string Munge(absl::string_view name) const;
 
   bool IsEmpty() const { return regexes_.empty(); }
 
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
-  std::vector<std::pair<std::unique_ptr<RE2>, std::string>> regexes_;
+  std::vector<std::pair<std::unique_ptr<ReImpl>, std::string>> regexes_;
 };
 
 typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;

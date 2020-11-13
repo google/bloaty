@@ -21,6 +21,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "capstone/capstone.h"
+#include "re.h"
 
 static void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
@@ -186,20 +187,20 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
 
     if (info.arch == CS_ARCH_X86) {
       if (in->id == X86_INS_LEA) {
-        RE2::GlobalReplace(&op_str, "\\w?word ptr ", "");
+        ReImpl::GlobalReplace(&op_str, "\\w?word ptr ", "");
       } else if (in->id == X86_INS_NOP) {
         op_str.clear();
       } else {
         // qword ptr => QWORD
-        while (RE2::PartialMatch(op_str, "(\\w?word) ptr", &match)) {
+        while (ReImpl::PartialMatch(op_str, "(\\w?word) ptr", &match)) {
           std::string upper_match = match;
           absl::AsciiStrToUpper(&upper_match);
-          RE2::Replace(&op_str, match + " ptr", upper_match);
+          ReImpl::Replace(&op_str, match + " ptr", upper_match);
         }
       }
     }
 
-    RE2::GlobalReplace(&op_str, " ", "");
+    ReImpl::GlobalReplace(&op_str, " ", "");
 
     auto iter = local_labels.find(in->address);
     if (iter != local_labels.end()) {
