@@ -33,7 +33,6 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "dwarf_constants.h"
-#include "re2/re2.h"
 
 using namespace dwarf2reader;
 using absl::string_view;

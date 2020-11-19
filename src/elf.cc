@@ -19,7 +19,6 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
-#include "re2/re2.h"
 #include "third_party/freebsd_elf/elf.h"
 #include "bloaty.h"
 

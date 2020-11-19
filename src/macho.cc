@@ -15,7 +15,6 @@
 #include <iostream>
 #include "string.h"
 #include "bloaty.h"
-#include "re2/re2.h"
 
 #include <cassert>
 

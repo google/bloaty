@@ -45,11 +45,11 @@
 #include "absl/strings/substitute.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/text_format.h"
-#include "re2/re2.h"
 
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "demangle.h"
+#include "re.h"
 
 using absl::string_view;
 
@@ -274,8 +274,8 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
 // NameMunger //////////////////////////////////////////////////////////////////
 
 void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
-  auto re2 = absl::make_unique<RE2>(regex);
-  regexes_.push_back(std::make_pair(std::move(re2), replacement));
+  auto reg = absl::make_unique<ReImpl>(regex);
+  regexes_.push_back(std::make_pair(std::move(reg), replacement));
 }
 
 std::string NameMunger::Munge(string_view name) const {
@@ -283,7 +283,7 @@ std::string NameMunger::Munge(string_view name) const {
   std::string ret(name);
 
   for (const auto& pair : regexes_) {
-    if (RE2::Extract(name_str, *pair.first, pair.second, &ret)) {
+    if (ReImpl::Extract(name_str, *pair.first, pair.second, &ret)) {
       return ret;
     }
   }
@@ -350,7 +350,7 @@ class Rollup {
     CreateRows(row, base, options, true);
   }
 
-  void SetFilterRegex(const RE2* regex) {
+  void SetFilterRegex(const ReImpl* regex) {
     filter_regex_ = regex;
   }
 
@@ -393,7 +393,7 @@ class Rollup {
   int64_t filtered_vm_total_ = 0;
   int64_t filtered_file_total_ = 0;
 
-  const RE2* filter_regex_ = nullptr;
+  const ReImpl* filter_regex_ = nullptr;
 
   // Putting Rollup by value seems to work on some compilers/libs but not
   // others.
@@ -419,7 +419,7 @@ class Rollup {
       bool any_matched = false;
 
       for (const auto& name : names) {
-        if (RE2::PartialMatch(name, *filter_regex_)) {
+        if (ReImpl::PartialMatch(name, *filter_regex_)) {
           any_matched = true;
           break;
         }
@@ -1685,9 +1685,9 @@ void Bloaty::ScanAndRollupFiles(
   std::vector<std::thread> threads(num_threads);
   ThreadSafeIterIndex index(filenames.size());
 
-  std::unique_ptr<RE2> regex = nullptr;
+  std::unique_ptr<ReImpl> regex = nullptr;
   if (options_.has_source_filter()) {
-    regex = absl::make_unique<RE2>(options_.source_filter());
+    regex = absl::make_unique<ReImpl>(options_.source_filter());
   }
 
   for (int i = 0; i < num_threads; i++) {
@@ -2137,7 +2137,7 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
   }
 
   if (options.has_source_filter()) {
-    RE2 re(options.source_filter());
+    ReImpl re(options.source_filter());
     if (!re.ok()) {
       THROW("invalid regex for source_filter");
     }
