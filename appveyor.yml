@@ -1,0 +1,8 @@
+version: 1.0.{build}
+image: Visual Studio 2019
+build_script:
+  - cmd: mkdir build && cd build
+  - cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  - cmake --build . --config RelWithDebInfo
+test_script:
+  - ctest -C RelWithDebInfo
