@@ -43,10 +43,17 @@
   class_name(const class_name&) = delete; \
   void operator=(const class_name&) = delete;
 
+#if !defined(_MSC_VER)
 #define BLOATY_UNREACHABLE() do { \
   assert(false); \
   __builtin_unreachable(); \
 } while (0)
+#else
+#define BLOATY_UNREACHABLE() do { \
+  assert(false); \
+  __assume(0); \
+} while (0)
+#endif
 
 #ifdef NDEBUG
 // Prevent "unused variable" warnings.

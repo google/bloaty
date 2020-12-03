@@ -32,11 +32,15 @@
 #include <math.h>
 #include <signal.h>
 #include <stdlib.h>
+#if !defined(_MSC_VER)
 #include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include <Windows.h>
+#endif
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/numbers.h"
@@ -179,6 +183,7 @@ static std::string CSVEscape(string_view str) {
 
 // Convenience code for iterating over lines of a pipe.
 
+#if !defined(_MSC_VER)
 LineReader::LineReader(LineReader&& other) {
   Close();
 
@@ -232,6 +237,7 @@ LineReader ReadLinesFromPipe(const std::string& cmd) {
 
   return LineReader(pipe, true);
 }
+#endif
 
 extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
                                 int* status);
@@ -905,6 +911,7 @@ constexpr uint64_t RangeSink::kUnknownSize;
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
+#if !defined(_MSC_VER)
 class MmapInputFile : public InputFile {
  public:
   MmapInputFile(const std::string& filename);
@@ -913,6 +920,7 @@ class MmapInputFile : public InputFile {
  private:
   BLOATY_DISALLOW_COPY_AND_ASSIGN(MmapInputFile);
 };
+
 
 class FileDescriptor {
  public:
@@ -966,6 +974,79 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
   return absl::make_unique<MmapInputFile>(filename);
 }
 
+#else // !_MSC_VER
+
+// MmapInputFile ///////////////////////////////////////////////////////////////
+
+class Win32MMapInputFile : public InputFile {
+ public:
+  Win32MMapInputFile(const std::string& filename);
+  ~Win32MMapInputFile() override;
+
+ private:
+  BLOATY_DISALLOW_COPY_AND_ASSIGN(Win32MMapInputFile);
+};
+
+class Win32Handle {
+ public:
+  Win32Handle(HANDLE h) : h_(h) {}
+
+  ~Win32Handle() {
+    if (h_ && h_ != INVALID_HANDLE_VALUE && !CloseHandle(h_)) {
+      fprintf(stderr, "bloaty: error calling CloseHandle(): %d\n",
+              GetLastError());
+    }
+  }
+
+  HANDLE h() { return h_; }
+
+ private:
+  HANDLE h_;
+};
+
+Win32MMapInputFile::Win32MMapInputFile(const std::string& filename)
+    : InputFile(filename) {
+  Win32Handle fd(::CreateFileA(filename.c_str(), FILE_GENERIC_READ,
+                               FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, NULL));
+  LARGE_INTEGER li = {};
+  const char* map;
+
+  if (fd.h() == INVALID_HANDLE_VALUE) {
+    THROWF("couldn't open file '$0': $1", filename, ::GetLastError());
+  }
+
+  if (!::GetFileSizeEx(fd.h(), &li)) {
+    THROWF("couldn't stat file '$0': $1", filename, ::GetLastError());
+  }
+
+  Win32Handle mapfd(
+      ::CreateFileMappingA(fd.h(), NULL, PAGE_READONLY, 0, 0, nullptr));
+  if (!mapfd.h()) {
+    THROWF("couldn't create file mapping '$0': $1", filename, ::GetLastError());
+  }
+
+  map = static_cast<char*>(::MapViewOfFile(mapfd.h(), FILE_MAP_READ, 0, 0, 0));
+  if (!map) {
+    THROWF("couldn't MapViewOfFile file '$0': $1", filename, ::GetLastError());
+  }
+
+  data_ = string_view(map, li.QuadPart);
+}
+
+Win32MMapInputFile::~Win32MMapInputFile() {
+  if (data_.data() != nullptr && !::UnmapViewOfFile(data_.data())) {
+    fprintf(stderr, "bloaty: error calling UnmapViewOfFile(): %d\n",
+            ::GetLastError());
+  }
+}
+
+std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
+    const std::string& filename) const {
+  return absl::make_unique<Win32MMapInputFile>(filename);
+}
+
+#endif
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 

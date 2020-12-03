@@ -746,7 +746,7 @@ void MaybeAddFileRange(const char* analyzer, RangeSink* sink, string_view label,
 template <class Func>
 void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
   ArFile ar_file(file.data());
-  unsigned long index_base = 0;
+  uint64_t index_base = 0;
 
   if (ar_file.IsOpen()) {
     ArFile::MemberFile member;
@@ -793,12 +793,12 @@ void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
 //
 // - 24 bits for index (up to 16M symbols with -ffunction-sections)
 // - 40 bits for address (up to 1TB section)
-static uint64_t ToVMAddr(size_t addr, long ndx, bool is_object) {
+static uint64_t ToVMAddr(size_t addr, uint64_t ndx, bool is_object) {
   if (is_object) {
     if (ndx >= 1 << 24) {
       THROW("ndx overflow: too many sections");
     }
-    if (addr >= 1UL << 40) {
+    if (addr >= 1ULL << 40) {
       THROW("address overflow: section too big");
     }
     return (ndx << 40) | addr;
@@ -891,7 +891,7 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
 
   ForEachElf(
       file, sink,
-      [=](const ElfFile& elf, string_view /*filename*/, uint32_t index_base) {
+      [=](const ElfFile& elf, string_view /*filename*/, uint64_t index_base) {
         for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
           ElfFile::Section section;
           elf.ReadSection(i, &section);

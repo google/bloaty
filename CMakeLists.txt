@@ -62,6 +62,21 @@ if(BLOATY_ENABLE_RE2)
   add_definitions(-DUSE_RE2)
 endif(BLOATY_ENABLE_RE2)
 
+# Set MSVC runtime before including thirdparty libraries
+if(MSVC)
+  # Link also the runtime library statically so that MSVCR*.DLL is not required at runtime.
+  # https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
+  # This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
+  # http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    if(${flag_var} MATCHES "/MD")
+      string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+    endif(${flag_var} MATCHES "/MD")
+  endforeach(flag_var)
+endif()
+
 if(UNIX)
   if(BLOATY_ENABLE_RE2)
     if(${RE2_FOUND})
@@ -90,11 +105,18 @@ if(UNIX)
   endif(${PROTOBUF_FOUND})
 else(UNIX)
   if(BLOATY_ENABLE_RE2)
+    set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
     add_subdirectory(third_party/re2)
     include_directories(third_party/re2)
   endif(BLOATY_ENABLE_RE2)
+
+  set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
+  set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
   add_subdirectory(third_party/capstone)
   include_directories(third_party/capstone/include)
+
+  set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
+  set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
   add_subdirectory(third_party/protobuf/cmake)
   include_directories(SYSTEM third_party/protobuf/src)
 endif(UNIX)
@@ -105,11 +127,15 @@ include_directories(third_party/abseil-cpp)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 
 # Baseline build flags.
-set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
-set(CMAKE_CXX_FLAGS_DEBUG "-g1")
-set(CMAKE_CXX_FLAGS_RELEASE "-O2")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1")
-set_source_files_properties(third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp PROPERTIES COMPILE_FLAGS -Wno-implicit-fallthrough)
+if(MSVC)
+  set(CMAKE_CXX_FLAGS "/EHsc /wd4018 /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX")
+else(MSVC)
+  set(CMAKE_CXX_FLAGS "-std=c++11 -W -Wall -Wno-sign-compare")
+  set(CMAKE_CXX_FLAGS_DEBUG "-g1")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1")
+  set_source_files_properties(third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp PROPERTIES COMPILE_FLAGS -Wno-implicit-fallthrough)
+endif()
 
 if(APPLE)
 elseif(UNIX)
