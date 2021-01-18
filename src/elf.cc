@@ -935,6 +935,29 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               sink->AddVMRangeAllowAlias(
                   "elf_symbols", full_addr, sym.st_size,
                   ItaniumDemangle(name, sink->data_source()));
+
+              if(ELF64_ST_TYPE(sym.st_info) == STT_FUNC) {
+                sink->AddFuncRange(
+                    "elf_symbols", full_addr, sym.st_size,
+                    ItaniumDemangle(name, sink->data_source()));
+              } else if(ELF64_ST_TYPE(sym.st_info) == STT_OBJECT) {
+                std::string section_label;
+                sink->MapAtIndex(0).vm_map.TryGetLabel(full_addr, &section_label);
+
+                std::cout << "OJBJECT name " << name << " " << ItaniumDemangle(name, sink->data_source()) << std::endl;
+
+                if (section_label.find('W') != std::string::npos) {                  
+                  sink->AddDataRange(
+                      "elf_symbols", full_addr, sym.st_size,
+                      ItaniumDemangle(name, sink->data_source()));
+                } else {           
+                  sink->AddRodataRange(
+                      "elf_symbols", full_addr, sym.st_size,
+                      ItaniumDemangle(name, sink->data_source()));
+                }
+              }
+
+
             }
             if (table) {
               table->insert(
@@ -1099,6 +1122,7 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
             }
 
             name_from_flags += ']';
+
             sink->AddRange("elf_section", name_from_flags, full_addr, vmsize,
                            contents);
           } else if (report_by == kReportBySectionName) {
@@ -1329,6 +1353,71 @@ class ElfObjectFile : public ObjectFile {
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          break;
+        }
+        case DataSource::kCompileSymbolUnits: {
+          CheckNotObject("compilesymbolunits", sink);
+          {
+            SymbolTable symtab;
+            DualMap symbol_map;
+            NameMunger empty_munger;
+            RangeSink symbol_sink(&debug_file().file_data(),
+                                  sink->options(),
+                                  DataSource::kRawSymbols,
+                                  &sinks[0]->MapAtIndex(0));
+            symbol_sink.AddOutput(&symbol_map, &empty_munger);
+            ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symtab,
+                          false);
+            dwarf::File dwarf;
+            ReadDWARFSections(debug_file().file_data(), &dwarf);
+            ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          }
+          {
+            SymbolTable symtab;
+            DualMap symbol_map;
+            NameMunger empty_munger;
+            RangeSink symbol_sink(&debug_file().file_data(),
+                                  sink->options(),
+                                  DataSource::kRawSymbols,
+                                  &sinks[0]->MapAtIndex(0));
+            symbol_sink.AddOutput(&symbol_map, &empty_munger);
+
+            DoReadELFSections(&symbol_sink, kReportByFlags);
+            ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symtab,
+                          false);
+
+            /* Copy ELF FUNC sections to sink */
+            symbol_map.func_map.ForEachRange(
+              [sink](uint64_t start, uint64_t length) {
+                    std::string label;
+                    if (sink->MapAtIndex(0).vm_map.TryGetLabel(start, &label)) {
+                      std::cout << "FUNC " << label << std::endl;
+                      sink->AddFuncRange("elf_symbols",start, length, label);
+                    }
+                  
+              });
+            symbol_map.data_map.ForEachRange(
+              [sink](uint64_t start, uint64_t length) {
+                    std::string label;
+                    if (sink->MapAtIndex(0).vm_map.TryGetLabel(start, &label)) {
+                      std::cout << "DATA " << label << std::endl;
+                      sink->AddDataRange("elf_symbols",start, length, label);
+                    } else {               
+                      std::cout << "NOT FOUND DATA " << label << std::endl;
+                      sink->AddDataRange("elf_symbols",start, length, "bloaty.cc");
+                    }
+                  
+              });
+            symbol_map.rodata_map.ForEachRange(
+              [sink](uint64_t start, uint64_t length) {
+                    std::string label;
+                    if (sink->MapAtIndex(0).vm_map.TryGetLabel(start, &label)) {
+                      sink->AddRodataRange("elf_symbols",start, length, label);
+                    }
+                  
+              });
+          }
+
           break;
         }
         case DataSource::kInlines: {
