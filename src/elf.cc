@@ -655,6 +655,7 @@ class ArFile {
 
    private:
     string_view Consume(size_t n) {
+      n = (n % 2 == 0 ? n : n + 1);
       if (remaining_.size() < n) {
         THROW("premature end of file");
       }
