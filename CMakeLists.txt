@@ -163,7 +163,6 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty_package.bloaty
 
 add_library(libbloaty STATIC
     src/bloaty.cc
-    src/demangle.cc
     src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
     src/dwarf.cc
@@ -174,6 +173,7 @@ add_library(libbloaty STATIC
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
     third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+    third_party/abseil-cpp/absl/debugging/internal/demangle.cc
     third_party/abseil-cpp/absl/numeric/int128.cc
     third_party/abseil-cpp/absl/strings/ascii.cc
     third_party/abseil-cpp/absl/strings/charconv.cc
