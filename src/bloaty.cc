@@ -38,6 +38,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/string_view.h"
@@ -48,7 +49,6 @@
 
 #include "bloaty.h"
 #include "bloaty.pb.h"
-#include "demangle.h"
 #include "re.h"
 
 using absl::string_view;
@@ -249,7 +249,8 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
 
   if (source == DataSource::kShortSymbols) {
     char demangled[1024];
-    if (::Demangle(demangle_from.data(), demangled, sizeof(demangled))) {
+    if (absl::debugging_internal::Demangle(demangle_from.data(), demangled,
+                                           sizeof(demangled))) {
       return std::string(demangled);
     } else {
       return std::string(symbol);
