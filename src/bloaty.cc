@@ -90,6 +90,8 @@ constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
+    {DataSource::kCompileSymbolUnits, "compilesymbolunits",
+     "source file for the .o file (translation unit) with symbols. requires debug info."},
     {DataSource::kInputFiles, "inputfiles",
      "the filename specified on the Bloaty command-line"},
     {DataSource::kInlines, "inlines",
@@ -327,9 +329,9 @@ class Rollup {
   Rollup& operator=(Rollup&& other) = default;
 
   void AddSizes(const std::vector<std::string>& names,
-                uint64_t size, bool is_vmsize) {
+                uint64_t size, DualMapType type) {
     // We start at 1 to exclude the base map (see base_map_).
-    AddInternal(names, 1, size, is_vmsize);
+    AddInternal(names, 1, size, type);
   }
 
   // Prints a graphical representation of the rollup.
@@ -343,10 +345,19 @@ class Rollup {
     RollupRow* row = &output->toplevel_row_;
     row->vmsize = vm_total_;
     row->filesize = file_total_;
+    row->funcsize = func_total_;
+    row->datasize = data_total_;
+    row->rodatasize = rodata_total_;
     row->filtered_vmsize = filtered_vm_total_;
     row->filtered_filesize = filtered_file_total_;
+    row->filtered_funcsize = filtered_func_total_;
+    row->filtered_datasize = filtered_data_total_;
+    row->filtered_rodatasize = filtered_rodata_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
+    row->funcpercent = 100;
+    row->datapercent = 100;
+    row->rodatapercent = 100;
     output->diff_mode_ = true;
     CreateRows(row, base, options, true);
   }
@@ -391,8 +402,14 @@ class Rollup {
 
   int64_t vm_total_ = 0;
   int64_t file_total_ = 0;
+  int64_t func_total_ = 0;
+  int64_t data_total_ = 0;
+  int64_t rodata_total_ = 0;
   int64_t filtered_vm_total_ = 0;
   int64_t filtered_file_total_ = 0;
+  int64_t filtered_func_total_ = 0;
+  int64_t filtered_data_total_ = 0;
+  int64_t filtered_rodata_total_ = 0;
 
   const ReImpl* filter_regex_ = nullptr;
 
@@ -412,7 +429,7 @@ class Rollup {
   // Adds "size" bytes to the rollup under the label names[i].
   // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
   void AddInternal(const std::vector<std::string>& names, size_t i,
-                   uint64_t size, bool is_vmsize) {
+                   uint64_t size, DualMapType type) {
     if (filter_regex_ != nullptr) {
       // filter_regex_ is only set in the root rollup, which checks the full
       // label hierarchy for a match to determine whether a region should be
@@ -428,19 +445,52 @@ class Rollup {
 
       if (!any_matched) {
         // Ignore this region in the rollup and don't visit sub-rollups.
-        if (is_vmsize) {
-          CheckedAdd(&filtered_vm_total_, size);
-        } else {
-          CheckedAdd(&filtered_file_total_, size);
+        switch(type) {
+          case DualMapType::vm:
+            CheckedAdd(&filtered_vm_total_, size);
+            break;
+
+          case DualMapType::file:
+            CheckedAdd(&filtered_file_total_, size);
+            break;
+
+          case DualMapType::func:
+            CheckedAdd(&filtered_func_total_, size);
+	          break;
+
+          case DualMapType::data:
+            CheckedAdd(&filtered_data_total_, size);
+	          break;
+
+          case DualMapType::rodata:
+            CheckedAdd(&filtered_rodata_total_, size);
+	        break;
         }
         return;
       }
     }
 
-    if (is_vmsize) {
-      CheckedAdd(&vm_total_, size);
-    } else {
-      CheckedAdd(&file_total_, size);
+    switch(type) {
+      case DualMapType::vm:
+        CheckedAdd(&vm_total_, size);
+        break;
+
+      case DualMapType::file:
+        CheckedAdd(&file_total_, size);
+        break;
+
+      case DualMapType::func:
+        CheckedAdd(&func_total_, size);
+        break;
+
+      case DualMapType::data:
+        CheckedAdd(&data_total_, size);
+        break;
+
+      case DualMapType::rodata:
+        CheckedAdd(&rodata_total_, size);
+        break;
+
     }
 
     if (i < names.size()) {
@@ -448,7 +498,7 @@ class Rollup {
       if (child.get() == nullptr) {
         child.reset(new Rollup());
       }
-      child->AddInternal(names, i + 1, size, is_vmsize);
+      child->AddInternal(names, i + 1, size, type);
     }
   }
 
@@ -479,14 +529,20 @@ void Rollup::CreateRows(RollupRow* row, const Rollup* base,
     // the same label at the same level.
     row->vmpercent = Percent(vm_total_, base->vm_total_);
     row->filepercent = Percent(file_total_, base->file_total_);
+    row->funcpercent = Percent(func_total_, base->func_total_);
+    row->datapercent = Percent(data_total_, base->data_total_);
+    row->rodatapercent = Percent(rodata_total_, base->rodata_total_);
   }
 
   for (const auto& value : children_) {
-    if (value.second->vm_total_ != 0 || value.second->file_total_ != 0) {
+    if (value.second->vm_total_ != 0 || value.second->file_total_ != 0 || value.second->func_total_ != 0) {
       row->sorted_children.emplace_back(value.first);
       RollupRow& child_row = row->sorted_children.back();
       child_row.vmsize = value.second->vm_total_;
       child_row.filesize = value.second->file_total_;
+      child_row.funcsize = value.second->func_total_;
+      child_row.datasize = value.second->data_total_;
+      child_row.rodatasize = value.second->rodata_total_;
     }
   }
 
@@ -549,11 +605,17 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
   while (i >= options.max_rows_per_level()) {
     CheckedAdd(&others_row.vmsize, child_rows[i].vmsize);
     CheckedAdd(&others_row.filesize, child_rows[i].filesize);
+    CheckedAdd(&others_row.funcsize, child_rows[i].funcsize);
+    CheckedAdd(&others_row.datasize, child_rows[i].datasize);
+    CheckedAdd(&others_row.rodatasize, child_rows[i].rodatasize);
     if (base) {
       auto it = base->children_.find(child_rows[i].name);
       if (it != base->children_.end()) {
         CheckedAdd(&others_base.vm_total_, it->second->vm_total_);
         CheckedAdd(&others_base.file_total_, it->second->file_total_);
+        CheckedAdd(&others_base.func_total_, it->second->func_total_);
+        CheckedAdd(&others_base.data_total_, it->second->data_total_);
+        CheckedAdd(&others_base.rodata_total_, it->second->rodata_total_);
       }
     }
 
@@ -561,10 +623,13 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
     i--;
   }
 
-  if (std::abs(others_row.vmsize) > 0 || std::abs(others_row.filesize) > 0) {
+  if (std::abs(others_row.vmsize) > 0 || std::abs(others_row.filesize) > 0 || std::abs(others_row.filesize) > 0) {
     child_rows.push_back(others_row);
     CheckedAdd(&others_rollup.vm_total_, others_row.vmsize);
     CheckedAdd(&others_rollup.file_total_, others_row.filesize);
+    CheckedAdd(&others_rollup.func_total_, others_row.funcsize);
+    CheckedAdd(&others_rollup.data_total_, others_row.datasize);
+    CheckedAdd(&others_rollup.rodata_total_, others_row.rodatasize);
   }
 
   // Now sort by actual value (positive or negative).
@@ -595,6 +660,9 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
     for (auto& child_row : child_rows) {
       child_row.vmpercent = Percent(child_row.vmsize, row->vmsize);
       child_row.filepercent = Percent(child_row.filesize, row->filesize);
+      child_row.funcpercent = Percent(child_row.funcsize, row->funcsize);
+      child_row.datapercent = Percent(child_row.datasize, row->datasize);
+      child_row.rodatapercent = Percent(child_row.rodatasize, row->rodatasize);
     }
   }
 
@@ -658,6 +726,10 @@ bool ShowFile(const OutputOptions& options) {
 
 bool ShowVM(const OutputOptions& options) {
   return options.show != ShowDomain::kShowFile;
+}
+
+bool ShowSection(const OutputOptions& options) {
+  return true;
 }
 
 std::string LeftPad(const std::string& input, size_t size) {
@@ -755,12 +827,21 @@ void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
 
   if (ShowFile(options)) {
     *out << PercentString(row.filepercent, diff_mode_) << " "
-         << SiPrint(row.filesize, diff_mode_) << " ";
+         << SiPrint(row.filesize, diff_mode_) << "  ";
   }
 
   if (ShowVM(options)) {
     *out << PercentString(row.vmpercent, diff_mode_) << " "
-         << SiPrint(row.vmsize, diff_mode_) << " ";
+         << SiPrint(row.vmsize, diff_mode_) << "  ";
+  }
+  
+  if (ShowSection(options)) {
+    *out << PercentString(row.funcpercent, diff_mode_) << " "
+         << SiPrint(row.funcsize, diff_mode_) << "  ";
+    *out << PercentString(row.datapercent, diff_mode_) << " "
+         << SiPrint(row.datasize, diff_mode_) << "  ";
+    *out << PercentString(row.rodatapercent, diff_mode_) << " "
+         << SiPrint(row.rodatasize, diff_mode_) << "  ";
   }
 
   *out << "   " << row.name << "\n";
@@ -808,6 +889,12 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
   if (ShowVM(options)) {
     *out << "     VM SIZE    ";
   }
+  
+  if (ShowSection(options)) {
+    *out << "    FUNC SIZE   ";
+    *out << "    DATA SIZE   ";
+    *out << "  RODATA SIZE   ";
+  }
 
   *out << "\n";
 
@@ -816,6 +903,12 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
   }
 
   if (ShowVM(options)) {
+    *out << " -------------- ";
+  }
+
+  if (ShowSection(options)) {
+    *out << " -------------- ";
+    *out << " -------------- ";
     *out << " -------------- ";
   }
 
@@ -830,11 +923,15 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
   uint64_t file_filtered = 0;
   uint64_t vm_filtered = 0;
+  uint64_t text_filtered = 0;
   if (ShowFile(options)) {
     file_filtered = toplevel_row_.filtered_filesize;
   }
   if (ShowVM(options)) {
     vm_filtered = toplevel_row_.filtered_vmsize;
+  }
+  if (ShowSection(options)) {
+    text_filtered = toplevel_row_.filtered_funcsize;
   }
 
   if (vm_filtered == 0 && file_filtered == 0) {
@@ -1058,6 +1155,51 @@ bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
 
 void RangeSink::AddOutput(DualMap* map, const NameMunger* munger) {
   outputs_.push_back(std::make_pair(map, munger));
+}
+
+void RangeSink::AddFuncRange(const char* analyzer, uint64_t vmaddr,
+                             uint64_t size, const std::string& name) {
+  bool verbose = IsVerboseForVMRange(vmaddr, size);
+  if (verbose) {
+    printf("%p [%s, %s] AddFuncRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n", this,
+           GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+           name.data(), vmaddr, size);
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label = pair.second->Munge(name);
+    pair.first->func_map.AddRange(vmaddr, size, label);
+  }
+}
+
+void RangeSink::AddDataRange(const char* analyzer, uint64_t vmaddr,
+                             uint64_t size, const std::string& name) {
+  bool verbose = IsVerboseForVMRange(vmaddr, size);
+  if (verbose) {
+    printf("%p [%s, %s] AddDataRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n", this,
+           GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+           name.data(), vmaddr, size);
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label = pair.second->Munge(name);
+    pair.first->data_map.AddRange(vmaddr, size, label);
+  }
+}
+
+void RangeSink::AddRodataRange(const char* analyzer, uint64_t vmaddr,
+                             uint64_t size, const std::string& name) {
+  bool verbose = IsVerboseForVMRange(vmaddr, size);
+  if (verbose) {
+    printf("%p [%s, %s] AddRodataRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n", this,
+           GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
+           name.data(), vmaddr, size);
+  }
+  assert(translator_);
+  for (auto& pair : outputs_) {
+    std::string label = pair.second->Munge(name);
+    pair.first->rodata_map.AddRange(vmaddr, size, label);
+  }
 }
 
 void RangeSink::AddFileRange(const char* analyzer, string_view name,
@@ -1494,18 +1636,67 @@ struct DualMaps {
   }
 
   void ComputeRollup(Rollup* rollup) {
-    for (auto& map : maps_) {
-      map->vm_map.Compress();
-      map->file_map.Compress();
+    for(int i=0; i < maps_.size(); i++){
+      maps_.at(i)->vm_map.Compress();
+      maps_.at(i)->file_map.Compress();
+
+      printf("%p \n", &maps_.at(i)->func_map);
+      maps_.at(i)->func_map.ForEachRange(
+        [this, i](uint64_t start, uint64_t length) {
+          std::string label;
+          std::cout << "Addr label " << start << std::endl;
+          printf("I:%i Addr label %" PRIx64 "\n", i, start);
+          if (maps_.at(i)->vm_map.TryGetLabel(start, &label)) {
+            std::cout << "Got label " << label << std::endl;
+            maps_.at(i)->func_map.AddRange(start, length, label);
+            maps_.at(0)->func_map.AddRange(start, length, label);
+          }
+        });
+      maps_.at(i)->data_map.ForEachRange(
+        [this, i](uint64_t start, uint64_t length) {
+          std::string label;
+          if (maps_.at(i)->vm_map.TryGetLabel(start, &label)) {
+            maps_.at(i)->data_map.AddRange(start, length, label);
+            maps_.at(0)->data_map.AddRange(start, length, label);
+          }
+        });
+      maps_.at(i)->rodata_map.ForEachRange(
+        [this, i](uint64_t start, uint64_t length) {
+          std::string label;
+          if (maps_.at(i)->vm_map.TryGetLabel(start, &label)) {
+            maps_.at(i)->rodata_map.AddRange(start, length, label);
+            maps_.at(0)->rodata_map.AddRange(start, length, label);
+          }
+        });
+
+      maps_.at(i)->func_map.Compress();
+      maps_.at(i)->data_map.Compress();
+      maps_.at(i)->rodata_map.Compress();
+
     }
     RangeMap::ComputeRollup(VmMaps(), [=](const std::vector<std::string>& keys,
                                           uint64_t addr, uint64_t end) {
-      return rollup->AddSizes(keys, end - addr, true);
+      return rollup->AddSizes(keys, end - addr, DualMapType::vm);
     });
     RangeMap::ComputeRollup(
         FileMaps(),
         [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
-          return rollup->AddSizes(keys, end - addr, false);
+          return rollup->AddSizes(keys, end - addr, DualMapType::file);
+        });
+    RangeMap::ComputeRollup(
+        FuncMaps(),
+        [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+          return rollup->AddSizes(keys, end - addr, DualMapType::func);
+        });
+    RangeMap::ComputeRollup(
+        DataMaps(),
+        [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+          return rollup->AddSizes(keys, end - addr, DualMapType::data);
+        });
+    RangeMap::ComputeRollup(
+        RodataMaps(),
+        [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+          return rollup->AddSizes(keys, end - addr, DualMapType::rodata);
         });
   }
 
@@ -1526,6 +1717,9 @@ struct DualMaps {
 
   void PrintFileMaps() { PrintMaps(FileMaps()); }
   void PrintVMMaps() { PrintMaps(VmMaps()); }
+  void PrintFuncMaps() { PrintMaps(FuncMaps()); }
+  void PrintObjectMaps() { PrintMaps(DataMaps()); }
+  void PrintRodataMaps() { PrintMaps(RodataMaps()); }
 
   std::string KeysToString(const std::vector<std::string>& keys) {
     std::string ret;
@@ -1562,6 +1756,30 @@ struct DualMaps {
     std::vector<const RangeMap*> ret;
     for (const auto& map : maps_) {
       ret.push_back(&map->file_map);
+    }
+    return ret;
+  }
+
+  std::vector<const RangeMap*> FuncMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->func_map);
+    }
+    return ret;
+  }
+
+  std::vector<const RangeMap*> DataMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->data_map);
+    }
+    return ret;
+  }
+
+  std::vector<const RangeMap*> RodataMaps() const {
+    std::vector<const RangeMap*> ret;
+    for (const auto& map : maps_) {
+      ret.push_back(&map->rodata_map);
     }
     return ret;
   }
@@ -1629,6 +1847,21 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
           sink->AddFileRange("inputfile_filecopier",
                              sink->input_file().filename(), start, length);
         });
+    maps.base_map()->func_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddFuncRange("inputfile_funccopier", start, length,
+                             sink->input_file().filename());
+        });
+    maps.base_map()->data_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddDataRange("inputfile_objectcopier", start, length,
+                             sink->input_file().filename());
+        });
+    maps.base_map()->rodata_map.ForEachRange(
+        [sink](uint64_t start, uint64_t length) {
+          sink->AddRodataRange("inputfile_rodatacopier", start, length,
+                             sink->input_file().filename());
+        });
   }
 
   // kRawRange source: add the directly preceding map's ranges, with labels
@@ -1651,6 +1884,24 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
                              absl::Hex(start + length), "]"),
                 start, length);
           });
+      from->MapAtIndex(0).func_map.ForEachRange([ranges_sink](uint64_t start,
+                                                              uint64_t length) {
+        ranges_sink->AddFuncRange("rawrange_funccopier", start, length,
+                                absl::StrCat("func: [", absl::Hex(start), ", ",
+                                             absl::Hex(start + length), "]"));
+      });
+      from->MapAtIndex(0).data_map.ForEachRange([ranges_sink](uint64_t start,
+                                                              uint64_t length) {
+        ranges_sink->AddDataRange("rawrange_objectcopier", start, length,
+                                absl::StrCat("object: [", absl::Hex(start), ", ",
+                                             absl::Hex(start + length), "]"));
+      });
+      from->MapAtIndex(0).rodata_map.ForEachRange([ranges_sink](uint64_t start,
+                                                              uint64_t length) {
+        ranges_sink->AddRodataRange("rawrange_rodatacopier", start, length,
+                                absl::StrCat("rodata: [", absl::Hex(start), ", ",
+                                             absl::Hex(start + length), "]"));
+      });
     }
   }
 
@@ -1667,6 +1918,12 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
     maps.PrintFileMaps();
     printf("VM MAP:\n");
     maps.PrintVMMaps();
+    printf("FUNC MAP:\n");
+    maps.PrintFuncMaps();
+    printf("OBJECT MAP:\n");
+    maps.PrintObjectMaps();
+    printf("RODATA MAP:\n");
+    maps.PrintRodataMaps();
   }
 }
 

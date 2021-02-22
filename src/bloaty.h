@@ -67,6 +67,7 @@ struct DisassemblyInfo;
 enum class DataSource {
   kArchiveMembers,
   kCompileUnits,
+  kCompileSymbolUnits,
   kInlines,
   kInputFiles,
   kRawRanges,
@@ -164,6 +165,15 @@ class RangeSink {
 
   void AddFileRange(const char* analyzer, absl::string_view name,
                     uint64_t fileoff, uint64_t filesize);
+
+  void AddFuncRange(const char* analyzer, uint64_t vmaddr,
+                    uint64_t size, const std::string& name);
+
+  void AddDataRange(const char* analyzer, uint64_t vmaddr,
+                    uint64_t size, const std::string& name);
+
+  void AddRodataRange(const char* analyzer, uint64_t vmaddr,
+                    uint64_t size, const std::string& name);
 
   // Like AddFileRange(), but the label is whatever label was previously
   // assigned to VM address |label_from_vmaddr|.  If no existing label is
@@ -406,6 +416,17 @@ std::string ItaniumDemangle(absl::string_view symbol, DataSource source);
 struct DualMap {
   RangeMap vm_map;
   RangeMap file_map;
+  RangeMap func_map;
+  RangeMap data_map;
+  RangeMap rodata_map;
+};
+
+enum class DualMapType {
+  vm,
+  file,
+  func,
+  data,
+  rodata
 };
 
 struct DisassemblyInfo {
@@ -431,12 +452,21 @@ struct RollupRow {
   std::string name;
   int64_t vmsize = 0;
   int64_t filesize = 0;
+  int64_t funcsize = 0;
+  int64_t datasize = 0;
+  int64_t rodatasize = 0;
   int64_t filtered_vmsize = 0;
   int64_t filtered_filesize = 0;
+  int64_t filtered_funcsize = 0;
+  int64_t filtered_datasize = 0;
+  int64_t filtered_rodatasize = 0;
   int64_t other_count = 0;
   int64_t sortkey;
   double vmpercent;
   double filepercent;
+  double funcpercent;
+  double datapercent;
+  double rodatapercent;
   std::vector<RollupRow> sorted_children;
 
   static bool Compare(const RollupRow& a, const RollupRow& b) {
@@ -458,6 +488,7 @@ enum class OutputFormat {
 enum class ShowDomain {
   kShowFile,
   kShowVM,
+  kShowSections,
   kShowBoth,
 };
 
