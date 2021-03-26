@@ -31,6 +31,10 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 
+#if defined(_MSC_VER)
+#define PATH_MAX  4096
+#endif
+
 inline bool GetFileSize(const std::string& filename, uint64_t* size) {
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
