@@ -3,6 +3,7 @@ cmake_policy(SET CMP0048 NEW)
 project (Bloaty VERSION 1.1)
 include(CTest)
 set(CMAKE_CXX_STANDARD 17)
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)  # Group projects in visual studio
 
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
@@ -120,12 +121,14 @@ else(UNIX)
     set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
     add_subdirectory(third_party/re2)
     include_directories(third_party/re2)
+    set_property(TARGET re2 PROPERTY FOLDER "third_party")
   endif(BLOATY_ENABLE_RE2)
 
   set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
   set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
   add_subdirectory(third_party/capstone)
   include_directories(third_party/capstone/include)
+  set_property(TARGET capstone-static PROPERTY FOLDER "third_party")
 
   set(protobuf_BUILD_TESTS OFF CACHE BOOL "enable tests for proto2" FORCE)
   set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
@@ -135,6 +138,14 @@ else(UNIX)
   add_subdirectory(third_party/zlib)
   include_directories(third_party/zlib)
   include_directories(${CMAKE_CURRENT_BINARY_DIR}/third_party/zlib)
+  set_property(TARGET example PROPERTY FOLDER "third_party")
+  set_property(TARGET minigzip PROPERTY FOLDER "third_party")
+  set_property(TARGET zlib PROPERTY FOLDER "third_party")
+  set_property(TARGET zlibstatic PROPERTY FOLDER "third_party")
+  set_property(TARGET libprotobuf PROPERTY FOLDER "third_party")
+  set_property(TARGET libprotobuf-lite PROPERTY FOLDER "third_party")
+  set_property(TARGET libprotoc PROPERTY FOLDER "third_party")
+  set_property(TARGET protoc PROPERTY FOLDER "third_party")
 endif(UNIX)
 
 include_directories(.)
@@ -205,13 +216,18 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty_package.bloaty
 
 add_library(libbloaty STATIC
     src/bloaty.cc
+    src/bloaty.h
     src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
     src/dwarf.cc
+    src/dwarf_constants.h
     src/elf.cc
     src/macho.cc
     src/range_map.cc
+    src/range_map.h
+    src/re.h
     src/util.cc
+    src/util.h
     src/webassembly.cc
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
@@ -236,6 +252,7 @@ add_library(libbloaty STATIC
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
+set_property(TARGET libbloaty PROPERTY FOLDER "bloaty")
 
 if(UNIX)
   set(LIBBLOATY_LIBS libbloaty)
@@ -294,6 +311,8 @@ else()
   add_executable(bloaty src/main.cc)
   target_link_libraries(bloaty "${LIBBLOATY_LIBS}")
 
+  set_property(TARGET bloaty PROPERTY FOLDER "bloaty")
+
   # All of this is to add -pthread, which is required by re2 (not us).
   find_package(Threads REQUIRED)
   if(THREADS_HAVE_PTHREAD_ARG)
@@ -335,10 +354,16 @@ else()
       foreach(target ${TEST_TARGETS})
         add_executable(${target} tests/${target}.cc)
         target_link_libraries(${target} "${LIBBLOATY_LIBS}" gtest_main gmock "${CMAKE_THREAD_LIBS_INIT}")
+        set_property(TARGET ${target} PROPERTY FOLDER "tests")
       endforeach(target)
 
       add_executable(fuzz_test tests/fuzz_target.cc tests/fuzz_driver.cc)
       target_link_libraries(fuzz_test "${LIBBLOATY_LIBS}" "${CMAKE_THREAD_LIBS_INIT}")
+      set_property(TARGET fuzz_test PROPERTY FOLDER "tests")
+
+      foreach(testlib gmock gmock_main gtest gtest_main)
+        set_property(TARGET ${testlib} PROPERTY FOLDER "tests/libs")
+      endforeach(testlib)
 
       file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
 
