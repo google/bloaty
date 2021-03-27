@@ -223,6 +223,8 @@ add_library(libbloaty STATIC
     src/dwarf_constants.h
     src/elf.cc
     src/macho.cc
+    src/pe.cc
+    third_party/lief_pe/pe_structures.h
     src/range_map.cc
     src/range_map.h
     src/re.h
@@ -347,6 +349,7 @@ else()
 
       set(TEST_TARGETS
           bloaty_test
+          bloaty_test_pe
           bloaty_misc_test
           range_map_test
           )
@@ -370,6 +373,8 @@ else()
       add_test(NAME range_map_test COMMAND range_map_test)
       add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
       add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
+      add_test(NAME bloaty_test_pe_x64 COMMAND bloaty_test_pe WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/PE/x64)
+      add_test(NAME bloaty_test_pe_x86 COMMAND bloaty_test_pe WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/PE/x86)
       add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
       add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
     endif()

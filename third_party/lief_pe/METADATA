@@ -1,0 +1,25 @@
+name: "LIEF: Library to Instrument Executable Formats (PE header)"
+description:
+    "This contains structures as defined by the LIEF project to parse PE headers."
+    "They only contain struct and constant definitions (no code) and their"
+    "contents are almost entirely derivable from the ELF standard."
+
+third_party {
+  url {
+    type: HOMEPAGE
+    value: "https://lief.quarkslab.com/"
+  }
+  url {
+    type: GIT
+    value: "https://github.com/lief-project/LIEF"
+  }
+  version: "1a4a93c36fab9b0d198e85459b6afe0fb2b0157b"
+  last_upgrade_date {
+    year: 2021
+    month: 4
+    day: 3
+  }
+  local_modifications:
+      "Renamed include/LIEF/PE/structures.inc to third_party/lief_pe/pe_structures.h"
+      "Added license header to the file."
+}
