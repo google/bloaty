@@ -785,7 +785,8 @@ bool DIEReader::ReadCompilationUnitHeader() {
   unit_sizes_.ReadDWARFVersion(&remaining_);
 
   if (unit_sizes_.dwarf_version() > 4) {
-    THROW("Data is in new DWARF format we don't understand");
+    THROWF("Data for $0 is in DWARF $1 format which we don't understand",
+        unit_name_, unit_sizes_.dwarf_version());
   }
 
   debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
