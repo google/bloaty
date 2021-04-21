@@ -1220,27 +1220,27 @@ static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
     string_view name = section.GetName();
+    string_view *target = NULL;
+    bool decompress = false;
 
-    if (name == ".debug_aranges") {
-      dwarf->debug_aranges = section.contents();
-    } else if (name == ".debug_str") {
-      dwarf->debug_str = section.contents();
-    } else if (name == ".debug_info") {
-      dwarf->debug_info = section.contents();
-    } else if (name == ".debug_types") {
-      dwarf->debug_types = section.contents();
-    } else if (name == ".debug_abbrev") {
-      dwarf->debug_abbrev = section.contents();
-    } else if (name == ".debug_line") {
-      dwarf->debug_line = section.contents();
-    } else if (name == ".debug_loc") {
-      dwarf->debug_loc = section.contents();
-    } else if (name == ".debug_pubnames") {
-      dwarf->debug_pubnames = section.contents();
-    } else if (name == ".debug_pubtypes") {
-      dwarf->debug_pubtypes = section.contents();
-    } else if (name == ".debug_ranges") {
-      dwarf->debug_ranges = section.contents();
+    if (name.find(".debug_") == 0) {
+      string_view suffix = name;
+      suffix.remove_prefix(string_view(".debug_").size());
+      target = dwarf->member_field_by_name(suffix);
+    } else if (name.find(".zdebug_") == 0) {
+      string_view suffix = name;
+      suffix.remove_prefix(string_view(".zdebug_").size());
+      decompress = true;
+      target = dwarf->member_field_by_name(suffix);
+    }
+
+    if (target != NULL) {
+      if (decompress) {
+        // XXX zdebug_decompress leaks an allocation XXX
+        *target = dwarf::zdebug_decompress(section.contents());
+      } else {
+        *target = section.contents();
+      }
     }
   }
 }

@@ -331,7 +331,11 @@ struct File {
   absl::string_view debug_pubnames;
   absl::string_view debug_pubtypes;
   absl::string_view debug_ranges;
+
+  absl::string_view *member_field_by_name(absl::string_view name);
 };
+
+absl::string_view zdebug_decompress(absl::string_view contents);
 
 }  // namespace dwarf
 
