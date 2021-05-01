@@ -1220,28 +1220,16 @@ static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
     string_view name = section.GetName();
-    string_view *target = NULL;
-    bool decompress = false;
+    string_view contents = section.contents();
 
     if (name.find(".debug_") == 0) {
-      string_view suffix = name;
-      suffix.remove_prefix(string_view(".debug_").size());
-      target = dwarf->member_field_by_name(suffix);
+      name.remove_prefix(string_view(".debug_").size());
     } else if (name.find(".zdebug_") == 0) {
-      string_view suffix = name;
-      suffix.remove_prefix(string_view(".zdebug_").size());
-      decompress = true;
-      target = dwarf->member_field_by_name(suffix);
+      name.remove_prefix(string_view(".zdebug_").size());
+      contents = dwarf::ZdebugDecompress(section.contents());
     }
 
-    if (target != NULL) {
-      if (decompress) {
-        // XXX zdebug_decompress leaks an allocation XXX
-        *target = dwarf::zdebug_decompress(section.contents());
-      } else {
-        *target = section.contents();
-      }
-    }
+    dwarf->SetByName(name, contents);
   }
 }
 

@@ -41,6 +41,7 @@
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <zlib.h>
 
 #include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
@@ -1343,6 +1344,30 @@ absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
     THROW("Can't translate VM pointer to file");
   }
   return file_->data().substr(translated);
+}
+
+absl::string_view RangeSink::ZlibDecompress(absl::string_view data) {
+  if (data.size() < 12 || (data.substr(0, 4) != "ZLIB")) {
+    return NULL;
+  }
+  data.remove_prefix(4);
+  uint64_t dlen = uint64_t(uint8_t(data[7])) + 
+  	(uint64_t(uint8_t(data[6])) << 8) +
+  	(uint64_t(uint8_t(data[5])) << 16) + 
+  	(uint64_t(uint8_t(data[4])) << 24) + 
+  	(uint64_t(uint8_t(data[3])) << 32) + 
+  	(uint64_t(uint8_t(data[2])) << 40) + 
+  	(uint64_t(uint8_t(data[1])) << 48) + 
+  	(uint64_t(uint8_t(data[0])) << 56);
+  data.remove_prefix(8);
+  unsigned char *dbuf = new unsigned char[dlen];
+  uLongf zliblen = dlen;
+  if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) != Z_OK) {
+    delete[] dbuf;
+    return NULL;
+  }
+  string_view sv((char *)dbuf, zliblen);
+  return sv;
 }
 
 // ThreadSafeIterIndex /////////////////////////////////////////////////////////
