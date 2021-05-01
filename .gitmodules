@@ -16,3 +16,6 @@
 [submodule "third_party/demumble"]
 	path = third_party/demumble
 	url = https://github.com/nico/demumble.git
+[submodule "third_party/zlib"]
+	path = third_party/zlib
+	url = https://github.com/madler/zlib

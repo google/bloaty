@@ -539,27 +539,27 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf) {
 
     string_view contents =
         StrictSubstr(cmd.file_data, section->offset, filesize);
+    string_view *target = NULL;
+    bool decompress = false;
 
-    if (sectname == "__debug_aranges") {
-      dwarf->debug_aranges = contents;
-    } else if (sectname == "__debug_str") {
-      dwarf->debug_str = contents;
-    } else if (sectname == "__debug_info") {
-      dwarf->debug_info = contents;
-    } else if (sectname == "__debug_types") {
-      dwarf->debug_types = contents;
-    } else if (sectname == "__debug_abbrev") {
-      dwarf->debug_abbrev = contents;
-    } else if (sectname == "__debug_line") {
-      dwarf->debug_line = contents;
-    } else if (sectname == "__debug_loc") {
-      dwarf->debug_loc = contents;
-    } else if (sectname == "__debug_pubnames") {
-      dwarf->debug_pubnames = contents;
-    } else if (sectname == "__debug_pubtypes") {
-      dwarf->debug_pubtypes = contents;
-    } else if (sectname == "__debug_ranges") {
-      dwarf->debug_ranges = contents;
+    if (sectname.find("__debug_") == 0) {
+      string_view suffix = sectname;
+      suffix.remove_prefix(string_view("__debug_").size());
+      target = dwarf->member_field_by_name(suffix);
+    } else if (sectname.find("__zdebug_") == 0) {
+      string_view suffix = sectname;
+      decompress = true;
+      suffix.remove_prefix(string_view("__zdebug_").size());
+      target = dwarf->member_field_by_name(suffix);
+    }
+
+    if (target != NULL) {
+      if (decompress) {
+        // XXX zdebug_decompress leaks an allocation XXX
+        *target = dwarf::zdebug_decompress(contents);
+      } else {
+        *target = contents;
+      }
     }
   }
 }
