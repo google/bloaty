@@ -33,22 +33,10 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "dwarf_constants.h"
+#include "util.h"
 
 using namespace dwarf2reader;
 using absl::string_view;
-
-static size_t AlignUpTo(size_t offset, size_t granularity) {
-  // Granularity must be a power of two.
-  return (offset + granularity - 1) & ~(granularity - 1);
-}
-
-ABSL_ATTRIBUTE_NORETURN
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
 
 namespace bloaty {
 
@@ -80,61 +68,6 @@ bool IsValidDwarfAddress(uint64_t addr, uint8_t address_size) {
 // For parsing the low-level values found in DWARF files.  These are the only
 // routines that touch the bytes of the input buffer directly.  Everything else
 // is layered on top of these.
-
-template <class T>
-T ReadMemcpy(string_view* data) {
-  T ret;
-  if (data->size() < sizeof(T)) {
-    THROW("premature EOF reading fixed-length DWARF data");
-  }
-  memcpy(&ret, data->data(), sizeof(T));
-  data->remove_prefix(sizeof(T));
-  return ret;
-}
-
-string_view ReadPiece(size_t bytes, string_view* data) {
-  if(data->size() < bytes) {
-    THROW("premature EOF reading variable-length DWARF data");
-  }
-  string_view ret = data->substr(0, bytes);
-  data->remove_prefix(bytes);
-  return ret;
-}
-
-void SkipBytes(size_t bytes, string_view* data) {
-  if (data->size() < bytes) {
-    THROW("premature EOF skipping DWARF data");
-  }
-  data->remove_prefix(bytes);
-}
-
-string_view ReadNullTerminated(string_view* data) {
-  const char* nullz =
-      static_cast<const char*>(memchr(data->data(), '\0', data->size()));
-
-  // Return false if not NULL-terminated.
-  if (nullz == NULL) {
-    THROW("DWARF string was not NULL-terminated");
-  }
-
-  size_t len = nullz - data->data();
-  string_view val = data->substr(0, len);
-  data->remove_prefix(len + 1);  // Remove NULL also.
-  return val;
-}
-
-void SkipNullTerminated(string_view* data) {
-  const char* nullz =
-      static_cast<const char*>(memchr(data->data(), '\0', data->size()));
-
-  // Return false if not NULL-terminated.
-  if (nullz == NULL) {
-    THROW("DWARF string was not NULL-terminated");
-  }
-
-  size_t len = nullz - data->data();
-  data->remove_prefix(len + 1);  // Remove NULL also.
-}
 
 // Parses the LEB128 format defined by DWARF (both signed and unsigned
 // versions).
@@ -218,18 +151,18 @@ class CompilationUnitSizes {
   // format.
   uint64_t ReadDWARFOffset(string_view* data) const {
     if (dwarf64_) {
-      return ReadMemcpy<uint64_t>(data);
+      return ReadFixed<uint64_t>(data);
     } else {
-      return ReadMemcpy<uint32_t>(data);
+      return ReadFixed<uint32_t>(data);
     }
   }
 
   // Reads an address according to the expected address_size.
   uint64_t ReadAddress(string_view* data) const {
     if (address_size_ == 8) {
-      return ReadMemcpy<uint64_t>(data);
+      return ReadFixed<uint64_t>(data);
     } else if (address_size_ == 4) {
-      return ReadMemcpy<uint32_t>(data);
+      return ReadFixed<uint32_t>(data);
     } else {
       BLOATY_UNREACHABLE();
     }
@@ -242,11 +175,11 @@ class CompilationUnitSizes {
   // Returns the range for this section and stores the remaining data
   // in |remaining|.
   string_view ReadInitialLength(string_view* remaining) {
-    uint64_t len = ReadMemcpy<uint32_t>(remaining);
+    uint64_t len = ReadFixed<uint32_t>(remaining);
 
     if (len == 0xffffffff) {
       dwarf64_ = true;
-      len = ReadMemcpy<uint64_t>(remaining);
+      len = ReadFixed<uint64_t>(remaining);
     } else {
       dwarf64_ = false;
     }
@@ -262,7 +195,7 @@ class CompilationUnitSizes {
   }
 
   void ReadDWARFVersion(string_view* data) {
-    dwarf_version_ = ReadMemcpy<uint16_t>(data);
+    dwarf_version_ = ReadFixed<uint16_t>(data);
   }
 
  private:
@@ -342,7 +275,7 @@ string_view AbbrevTable::ReadAbbrevs(string_view data) {
 
     abbrev.code = code;
     abbrev.tag = ReadLEB128<uint16_t>(&data);
-    has_child = ReadMemcpy<uint8_t>(&data);
+    has_child = ReadFixed<uint8_t>(&data);
 
     switch (has_child) {
       case DW_children_yes:
@@ -457,15 +390,15 @@ bool AddressRanges::NextUnit() {
 
   uint8_t segment_size;
 
-  sizes_.SetAddressSize(ReadMemcpy<uint8_t>(&unit_remaining_));
-  segment_size = ReadMemcpy<uint8_t>(&unit_remaining_);
+  sizes_.SetAddressSize(ReadFixed<uint8_t>(&unit_remaining_));
+  segment_size = ReadFixed<uint8_t>(&unit_remaining_);
 
   if (segment_size) {
     THROW("we don't know how to handle segmented addresses.");
   }
 
   size_t ofs = unit_remaining_.data() - section_.data();
-  size_t aligned_ofs = AlignUpTo(ofs, sizes_.address_size() * 2);
+  size_t aligned_ofs = AlignUp(ofs, sizes_.address_size() * 2);
   SkipBytes(aligned_ofs - ofs, &unit_remaining_);
   return true;
 }
@@ -501,7 +434,7 @@ bool LocationList::NextEntry() {
     // Base address selection, nothing more to do.
   } else {
     // Need to skip the location description.
-    uint16_t length = ReadMemcpy<uint16_t>(&remaining_);
+    uint16_t length = ReadFixed<uint16_t>(&remaining_);
     SkipBytes(length, &remaining_);
   }
   return true;
@@ -565,6 +498,8 @@ class DIEReader {
   // Constructs a new DIEReader.  Cannot be used until you call one of the
   // Seek() methods below.
   DIEReader(const File& file) : dwarf_(file) {}
+  DIEReader(const DIEReader&) = delete;
+  DIEReader& operator=(const DIEReader&) = delete;
 
   // Returns true if we are at the end of DIEs for this compilation unit.
   bool IsEof() const { return state_ == State::kEof; }
@@ -634,8 +569,6 @@ class DIEReader {
   }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(DIEReader);
-
   template<typename> friend class AttrReader;
 
   // APIs for our friends to use to update our state.
@@ -800,10 +733,10 @@ bool DIEReader::ReadCompilationUnitHeader() {
     unit_abbrev_->ReadAbbrevs(abbrev_data);
   }
 
-  unit_sizes_.SetAddressSize(ReadMemcpy<uint8_t>(&remaining_));
+  unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
 
   if (section_ == Section::kDebugTypes) {
-    unit_type_signature_ = ReadMemcpy<uint64_t>(&remaining_);
+    unit_type_signature_ = ReadFixed<uint64_t>(&remaining_);
     unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
   }
 
@@ -840,13 +773,13 @@ class AttrValue {
     string_view str = string_;
     switch (str.size()) {
       case 1:
-        return ReadMemcpy<uint8_t>(&str);
+        return ReadFixed<uint8_t>(&str);
       case 2:
-        return ReadMemcpy<uint8_t>(&str);
+        return ReadFixed<uint8_t>(&str);
       case 4:
-        return ReadMemcpy<uint32_t>(&str);
+        return ReadFixed<uint32_t>(&str);
       case 8:
-        return ReadMemcpy<uint64_t>(&str);
+        return ReadFixed<uint64_t>(&str);
     }
     return absl::nullopt;
   }
@@ -872,18 +805,18 @@ class AttrValue {
 
 template <class D>
 string_view ReadBlock(string_view* data) {
-  D len = ReadMemcpy<D>(data);
-  return ReadPiece(len, data);
+  D len = ReadFixed<D>(data);
+  return ReadBytes(len, data);
 }
 
 string_view ReadVariableBlock(string_view* data) {
   uint64_t len = ReadLEB128<uint64_t>(data);
-  return ReadPiece(len, data);
+  return ReadBytes(len, data);
 }
 
 template <class D>
 string_view ReadIndirectString(const DIEReader& reader, string_view* data) {
-  D ofs = ReadMemcpy<D>(data);
+  D ofs = ReadFixed<D>(data);
   StringTable table(reader.dwarf().debug_str);
   string_view ret = table.ReadEntry(ofs);
   reader.AddIndirectString(ret);
@@ -900,23 +833,23 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       return ParseAttr(reader, indirect_form, data);
     }
     case DW_FORM_ref1:
-      return AttrValue(ReadMemcpy<uint8_t>(data));
+      return AttrValue(ReadFixed<uint8_t>(data));
     case DW_FORM_ref2:
-      return AttrValue(ReadMemcpy<uint16_t>(data));
+      return AttrValue(ReadFixed<uint16_t>(data));
     case DW_FORM_ref4:
-      return AttrValue(ReadMemcpy<uint32_t>(data));
+      return AttrValue(ReadFixed<uint32_t>(data));
     case DW_FORM_ref_sig8:
     case DW_FORM_ref8:
-      return AttrValue(ReadMemcpy<uint64_t>(data));
+      return AttrValue(ReadFixed<uint64_t>(data));
     case DW_FORM_ref_udata:
       return AttrValue(ReadLEB128<uint64_t>(data));
     case DW_FORM_addr:
     address_size:
       switch (reader.unit_sizes().address_size()) {
         case 4:
-          return AttrValue(ReadMemcpy<uint32_t>(data));
+          return AttrValue(ReadFixed<uint32_t>(data));
         case 8:
-          return AttrValue(ReadMemcpy<uint64_t>(data));
+          return AttrValue(ReadFixed<uint64_t>(data));
         default:
           BLOATY_UNREACHABLE();
       }
@@ -927,9 +860,9 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       ABSL_FALLTHROUGH_INTENDED;
     case DW_FORM_sec_offset:
       if (reader.unit_sizes().dwarf64()) {
-        return AttrValue(ReadMemcpy<uint64_t>(data));
+        return AttrValue(ReadFixed<uint64_t>(data));
       } else {
-        return AttrValue(ReadMemcpy<uint32_t>(data));
+        return AttrValue(ReadFixed<uint32_t>(data));
       }
     case DW_FORM_udata:
       return AttrValue(ReadLEB128<uint64_t>(data));
@@ -951,20 +884,20 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
         return AttrValue(ReadIndirectString<uint32_t>(reader, data));
       }
     case DW_FORM_data1:
-      return AttrValue(ReadPiece(1, data));
+      return AttrValue(ReadBytes(1, data));
     case DW_FORM_data2:
-      return AttrValue(ReadPiece(2, data));
+      return AttrValue(ReadBytes(2, data));
     case DW_FORM_data4:
-      return AttrValue(ReadPiece(4, data));
+      return AttrValue(ReadBytes(4, data));
     case DW_FORM_data8:
-      return AttrValue(ReadPiece(8, data));
+      return AttrValue(ReadBytes(8, data));
 
     // Bloaty doesn't currently care about any bool or signed data.
     // So we fudge it a bit and just stuff these in a uint64.
     case DW_FORM_flag_present:
       return AttrValue(1);
     case DW_FORM_flag:
-      return AttrValue(ReadMemcpy<uint8_t>(data));
+      return AttrValue(ReadFixed<uint8_t>(data));
     case DW_FORM_sdata:
       return AttrValue(ReadLEB128<uint64_t>(data));
     default:
@@ -1157,9 +1090,9 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   string_view program = data;
   SkipBytes(header_length, &program);
 
-  params_.minimum_instruction_length = ReadMemcpy<uint8_t>(&data);
+  params_.minimum_instruction_length = ReadFixed<uint8_t>(&data);
   if (sizes_.dwarf_version() == 4) {
-    params_.maximum_operations_per_instruction = ReadMemcpy<uint8_t>(&data);
+    params_.maximum_operations_per_instruction = ReadFixed<uint8_t>(&data);
 
     if (params_.maximum_operations_per_instruction == 0) {
       THROW("DWARF line info had maximum_operations_per_instruction=0");
@@ -1167,17 +1100,17 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   } else {
     params_.maximum_operations_per_instruction = 1;
   }
-  params_.default_is_stmt = ReadMemcpy<uint8_t>(&data);
-  params_.line_base = ReadMemcpy<int8_t>(&data);
-  params_.line_range = ReadMemcpy<uint8_t>(&data);
-  params_.opcode_base = ReadMemcpy<uint8_t>(&data);
+  params_.default_is_stmt = ReadFixed<uint8_t>(&data);
+  params_.line_base = ReadFixed<int8_t>(&data);
+  params_.line_range = ReadFixed<uint8_t>(&data);
+  params_.opcode_base = ReadFixed<uint8_t>(&data);
   if (params_.line_range == 0) {
     THROW("line_range of zero will cause divide by zero");
   }
 
   standard_opcode_lengths_.resize(params_.opcode_base);
   for (size_t i = 1; i < params_.opcode_base; i++) {
-    standard_opcode_lengths_[i] = ReadMemcpy<uint8_t>(&data);
+    standard_opcode_lengths_[i] = ReadFixed<uint8_t>(&data);
   }
 
   // Read include_directories.
@@ -1238,7 +1171,7 @@ bool LineInfoReader::ReadLineInfo() {
       return false;
     }
 
-    uint8_t op = ReadMemcpy<uint8_t>(&data);
+    uint8_t op = ReadFixed<uint8_t>(&data);
 
     if (op >= params_.opcode_base) {
       SpecialOpcodeAdvance(op);
@@ -1252,7 +1185,7 @@ bool LineInfoReader::ReadLineInfo() {
       switch (op) {
         case DW_LNS_extended_op: {
           uint16_t len = ReadLEB128<uint16_t>(&data);
-          uint8_t extended_op = ReadMemcpy<uint8_t>(&data);
+          uint8_t extended_op = ReadFixed<uint8_t>(&data);
           switch (extended_op) {
             case DW_LNE_end_sequence: {
               // Preserve address and set end_sequence, but reset everything
@@ -1331,7 +1264,7 @@ bool LineInfoReader::ReadLineInfo() {
           SpecialOpcodeAdvance(255);
           break;
         case DW_LNS_fixed_advance_pc:
-          info_.address += ReadMemcpy<uint16_t>(&data);
+          info_.address += ReadFixed<uint16_t>(&data);
           info_.op_index = 0;
           break;
         case DW_LNS_set_prologue_end:
@@ -1357,27 +1290,29 @@ bool LineInfoReader::ReadLineInfo() {
   }
 }
 
-void File::SetByName(string_view name, string_view contents) {
+string_view* File::GetFieldByName(string_view name) {
   if (name == "aranges") {
-    debug_aranges = contents;
+    return &debug_aranges;
   } else if (name == "str") {
-    debug_str = contents;
+    return &debug_str;
   } else if (name == "info") {
-    debug_info = contents;
+    return &debug_info;
   } else if (name == "types") {
-    debug_types = contents;
+    return &debug_types;
   } else if (name == "abbrev") {
-    debug_abbrev = contents;
+    return &debug_abbrev;
   } else if (name == "line") {
-    debug_line = contents;
+    return &debug_line;
   } else if (name == "loc") {
-    debug_loc = contents;
+    return &debug_loc;
   } else if (name == "pubnames") {
-    debug_pubnames = contents;
+    return &debug_pubnames;
   } else if (name == "pubtypes") {
-    debug_pubtypes = contents;
+    return &debug_pubtypes;
   } else if (name == "ranges") {
-    debug_ranges = contents;
+    return &debug_ranges;
+  } else {
+    return nullptr;
   }
 }
 
@@ -1621,9 +1556,9 @@ void AddDIE(const dwarf::File& file, const std::string& name,
       uint64_t addr;
       // TODO(haberman): endian?
       if (sizes.address_size() == 4) {
-        addr = dwarf::ReadMemcpy<uint32_t>(&location);
+        addr = ReadFixed<uint32_t>(&location);
       } else if (sizes.address_size() == 8) {
-        addr = dwarf::ReadMemcpy<uint64_t>(&location);
+        addr = ReadFixed<uint64_t>(&location);
       } else {
         BLOATY_UNREACHABLE();
       }
@@ -1727,34 +1662,34 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
       return 0;
     case DW_EH_PE_absptr:
       if (is_64bit) {
-        value = dwarf::ReadMemcpy<uint64_t>(data);
+        value = ReadFixed<uint64_t>(data);
       } else {
-        value = dwarf::ReadMemcpy<uint32_t>(data);
+        value = ReadFixed<uint32_t>(data);
       }
       break;
     case DW_EH_PE_uleb128:
       value = dwarf::ReadLEB128<uint64_t>(data);
       break;
     case DW_EH_PE_udata2:
-      value = dwarf::ReadMemcpy<uint16_t>(data);
+      value = ReadFixed<uint16_t>(data);
       break;
     case DW_EH_PE_udata4:
-      value = dwarf::ReadMemcpy<uint32_t>(data);
+      value = ReadFixed<uint32_t>(data);
       break;
     case DW_EH_PE_udata8:
-      value = dwarf::ReadMemcpy<uint64_t>(data);
+      value = ReadFixed<uint64_t>(data);
       break;
     case DW_EH_PE_sleb128:
       value = dwarf::ReadLEB128<int64_t>(data);
       break;
     case DW_EH_PE_sdata2:
-      value = dwarf::ReadMemcpy<int16_t>(data);
+      value = ReadFixed<int16_t>(data);
       break;
     case DW_EH_PE_sdata4:
-      value = dwarf::ReadMemcpy<int32_t>(data);
+      value = ReadFixed<int32_t>(data);
       break;
     case DW_EH_PE_sdata8:
-      value = dwarf::ReadMemcpy<int64_t>(data);
+      value = ReadFixed<int64_t>(data);
       break;
     default:
       THROWF("Unexpected eh_frame format value: $0", format);
@@ -1783,9 +1718,9 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
   if (encoding & DW_EH_PE_indirect) {
     string_view location = sink->TranslateVMToFile(value);
     if (is_64bit) {
-      value = dwarf::ReadMemcpy<uint64_t>(&location);
+      value = ReadFixed<uint64_t>(&location);
     } else {
-      value = dwarf::ReadMemcpy<uint32_t>(&location);
+      value = ReadFixed<uint32_t>(&location);
     }
   }
 
@@ -1841,17 +1776,17 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
     }
     full_entry =
         full_entry.substr(0, entry.size() + (entry.data() - full_entry.data()));
-    uint32_t id = dwarf::ReadMemcpy<uint32_t>(&entry);
+    uint32_t id = ReadFixed<uint32_t>(&entry);
     if (id == 0) {
       // CIE, we don't attribute this yet.
       CIEInfo& cie_info = cie_map[full_entry.data()];
-      cie_info.version = dwarf::ReadMemcpy<uint8_t>(&entry);
-      string_view aug_string = dwarf::ReadNullTerminated(&entry);
+      cie_info.version = ReadFixed<uint8_t>(&entry);
+      string_view aug_string = ReadNullTerminated(&entry);
       cie_info.code_align = dwarf::ReadLEB128<uint32_t>(&entry);
       cie_info.data_align = dwarf::ReadLEB128<int32_t>(&entry);
       switch (cie_info.version) {
         case 1:
-          cie_info.return_address_reg = dwarf::ReadMemcpy<uint8_t>(&entry);
+          cie_info.return_address_reg = ReadFixed<uint8_t>(&entry);
           break;
         case 3:
           cie_info.return_address_reg = dwarf::ReadLEB128<uint32_t>(&entry);
@@ -1867,16 +1802,16 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
             dwarf::ReadLEB128<uint32_t>(&entry);
             break;
           case 'L':
-            cie_info.lsda_encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            cie_info.lsda_encoding = ReadFixed<uint8_t>(&entry);
             break;
           case 'R':
-            cie_info.fde_encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            cie_info.fde_encoding = ReadFixed<uint8_t>(&entry);
             break;
           case 'S':
             cie_info.is_signal_handler = true;
             break;
           case 'P': {
-            uint8_t encoding = dwarf::ReadMemcpy<uint8_t>(&entry);
+            uint8_t encoding = ReadFixed<uint8_t>(&entry);
             cie_info.personality_function =
                 ReadEncodedPointer(encoding, true, &entry, nullptr, sink);
             break;
@@ -1922,10 +1857,10 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
 //   http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html#EHFRAME
 void ReadEhFrameHdr(string_view data, RangeSink* sink) {
   const char* base = data.data();
-  uint8_t version = dwarf::ReadMemcpy<uint8_t>(&data);
-  uint8_t eh_frame_ptr_enc = dwarf::ReadMemcpy<uint8_t>(&data);
-  uint8_t fde_count_enc = dwarf::ReadMemcpy<uint8_t>(&data);
-  uint8_t table_enc = dwarf::ReadMemcpy<uint8_t>(&data);
+  uint8_t version = ReadFixed<uint8_t>(&data);
+  uint8_t eh_frame_ptr_enc = ReadFixed<uint8_t>(&data);
+  uint8_t fde_count_enc = ReadFixed<uint8_t>(&data);
+  uint8_t table_enc = ReadFixed<uint8_t>(&data);
 
   if (version != 1) {
     THROWF("Unknown eh_frame_hdr version: $0", version);
@@ -1957,7 +1892,7 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
 static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
                                    string_view unit_name, RangeSink* sink) {
   string_view data = file.debug_line;
-  dwarf::SkipBytes(offset, &data);
+  SkipBytes(offset, &data);
   string_view data_with_length = data;
   dwarf::CompilationUnitSizes sizes;
   data = sizes.ReadInitialLength(&data);
@@ -2063,7 +1998,7 @@ static void ReadDWARFDebugInfo(
     }
 
     string_view abbrev_data = file.debug_abbrev;
-    dwarf::SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
+    SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
     dwarf::AbbrevTable unit_abbrev;
     abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
     sink->AddFileRange("dwarf_abbrev", compileunit_name, abbrev_data);

@@ -55,28 +55,9 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "re.h"
+#include "util.h"
 
 using absl::string_view;
-
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-#define CHECK_SYSCALL(call) \
-  if (call < 0) { \
-    perror(#call " " __FILE__ ":" TOSTRING(__LINE__)); \
-    exit(1); \
-  }
-
-ABSL_ATTRIBUTE_NORETURN
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(...)                                                   \
-  if (verbose_level > 0) {                                          \
-    printf("WARNING: %s\n", absl::Substitute(__VA_ARGS__).c_str()); \
-  }
 
 namespace bloaty {
 
@@ -134,11 +115,7 @@ int SignOf(long val) {
   }
 }
 
-template <typename A, typename B>
-void CheckedAdd(A* accum, B val) {
-  // We've only implemented the portable version for a subset of possible types.
-  static_assert(std::is_signed<A>::value, "requires signed A");
-  static_assert(sizeof(A) == sizeof(B), "requires integers of the same type");
+void CheckedAdd(int64_t* accum, int64_t val) {
 #if ABSL_HAVE_BUILTIN(__builtin_add_overflow)
   if (__builtin_add_overflow(*accum, val, accum)) {
     THROW("integer overflow");
@@ -329,6 +306,8 @@ std::string others_label = "[Other]";
 class Rollup {
  public:
   Rollup() {}
+  Rollup(const Rollup&) = delete;
+  Rollup& operator=(const Rollup&) = delete;
 
   Rollup(Rollup&& other) = default;
   Rollup& operator=(Rollup&& other) = default;
@@ -394,8 +373,6 @@ class Rollup {
   int64_t filtered_file_total() const { return filtered_file_total_; }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Rollup);
-
   int64_t vm_total_ = 0;
   int64_t file_total_ = 0;
   int64_t filtered_vm_total_ = 0;
@@ -746,6 +723,28 @@ std::string PercentString(double percent, bool diff_mode) {
 
 }  // namespace
 
+void RollupOutput::Print(const OutputOptions& options, std::ostream* out) {
+  if (!source_names_.empty()) {
+    switch (options.output_format) {
+      case bloaty::OutputFormat::kPrettyPrint:
+        PrettyPrint(options, out);
+        break;
+      case bloaty::OutputFormat::kCSV:
+        PrintToCSV(out, /*tabs=*/false);
+        break;
+      case bloaty::OutputFormat::kTSV:
+        PrintToCSV(out, /*tabs=*/true);
+        break;
+      default:
+        BLOATY_UNREACHABLE();
+    }
+  }
+
+  if (!disassembly_.empty()) {
+    *out << disassembly_;
+  }
+}
+
 void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
                                   const OutputOptions& options,
                                   std::ostream* out) const {
@@ -917,10 +916,9 @@ constexpr uint64_t RangeSink::kUnknownSize;
 class MmapInputFile : public InputFile {
  public:
   MmapInputFile(const std::string& filename);
+  MmapInputFile(const MmapInputFile&) = delete;
+  MmapInputFile& operator=(const MmapInputFile&) = delete;
   ~MmapInputFile() override;
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MmapInputFile);
 };
 
 
@@ -983,10 +981,9 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 class Win32MMapInputFile : public InputFile {
  public:
   Win32MMapInputFile(const std::string& filename);
+  Win32MMapInputFile(const Win32MMapInputFile&) = delete;
+  Win32MMapInputFile& operator=(const Win32MMapInputFile&) = delete;
   ~Win32MMapInputFile() override;
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Win32MMapInputFile);
 };
 
 class Win32Handle {
@@ -1052,12 +1049,11 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 
-RangeSink::RangeSink(const InputFile* file, const Options& options,
-                     DataSource data_source, const DualMap* translator)
-    : file_(file),
-      options_(options),
-      data_source_(data_source),
-      translator_(translator) {}
+RangeSink::RangeSink(const InputFile *file, const Options &options,
+                     DataSource data_source, const DualMap *translator,
+                     google::protobuf::Arena *arena)
+    : file_(file), options_(options), data_source_(data_source),
+      translator_(translator), arena_(arena) {}
 
 RangeSink::~RangeSink() {}
 
@@ -1347,24 +1343,18 @@ absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
 }
 
 absl::string_view RangeSink::ZlibDecompress(absl::string_view data) {
-  if (data.size() < 12 || (data.substr(0, 4) != "ZLIB")) {
-    return NULL;
+  if (!arena_) {
+    THROW("This range sink isn't prepared to zlib decompress.");
   }
-  data.remove_prefix(4);
-  uint64_t dlen = uint64_t(uint8_t(data[7])) + 
-  	(uint64_t(uint8_t(data[6])) << 8) +
-  	(uint64_t(uint8_t(data[5])) << 16) + 
-  	(uint64_t(uint8_t(data[4])) << 24) + 
-  	(uint64_t(uint8_t(data[3])) << 32) + 
-  	(uint64_t(uint8_t(data[2])) << 40) + 
-  	(uint64_t(uint8_t(data[1])) << 48) + 
-  	(uint64_t(uint8_t(data[0])) << 56);
-  data.remove_prefix(8);
-  unsigned char *dbuf = new unsigned char[dlen];
+  if (ReadBytes(4, &data) != "ZLIB") {
+    THROW("Bad header for compressed debug info");
+  }
+  auto dlen = ReadBigEndian<uint64_t>(&data);
+  unsigned char *dbuf =
+      arena_->google::protobuf::Arena::CreateArray<unsigned char>(arena_, dlen);
   uLongf zliblen = dlen;
   if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) != Z_OK) {
-    delete[] dbuf;
-    return NULL;
+    THROW("Error decompressing debug info");
   }
   string_view sv((char *)dbuf, zliblen);
   return sv;
@@ -1430,6 +1420,8 @@ struct ConfiguredDataSource {
 class Bloaty {
  public:
   Bloaty(const InputFileFactory& factory, const Options& options);
+  Bloaty(const Bloaty&) = delete;
+  Bloaty& operator=(const Bloaty&) = delete;
 
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
@@ -1444,8 +1436,6 @@ class Bloaty {
                            RollupOutput* output);
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
-
   template <size_t T>
   void AddBuiltInSources(const DataSourceDefinition (&sources)[T],
                          const Options& options) {
@@ -1502,10 +1492,14 @@ class Bloaty {
   std::vector<InputFileInfo> input_files_;
   std::vector<InputFileInfo> base_files_;
   std::map<std::string, std::string> debug_files_;
+
+  // For allocating memory, like to decompress compressed sections.
+  std::unique_ptr<google::protobuf::Arena> arena_;
 };
 
-Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
-    : file_factory_(factory), options_(options) {
+Bloaty::Bloaty(const InputFileFactory &factory, const Options &options)
+    : file_factory_(factory), options_(options),
+      arena_(std::make_unique<google::protobuf::Arena>()) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -1685,8 +1679,8 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   std::vector<RangeSink*> filename_sink_ptrs;
 
   // Base map always goes first.
-  sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
-                                               DataSource::kSegments, nullptr));
+  sinks.push_back(absl::make_unique<RangeSink>(
+      &file->file_data(), options_, DataSource::kSegments, nullptr, nullptr));
   NameMunger empty_munger;
   sinks.back()->AddOutput(maps.base_map(), &empty_munger);
   sink_ptrs.push_back(sinks.back().get());
@@ -1694,7 +1688,7 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
                                                  source->effective_source,
-                                                 maps.base_map()));
+                                                 maps.base_map(), arena_.get()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     // We handle the kInputFiles data source internally, without handing it off
     // to the file format implementation.  This seems slightly simpler, since

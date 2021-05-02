@@ -34,6 +34,7 @@
 
 #include <exception>
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
@@ -384,7 +385,6 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
     }
   }
 }
-
 
 }  // namespace bloaty
 

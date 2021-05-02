@@ -15,6 +15,7 @@
 #include <iostream>
 #include "string.h"
 #include "bloaty.h"
+#include "util.h"
 
 #include <cassert>
 
@@ -26,16 +27,7 @@
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
 #include "third_party/darwin_xnu_macho/mach-o/reloc.h"
 
-ABSL_ATTRIBUTE_NORETURN
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
 using absl::string_view;
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
 namespace bloaty {
 namespace macho {
@@ -45,23 +37,6 @@ namespace macho {
 //   hence specifying size when constructing std::string
 static string_view ArrayToStr(const char* s, size_t maxlen) {
   return string_view(s, strnlen(s, maxlen));
-}
-
-static uint64_t CheckedAdd(uint64_t a, uint64_t b) {
-  absl::uint128 a_128(a), b_128(b);
-  absl::uint128 c_128 = a_128 + b_128;
-  if (c_128 > absl::uint128(UINT64_MAX)) {
-    THROW("integer overflow in addition");
-  }
-  return static_cast<uint64_t>(c_128);
-}
-
-static string_view StrictSubstr(string_view data, size_t off, size_t n) {
-  uint64_t end = CheckedAdd(off, n);
-  if (end > data.size()) {
-    THROW("Mach-O region out-of-bounds");
-  }
-  return data.substr(off, n);
 }
 
 uint32_t ReadMagic(string_view data) {
@@ -82,33 +57,9 @@ const T* GetStructPointer(string_view data) {
 }
 
 template <class T>
-void AdvancePastStruct(string_view* data) {
-  *data = data->substr(sizeof(T));
-}
-
-string_view ReadNullTerminated(string_view data, size_t offset) {
-  if (offset >= data.size()) {
-    THROW("Invalid Mach-O string table offset.");
-  }
-
-  data = data.substr(offset);
-
-  const char* nullz =
-      static_cast<const char*>(memchr(data.data(), '\0', data.size()));
-
-  // Return false if not NULL-terminated.
-  if (nullz == NULL) {
-    THROW("Mach-O string was not NULL-terminated");
-  }
-
-  size_t len = nullz - data.data();
-  return data.substr(0, len);
-}
-
-template <class T>
 const T* GetStructPointerAndAdvance(string_view* data) {
   const T* ret = GetStructPointer<T>(*data);
-  AdvancePastStruct<T>(data);
+  *data = data->substr(sizeof(T));
   return ret;
 }
 
@@ -450,7 +401,8 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
       continue;
     }
 
-    string_view name = ReadNullTerminated(strtab, sym->n_un.n_strx);
+    string_view name_region = StrictSubstr(strtab, sym->n_un.n_strx);
+    string_view name = ReadNullTerminated(&name_region);
 
     if (sink->data_source() >= DataSource::kSymbols) {
       sink->AddVMRange("macho_symbols", sym->n_value, RangeSink::kUnknownSize,
@@ -507,7 +459,8 @@ static void AddMachOFallback(RangeSink* sink) {
 }
 
 template <class Segment, class Section>
-void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf) {
+void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
+                                  RangeSink *sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
 
   if (segment->maxprot == VM_PROT_NONE) {
@@ -539,43 +492,35 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf) {
 
     string_view contents =
         StrictSubstr(cmd.file_data, section->offset, filesize);
-    string_view *target = NULL;
-    bool decompress = false;
 
     if (sectname.find("__debug_") == 0) {
-      string_view suffix = sectname;
-      suffix.remove_prefix(string_view("__debug_").size());
-      target = dwarf->member_field_by_name(suffix);
+      sectname.remove_prefix(string_view("__debug_").size());
+      dwarf->SetFieldByName(sectname, contents);
     } else if (sectname.find("__zdebug_") == 0) {
-      string_view suffix = sectname;
-      decompress = true;
-      suffix.remove_prefix(string_view("__zdebug_").size());
-      target = dwarf->member_field_by_name(suffix);
-    }
-
-    if (target != NULL) {
-      if (decompress) {
-        // XXX zdebug_decompress leaks an allocation XXX
-        *target = dwarf::zdebug_decompress(contents);
-      } else {
-        *target = contents;
+      sectname.remove_prefix(string_view("__zdebug_").size());
+      string_view *member = dwarf->GetFieldByName(sectname);
+      if (member) {
+        *member = sink->ZlibDecompress(contents);
       }
     }
   }
 }
 
-static void ReadDebugSectionsFromMachO(const InputFile& file, dwarf::File* dwarf) {
-  ForEachLoadCommand(file.data(), nullptr, [dwarf](const LoadCommand& cmd) {
-    switch (cmd.cmd) {
-      case LC_SEGMENT_64:
-        ReadDebugSectionsFromSegment<segment_command_64, section_64>(cmd,
-                                                                     dwarf);
-        break;
-      case LC_SEGMENT:
-        ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf);
-        break;
-    }
-  });
+static void ReadDebugSectionsFromMachO(const InputFile &file,
+                                       dwarf::File *dwarf, RangeSink *sink) {
+  ForEachLoadCommand(
+      file.data(), nullptr, [dwarf, sink](const LoadCommand &cmd) {
+        switch (cmd.cmd) {
+        case LC_SEGMENT_64:
+          ReadDebugSectionsFromSegment<segment_command_64, section_64>(
+              cmd, dwarf, sink);
+          break;
+        case LC_SEGMENT:
+          ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf,
+                                                                 sink);
+          break;
+        }
+      });
 }
 
 class MachOObjectFile : public ObjectFile {
@@ -618,14 +563,13 @@ class MachOObjectFile : public ObjectFile {
           SymbolTable symtab;
           DualMap symbol_map;
           NameMunger empty_munger;
-          RangeSink symbol_sink(&debug_file().file_data(),
-                                sink->options(),
+          RangeSink symbol_sink(&debug_file().file_data(), sink->options(),
                                 DataSource::kRawSymbols,
-                                &sinks[0]->MapAtIndex(0));
+                                &sinks[0]->MapAtIndex(0), nullptr);
           symbol_sink.AddOutput(&symbol_map, &empty_munger);
           ParseSymbols(debug_file().file_data().data(), &symtab, &symbol_sink);
           dwarf::File dwarf;
-          ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf);
+          ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf, sink);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
           ParseSymbols(sink->input_file().data(), nullptr, sink);
           break;

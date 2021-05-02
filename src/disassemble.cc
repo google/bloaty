@@ -14,21 +14,15 @@
 
 #include <string>
 
-#include "bloaty.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
+#include "bloaty.h"
 #include "capstone/capstone.h"
 #include "re.h"
-
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
+#include "util.h"
 
 using absl::string_view;
 

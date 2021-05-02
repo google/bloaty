@@ -13,33 +13,14 @@
 // limitations under the License.
 
 #include "bloaty.h"
+#include "util.h"
 
 #include "absl/strings/substitute.h"
-
-ABSL_ATTRIBUTE_NORETURN
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
 
 using absl::string_view;
 
 namespace bloaty {
 namespace wasm {
-
-template <class T>
-T ReadMemcpy(string_view* data) {
-  T ret;
-  if (data->size() < sizeof(T)) {
-    THROW("premature EOF reading fixed-length wasm data");
-  }
-  memcpy(&ret, data->data(), sizeof(T));
-  data->remove_prefix(sizeof(T));
-  return ret;
-}
 
 uint64_t ReadLEB128Internal(bool is_signed, size_t size, string_view* data) {
   uint64_t ret = 0;
@@ -91,14 +72,14 @@ string_view ReadPiece(size_t bytes, string_view* data) {
 
 bool ReadMagic(string_view* data) {
   const uint32_t wasm_magic = 0x6d736100;
-  uint32_t magic = ReadMemcpy<uint32_t>(data);
+  auto magic = ReadFixed<uint32_t>(data);
 
   if (magic != wasm_magic) {
     return false;
   }
 
   // TODO(haberman): do we need to fail if this is >1?
-  uint32_t version = ReadMemcpy<uint32_t>(data);
+  auto version = ReadFixed<uint32_t>(data);
   (void)version;
 
   return true;
@@ -272,7 +253,7 @@ uint32_t GetNumFunctionImports(const Section& section) {
     ReadPiece(module_len, &data);
     uint32_t field_len = ReadVarUInt32(&data);
     ReadPiece(field_len, &data);
-    auto kind = ReadMemcpy<uint8_t>(&data);
+    auto kind = ReadFixed<uint8_t>(&data);
 
     switch (kind) {
       case ExternalKind::kFunction:
