@@ -134,6 +134,7 @@ else(UNIX)
 
   add_subdirectory(third_party/zlib)
   include_directories(third_party/zlib)
+  include_directories(${CMAKE_CURRENT_BINARY_DIR}/third_party/zlib)
 endif(UNIX)
 
 include_directories(.)
@@ -265,7 +266,7 @@ else(UNIX)
   if(BLOATY_ENABLE_RE2)
     set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} re2)
   endif(BLOATY_ENABLE_RE2)
-  set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} zlib)
+  set(LIBBLOATY_LIBS ${LIBBLOATY_LIBS} zlibstatic)
 endif(UNIX)
 
 if(UNIX)
