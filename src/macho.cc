@@ -233,17 +233,28 @@ void AddSegmentAsFallback(string_view command_data, string_view file_data,
 template <class Segment, class Section>
 void ParseSegment(LoadCommand cmd, RangeSink* sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
-
-  if (segment->maxprot == VM_PROT_NONE) {
-    return;
-  }
-
   string_view segname = ArrayToStr(segment->segname, 16);
 
+  // For unknown reasons, some load commands will have maxprot = NONE
+  // indicating they are not accessible, but will also contain a vmaddr
+  // and vmsize.  In practice the vmaddr/vmsize of a section sometimes
+  // fall within the segment, but sometimes exceed it, leading to an
+  // error about exceeding the base map.
+  //
+  // Since such segments should not be mapped, we simply ignore the
+  // vmaddr/vmsize of such segments.
+  bool unmapped = segment->maxprot == VM_PROT_NONE;
+
   if (sink->data_source() == DataSource::kSegments) {
-    sink->AddRange(
-        "macho_segment", segname, segment->vmaddr, segment->vmsize,
-        StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+    if (unmapped) {
+      sink->AddFileRange(
+          "macho_segment", segname,
+          StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+    } else {
+      sink->AddRange(
+          "macho_segment", segname, segment->vmaddr, segment->vmsize,
+          StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+    }
   } else if (sink->data_source() == DataSource::kSections) {
     uint32_t nsects = segment->nsects;
     for (uint32_t j = 0; j < nsects; j++) {
@@ -263,8 +274,14 @@ void ParseSegment(LoadCommand cmd, RangeSink* sink) {
 
       std::string label = absl::StrJoin(
           std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
-      sink->AddRange("macho_section", label, section->addr, section->size,
-                     StrictSubstr(cmd.file_data, section->offset, filesize));
+      if (unmapped) {
+        sink->AddFileRange(
+            "macho_section", label,
+            StrictSubstr(cmd.file_data, section->offset, filesize));
+      } else {
+        sink->AddRange("macho_section", label, section->addr, section->size,
+                       StrictSubstr(cmd.file_data, section->offset, filesize));
+      }
     }
   } else {
     BLOATY_UNREACHABLE();
@@ -462,11 +479,6 @@ template <class Segment, class Section>
 void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
                                   RangeSink *sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
-
-  if (segment->maxprot == VM_PROT_NONE) {
-    return;
-  }
-
   string_view segname = ArrayToStr(segment->segname, 16);
 
   if (segname != "__DWARF") {
@@ -497,13 +509,13 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
       sectname.remove_prefix(string_view("__debug_").size());
       dwarf->SetFieldByName(sectname, contents);
     } else if (sectname.find("__zdebug_") == 0) {
-      /*
       sectname.remove_prefix(string_view("__zdebug_").size());
       string_view *member = dwarf->GetFieldByName(sectname);
-      if (member) {
-        *member = sink->ZlibDecompress(contents);
+      if (!member || ReadBytes(4, &contents) != "ZLIB") {
+        continue;
       }
-      */
+      auto uncompressed_size = ReadBigEndian<uint64_t>(&contents);
+      *member = sink->ZlibDecompress(contents, uncompressed_size);
     }
   }
 }

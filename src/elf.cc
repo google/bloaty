@@ -1173,7 +1173,7 @@ static void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
     string_view name = section.GetName();
     string_view contents = section.contents();
     uint64_t uncompressed_size = 0;
-    
+
     if (section.header().sh_flags & SHF_COMPRESSED) {
       // Standard ELF section compression, produced when you link with
       //   --compress-debug-sections=zlib-gabi
@@ -1201,9 +1201,9 @@ static void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
     }
 
     if (string_view* member = dwarf->GetFieldByName(name)) {
-      if (compressed_size) {
-        *member = sink->ZlibDecompress(contents, compressed_size);
-      } else { 
+      if (uncompressed_size) {
+        *member = sink->ZlibDecompress(contents, uncompressed_size);
+      } else {
         *member = section.contents();
       }
     }
