@@ -235,6 +235,7 @@ add_library(libbloaty STATIC
     third_party/abseil-cpp/absl/strings/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
+    third_party/abseil-cpp/absl/strings/internal/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/match.cc
