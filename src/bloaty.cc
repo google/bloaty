@@ -1516,6 +1516,10 @@ std::unique_ptr<ObjectFile> Bloaty::GetObjectFile(
   }
 
   if (!object_file.get()) {
+    object_file = TryOpenPEFile(file);
+  }
+
+  if (!object_file.get()) {
     THROWF("unknown file type for file '$0'", filename.c_str());
   }
 
