@@ -39,29 +39,6 @@
 #include "range_map.h"
 #include "re.h"
 
-#define BLOATY_DISALLOW_COPY_AND_ASSIGN(class_name) \
-  class_name(const class_name&) = delete; \
-  void operator=(const class_name&) = delete;
-
-#if !defined(_MSC_VER)
-#define BLOATY_UNREACHABLE() do { \
-  assert(false); \
-  __builtin_unreachable(); \
-} while (0)
-#else
-#define BLOATY_UNREACHABLE() do { \
-  assert(false); \
-  __assume(0); \
-} while (0)
-#endif
-
-#ifdef NDEBUG
-// Prevent "unused variable" warnings.
-#define BLOATY_ASSERT(expr) do {} while (false && (expr))
-#else
-#define BLOATY_ASSERT(expr) assert(expr)
-#endif
-
 namespace bloaty {
 
 extern int verbose_level;
@@ -89,31 +66,17 @@ enum class DataSource {
   kShortSymbols
 };
 
-class Error : public std::runtime_error {
- public:
-  Error(const char* msg, const char* file, int line)
-      : std::runtime_error(msg), file_(file), line_(line) {}
-
-  // TODO(haberman): add these to Bloaty's error message when verbose is
-  // enabled.
-  const char* file() const { return file_; }
-  int line() const { return line_; }
-
- private:
-  const char* file_;
-  int line_;
-};
-
 class InputFile {
  public:
   InputFile(const std::string& filename) : filename_(filename) {}
+  InputFile(const InputFile&) = delete;
+  InputFile& operator=(const InputFile&) = delete;
   virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }
   absl::string_view data() const { return data_; }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(InputFile);
   const std::string filename_;
 
  protected:
@@ -147,6 +110,8 @@ class RangeSink {
  public:
   RangeSink(const InputFile* file, const Options& options,
             DataSource data_source, const DualMap* translator);
+  RangeSink(const RangeSink&) = delete;
+  RangeSink& operator=(const RangeSink&) = delete;
   ~RangeSink();
 
   const Options& options() const { return options_; }
@@ -238,8 +203,6 @@ class RangeSink {
   static constexpr uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(RangeSink);
-
   bool FileContainsPointer(const void* ptr) const {
     absl::string_view file_data = file_->data();
     return ptr >= file_data.data() && ptr < file_data.data() + file_data.size();
@@ -265,6 +228,8 @@ class RangeSink {
 class NameMunger {
  public:
   NameMunger() {}
+  NameMunger(const NameMunger&) = delete;
+  NameMunger& operator=(const NameMunger&) = delete;
 
   // Adds a regex that will be applied to all names.  All regexes will be
   // applied in sequence.
@@ -274,7 +239,6 @@ class NameMunger {
   bool IsEmpty() const { return regexes_.empty(); }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(NameMunger);
   std::vector<std::pair<std::unique_ptr<ReImpl>, std::string>> regexes_;
 };
 
@@ -362,6 +326,9 @@ class LineReader {
  public:
   LineReader(FILE* file, bool pclose) : file_(file), pclose_(pclose) {}
   LineReader(LineReader&& other);
+  LineReader(const LineReader&) = delete;
+  LineReader& operator=(const LineReader&);
+
 
   ~LineReader() { Close(); }
 
@@ -374,8 +341,6 @@ class LineReader {
   bool eof() { return eof_; }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(LineReader);
-
   void Close();
 
   FILE* file_;
@@ -481,35 +446,15 @@ struct OutputOptions {
 struct RollupOutput {
  public:
   RollupOutput() : toplevel_row_("TOTAL") {}
+  RollupOutput(const RollupOutput&) = delete;
+  RollupOutput& operator=(const RollupOutput&) = delete;
 
   void AddDataSourceName(absl::string_view name) {
     source_names_.emplace_back(std::string(name));
   }
 
   const std::vector<std::string>& source_names() const { return source_names_; }
-
-  void Print(const OutputOptions& options, std::ostream* out) {
-    if (!source_names_.empty()) {
-      switch (options.output_format) {
-        case bloaty::OutputFormat::kPrettyPrint:
-          PrettyPrint(options, out);
-          break;
-        case bloaty::OutputFormat::kCSV:
-          PrintToCSV(out, /*tabs=*/false);
-          break;
-        case bloaty::OutputFormat::kTSV:
-          PrintToCSV(out, /*tabs=*/true);
-          break;
-        default:
-          BLOATY_UNREACHABLE();
-      }
-    }
-
-    if (!disassembly_.empty()) {
-      *out << disassembly_;
-    }
-  }
-
+  void Print(const OutputOptions& options, std::ostream* out);
   void SetDisassembly(absl::string_view disassembly) {
     disassembly_ = std::string(disassembly);
   }
@@ -521,7 +466,6 @@ struct RollupOutput {
   bool diff_mode() const { return diff_mode_; }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(RollupOutput);
   friend class Rollup;
 
   std::vector<std::string> source_names_;
@@ -550,65 +494,6 @@ bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,
                   OutputOptions* output_options, std::string* error);
 bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
                 RollupOutput* output, std::string* error);
-
-// Endianness utilities ////////////////////////////////////////////////////////
-
-inline bool IsLittleEndian() {
-  int x = 1;
-  return *(char*)&x == 1;
-}
-
-// It seems like it would be simpler to just specialize on:
-//   template <class T> T ByteSwap(T val);
-//   template <> T ByteSwap<uint16>(T val) { /* ... */ }
-//   template <> T ByteSwap<uint32>(T val) { /* ... */ }
-//   // etc...
-//
-// But this doesn't work out so well.  Consider that on LP32, uint32 could
-// be either "unsigned int" or "unsigned long".  Specializing ByteSwap<uint32>
-// will leave one of those two unspecialized.  C++ is annoying in this regard.
-// Our approach here handles both cases with just one specialization.
-template <class T, size_t size> struct ByteSwapper { T operator()(T val); };
-
-template <class T>
-struct ByteSwapper<T, 1> {
-  T operator()(T val) { return val; }
-};
-
-template <class T>
-struct ByteSwapper<T, 2> {
-  T operator()(T val) {
-    return ((val & 0xff) << 8) |
-        ((val & 0xff00) >> 8);
-  }
-};
-
-template <class T>
-struct ByteSwapper<T, 4> {
-  T operator()(T val) {
-    return ((val & 0xff) << 24) |
-        ((val & 0xff00) << 8) |
-        ((val & 0xff0000ULL) >> 8) |
-        ((val & 0xff000000ULL) >> 24);
-  }
-};
-
-template <class T>
-struct ByteSwapper<T, 8> {
-  T operator()(T val) {
-    return ((val & 0xff) << 56) |
-        ((val & 0xff00) << 40) |
-        ((val & 0xff0000) << 24) |
-        ((val & 0xff000000) << 8) |
-        ((val & 0xff00000000ULL) >> 8) |
-        ((val & 0xff0000000000ULL) >> 24) |
-        ((val & 0xff000000000000ULL) >> 40) |
-        ((val & 0xff00000000000000ULL) >> 56);
-  }
-};
-
-template <class T>
-T ByteSwap(T val) { return ByteSwapper<T, sizeof(T)>()(val); }
 
 }  // namespace bloaty
 

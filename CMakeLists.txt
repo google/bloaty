@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0048 NEW)
 project (Bloaty VERSION 1.1)
 include(CTest)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 # Options we define for users.
 option(BLOATY_ENABLE_ASAN "Enable address sanitizer." OFF)
@@ -223,6 +223,7 @@ add_library(libbloaty STATIC
     src/elf.cc
     src/macho.cc
     src/range_map.cc
+    src/util.cc
     src/webassembly.cc
     # Until Abseil has a proper CMake build system
     third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
@@ -234,6 +235,7 @@ add_library(libbloaty STATIC
     third_party/abseil-cpp/absl/strings/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
     third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
+    third_party/abseil-cpp/absl/strings/internal/escaping.cc
     third_party/abseil-cpp/absl/strings/internal/memutil.cc
     third_party/abseil-cpp/absl/strings/internal/utf8.cc
     third_party/abseil-cpp/absl/strings/match.cc
