@@ -1342,21 +1342,19 @@ absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   return file_->data().substr(translated);
 }
 
-absl::string_view RangeSink::ZlibDecompress(absl::string_view data) {
+absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
+                                            uint64_t uncompressed_size) {
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
   }
-  if (ReadBytes(4, &data) != "ZLIB") {
-    THROW("Bad header for compressed debug info");
-  }
-  auto dlen = ReadBigEndian<uint64_t>(&data);
   unsigned char *dbuf =
-      arena_->google::protobuf::Arena::CreateArray<unsigned char>(arena_, dlen);
-  uLongf zliblen = dlen;
+      arena_->google::protobuf::Arena::CreateArray<unsigned char>(
+          arena_, uncompressed_size);
+  uLongf zliblen = uncompressed_size;
   if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) != Z_OK) {
     THROW("Error decompressing debug info");
   }
-  string_view sv((char *)dbuf, zliblen);
+  string_view sv(reinterpret_cast<char *>(dbuf), zliblen);
   return sv;
 }
 

@@ -27,9 +27,6 @@
 #include <limits.h>
 #include <stdlib.h>
 
-// Not present in the FreeBSD ELF headers.
-#define NT_GNU_BUILD_ID 3
-
 using absl::string_view;
 
 namespace bloaty {
@@ -168,6 +165,12 @@ class ElfFile {
   bool is_64bit() const { return is_64bit_; }
   bool is_native_endian() const { return is_native_endian_; }
 
+  template <class T32, class T64, class Munger>
+  void ReadStruct(absl::string_view contents, uint64_t offset, Munger munger,
+                  absl::string_view* range, T64* out) const {
+    StructReader(*this, contents).Read<T32>(offset, munger, range, out);
+  }
+
  private:
   friend class Section;
 
@@ -211,12 +214,6 @@ class ElfFile {
       memcpy(out, data_.data() + offset, sizeof(*out));
     }
   };
-
-  template <class T32, class T64, class Munger>
-  void ReadStruct(absl::string_view contents, uint64_t offset, Munger munger,
-                  absl::string_view* range, T64* out) const {
-    StructReader(*this, contents).Read<T32>(offset, munger, range, out);
-  }
 
   bool ok_;
   bool is_64bit_;
@@ -327,6 +324,15 @@ struct NoteMunger {
     to->n_namesz = func(from.n_namesz);
     to->n_descsz = func(from.n_descsz);
     to->n_type   = func(from.n_type);
+  }
+};
+
+struct ChdrMunger {
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Chdr* to, Func func) {
+    to->ch_type = func(from.ch_type);
+    to->ch_size = func(from.ch_size);
+    to->ch_addralign   = func(from.ch_addralign);
   }
 };
 
@@ -1165,15 +1171,40 @@ static void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
     ElfFile::Section section;
     elf.ReadSection(i, &section);
     string_view name = section.GetName();
+    string_view contents = section.contents();
+    uint64_t uncompressed_size = 0;
+    
+    if (section.header().sh_flags & SHF_COMPRESSED) {
+      // Standard ELF section compression, produced when you link with
+      //   --compress-debug-sections=zlib-gabi
+      Elf64_Chdr chdr;
+      absl::string_view range;
+      elf.ReadStruct<Elf32_Chdr>(contents, 0, ChdrMunger(), &range, &chdr);
+      if (chdr.ch_type != ELFCOMPRESS_ZLIB) {
+        // Unknown compression format.
+        continue;
+      }
+      uncompressed_size = chdr.ch_size;
+      contents.remove_prefix(range.size());
+    }
 
     if (name.find(".debug_") == 0) {
       name.remove_prefix(string_view(".debug_").size());
-      dwarf->SetFieldByName(name, section.contents());
     } else if (name.find(".zdebug_") == 0) {
+      // GNU format compressed debug info, produced when you link with
+      //   --compress-debug-sections=zlib-gnu
       name.remove_prefix(string_view(".zdebug_").size());
-      string_view* member = dwarf->GetFieldByName(name);
-      if (member) {
-        *member = sink->ZlibDecompress(section.contents());
+      if (ReadBytes(4, &contents) != "ZLIB") {
+        continue;  // Bad compression header.
+      }
+      uncompressed_size = ReadBigEndian<uint64_t>(&contents);
+    }
+
+    if (string_view* member = dwarf->GetFieldByName(name)) {
+      if (compressed_size) {
+        *member = sink->ZlibDecompress(contents, compressed_size);
+      } else { 
+        *member = section.contents();
       }
     }
   }

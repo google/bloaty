@@ -497,11 +497,13 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
       sectname.remove_prefix(string_view("__debug_").size());
       dwarf->SetFieldByName(sectname, contents);
     } else if (sectname.find("__zdebug_") == 0) {
+      /*
       sectname.remove_prefix(string_view("__zdebug_").size());
       string_view *member = dwarf->GetFieldByName(sectname);
       if (member) {
         *member = sink->ZlibDecompress(contents);
       }
+      */
     }
   }
 }
