@@ -54,28 +54,9 @@
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "re.h"
+#include "util.h"
 
 using absl::string_view;
-
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-#define CHECK_SYSCALL(call) \
-  if (call < 0) { \
-    perror(#call " " __FILE__ ":" TOSTRING(__LINE__)); \
-    exit(1); \
-  }
-
-ABSL_ATTRIBUTE_NORETURN
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(...)                                                   \
-  if (verbose_level > 0) {                                          \
-    printf("WARNING: %s\n", absl::Substitute(__VA_ARGS__).c_str()); \
-  }
 
 namespace bloaty {
 
@@ -133,11 +114,7 @@ int SignOf(long val) {
   }
 }
 
-template <typename A, typename B>
-void CheckedAdd(A* accum, B val) {
-  // We've only implemented the portable version for a subset of possible types.
-  static_assert(std::is_signed<A>::value, "requires signed A");
-  static_assert(sizeof(A) == sizeof(B), "requires integers of the same type");
+void CheckedAdd(int64_t* accum, int64_t val) {
 #if ABSL_HAVE_BUILTIN(__builtin_add_overflow)
   if (__builtin_add_overflow(*accum, val, accum)) {
     THROW("integer overflow");
@@ -328,6 +305,8 @@ std::string others_label = "[Other]";
 class Rollup {
  public:
   Rollup() {}
+  Rollup(const Rollup&) = delete;
+  Rollup& operator=(const Rollup&) = delete;
 
   Rollup(Rollup&& other) = default;
   Rollup& operator=(Rollup&& other) = default;
@@ -393,8 +372,6 @@ class Rollup {
   int64_t filtered_file_total() const { return filtered_file_total_; }
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Rollup);
-
   int64_t vm_total_ = 0;
   int64_t file_total_ = 0;
   int64_t filtered_vm_total_ = 0;
@@ -745,6 +722,28 @@ std::string PercentString(double percent, bool diff_mode) {
 
 }  // namespace
 
+void RollupOutput::Print(const OutputOptions& options, std::ostream* out) {
+  if (!source_names_.empty()) {
+    switch (options.output_format) {
+      case bloaty::OutputFormat::kPrettyPrint:
+        PrettyPrint(options, out);
+        break;
+      case bloaty::OutputFormat::kCSV:
+        PrintToCSV(out, /*tabs=*/false);
+        break;
+      case bloaty::OutputFormat::kTSV:
+        PrintToCSV(out, /*tabs=*/true);
+        break;
+      default:
+        BLOATY_UNREACHABLE();
+    }
+  }
+
+  if (!disassembly_.empty()) {
+    *out << disassembly_;
+  }
+}
+
 void RollupOutput::PrettyPrintRow(const RollupRow& row, size_t indent,
                                   const OutputOptions& options,
                                   std::ostream* out) const {
@@ -916,10 +915,9 @@ constexpr uint64_t RangeSink::kUnknownSize;
 class MmapInputFile : public InputFile {
  public:
   MmapInputFile(const std::string& filename);
+  MmapInputFile(const MmapInputFile&) = delete;
+  MmapInputFile& operator=(const MmapInputFile&) = delete;
   ~MmapInputFile() override;
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(MmapInputFile);
 };
 
 
@@ -982,10 +980,9 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 class Win32MMapInputFile : public InputFile {
  public:
   Win32MMapInputFile(const std::string& filename);
+  Win32MMapInputFile(const Win32MMapInputFile&) = delete;
+  Win32MMapInputFile& operator=(const Win32MMapInputFile&) = delete;
   ~Win32MMapInputFile() override;
-
- private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Win32MMapInputFile);
 };
 
 class Win32Handle {
@@ -1405,6 +1402,8 @@ struct ConfiguredDataSource {
 class Bloaty {
  public:
   Bloaty(const InputFileFactory& factory, const Options& options);
+  Bloaty(const Bloaty&) = delete;
+  Bloaty& operator=(const Bloaty&) = delete;
 
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
@@ -1419,8 +1418,6 @@ class Bloaty {
                            RollupOutput* output);
 
  private:
-  BLOATY_DISALLOW_COPY_AND_ASSIGN(Bloaty);
-
   template <size_t T>
   void AddBuiltInSources(const DataSourceDefinition (&sources)[T],
                          const Options& options) {

@@ -21,6 +21,7 @@
 #include "absl/strings/substitute.h"
 #include "third_party/freebsd_elf/elf.h"
 #include "bloaty.h"
+#include "util.h"
 
 #include <assert.h>
 #include <limits.h>
@@ -31,36 +32,9 @@
 
 using absl::string_view;
 
-ABSL_ATTRIBUTE_NORETURN
-static void Throw(const char *str, int line) {
-  throw bloaty::Error(str, __FILE__, line);
-}
-
-#define THROW(msg) Throw(msg, __LINE__)
-#define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
-#define WARN(x) fprintf(stderr, "bloaty: %s\n", x);
-
 namespace bloaty {
 
 namespace {
-
-uint64_t CheckedAdd(uint64_t a, uint64_t b) {
-  absl::uint128 a_128(a), b_128(b);
-  absl::uint128 c_128 = a_128 + b_128;
-  if (c_128 > UINT64_MAX) {
-    THROW("integer overflow in addition");
-  }
-  return static_cast<uint64_t>(c_128);
-}
-
-uint64_t CheckedMul(uint64_t a, uint64_t b) {
-  absl::uint128 a_128(a), b_128(b);
-  absl::uint128 c = a * b;
-  if (c > UINT64_MAX) {
-    THROW("integer overflow in multiply");
-  }
-  return static_cast<uint64_t>(c);
-}
 
 struct ByteSwapFunc {
   template <class T>
@@ -83,36 +57,8 @@ size_t StringViewToSize(string_view str) {
 }
 
 template <class T>
-const T* GetStructPointer(string_view data) {
-  if (sizeof(T) > data.size()) {
-    THROW("Premature EOF reading ELF data.");
-  }
-  return reinterpret_cast<const T*>(data.data());
-}
-
-template <class T>
 void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
-}
-
-static string_view StrictSubstr(string_view data, size_t off, size_t n) {
-  uint64_t end = CheckedAdd(off, n);
-  if (end > data.size()) {
-    THROW("ELF region out-of-bounds");
-  }
-  return data.substr(off, n);
-}
-
-static string_view StrictSubstr(string_view data, size_t off) {
-  if (off > data.size()) {
-    THROW("ELF region out-of-bounds");
-  }
-  return data.substr(off);
-}
-
-static size_t AlignUp(size_t offset, size_t granularity) {
-  // Granularity must be a power of two.
-  return (offset + granularity - 1) & ~(granularity - 1);
 }
 
 // ElfFile /////////////////////////////////////////////////////////////////////
@@ -257,13 +203,10 @@ class ElfFile {
                       T64* out) const;
 
     template <class T>
-    void Memcpy(uint64_t offset, absl::string_view* range, T* out) const {
-      uint64_t end = CheckedAdd(offset, sizeof(T));
-      if (end > data_.size()) {
-        THROW("out-of-bounds read to ELF file");
-      }
-      if (range) {
-        *range = absl::string_view(data_.data() + offset, sizeof(*out));
+    void Memcpy(uint64_t offset, absl::string_view* out_range, T* out) const {
+      absl::string_view range = StrictSubstr(data_, offset, sizeof(*out));
+      if (out_range) {
+        *out_range = range;
       }
       memcpy(out, data_.data() + offset, sizeof(*out));
     }
@@ -391,6 +334,7 @@ template <class T32, class T64, class Munger>
 void ElfFile::StructReader::ReadFallback(uint64_t offset,
                                          absl::string_view* range,
                                          T64* out) const {
+  // Fallback for either 32-bit ELF file or non-native endian.
   if (elf_.is_64bit()) {
     assert(!elf_.is_native_endian());
     Memcpy(offset, range, out);
@@ -517,10 +461,10 @@ bool ElfFile::Initialize() {
 
   switch (ident[EI_DATA]) {
     case ELFDATA2LSB:
-      is_native_endian_ = IsLittleEndian();
+      is_native_endian_ = GetMachineEndian() == Endian::kLittle;
       break;
     case ELFDATA2MSB:
-      is_native_endian_ = !IsLittleEndian();
+      is_native_endian_ = GetMachineEndian() == Endian::kBig;
       break;
     default:
       THROWF("unexpected ELF data: $0", ident[EI_DATA]);
