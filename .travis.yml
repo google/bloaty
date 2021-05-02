@@ -1,7 +1,7 @@
 language: cpp
 
 dist: bionic
-osx_image: xcode1
+osx_image: xcode11
 
 compiler:
   - clang
