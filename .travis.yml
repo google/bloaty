@@ -1,6 +1,7 @@
 language: cpp
 
-dist: trusty
+dist: bionic
+osx_image: xcode1
 
 compiler:
   - clang
