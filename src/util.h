@@ -152,6 +152,10 @@ template <class T> T ReadLittleEndian(absl::string_view *data) {
   return ReadEndian<T>(data, Endian::kLittle);
 }
 
+template <class T> T ReadBigEndian(absl::string_view *data) {
+  return ReadEndian<T>(data, Endian::kBig);
+}
+
 // General data reading  ///////////////////////////////////////////////////////
 
 absl::string_view ReadNullTerminated(absl::string_view* data);

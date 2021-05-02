@@ -107,28 +107,29 @@ class MmapInputFileFactory : public InputFileFactory {
 // A RangeSink allows data sources to assign labels to ranges of VM address
 // space and/or file offsets.
 class RangeSink {
- public:
-  RangeSink(const InputFile* file, const Options& options,
-            DataSource data_source, const DualMap* translator);
-  RangeSink(const RangeSink&) = delete;
-  RangeSink& operator=(const RangeSink&) = delete;
+public:
+  RangeSink(const InputFile *file, const Options &options,
+            DataSource data_source, const DualMap *translator,
+            google::protobuf::Arena *arena);
+  RangeSink(const RangeSink &) = delete;
+  RangeSink &operator=(const RangeSink &) = delete;
   ~RangeSink();
 
-  const Options& options() const { return options_; }
+  const Options &options() const { return options_; }
 
-  void AddOutput(DualMap* map, const NameMunger* munger);
+  void AddOutput(DualMap *map, const NameMunger *munger);
 
   DataSource data_source() const { return data_source_; }
-  const InputFile& input_file() const { return *file_; }
+  const InputFile &input_file() const { return *file_; }
   bool IsBaseMap() const { return translator_ == nullptr; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(const char* analyzer, absl::string_view name, uint64_t vmaddr,
+  void AddRange(const char *analyzer, absl::string_view name, uint64_t vmaddr,
                 uint64_t vmsize, uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(const char* analyzer, absl::string_view name, uint64_t vmaddr,
+  void AddRange(const char *analyzer, absl::string_view name, uint64_t vmaddr,
                 uint64_t vmsize, absl::string_view file_range) {
     AddRange(analyzer, name, vmaddr, vmsize,
              file_range.data() - file_->data().data(), file_range.size());
@@ -200,6 +201,12 @@ class RangeSink {
   uint64_t TranslateFileToVM(const char* ptr);
   absl::string_view TranslateVMToFile(uint64_t address);
 
+  // Decompresses zlib-formatted data and returns the decompressed data.
+  // Since the decompressed data is not actually part of the file, any
+  // Add*Range() calls to this region will be no-ops.
+  absl::string_view ZlibDecompress(absl::string_view contents,
+                                   uint64_t uncompressed_size);
+
   static constexpr uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
  private:
@@ -218,8 +225,8 @@ class RangeSink {
   DataSource data_source_;
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
+  google::protobuf::Arena *arena_;
 };
-
 
 // NameMunger //////////////////////////////////////////////////////////////////
 
@@ -296,10 +303,12 @@ struct File {
   absl::string_view debug_pubtypes;
   absl::string_view debug_ranges;
 
-  absl::string_view *member_field_by_name(absl::string_view name);
+  absl::string_view* GetFieldByName(absl::string_view name);
+  void SetFieldByName(absl::string_view name, absl::string_view contents) {
+    absl::string_view *member = GetFieldByName(name);
+    if (member) *member = contents;
+  }
 };
-
-absl::string_view zdebug_decompress(absl::string_view contents);
 
 }  // namespace dwarf
 

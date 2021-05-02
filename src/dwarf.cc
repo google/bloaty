@@ -24,9 +24,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#ifdef USE_ZLIB
-#include <zlib.h>
-#endif
 
 #include "absl/base/attributes.h"
 #include "absl/base/macros.h"
@@ -1293,58 +1290,30 @@ bool LineInfoReader::ReadLineInfo() {
   }
 }
 
-string_view *File::member_field_by_name(string_view name) {
+string_view* File::GetFieldByName(string_view name) {
   if (name == "aranges") {
     return &debug_aranges;
   } else if (name == "str") {
     return &debug_str;
   } else if (name == "info") {
-    return &(debug_info);
+    return &debug_info;
   } else if (name == "types") {
-    return &(debug_types);
+    return &debug_types;
   } else if (name == "abbrev") {
-    return &(debug_abbrev);
+    return &debug_abbrev;
   } else if (name == "line") {
-    return &(debug_line);
+    return &debug_line;
   } else if (name == "loc") {
-    return &(debug_loc);
+    return &debug_loc;
   } else if (name == "pubnames") {
-    return &(debug_pubnames);
+    return &debug_pubnames;
   } else if (name == "pubtypes") {
-    return &(debug_pubtypes);
+    return &debug_pubtypes;
   } else if (name == "ranges") {
-    return &(debug_ranges);
+    return &debug_ranges;
   } else {
-    return NULL;
+    return nullptr;
   }
-}
-
-string_view zdebug_decompress(string_view contents) {
-#ifdef USE_ZLIB
-  if (contents.size() < 12 || (contents.substr(0, 4) != "ZLIB")) {
-    return NULL;
-  }
-  contents.remove_prefix(4);
-  uint64_t dlen = uint64_t(uint8_t(contents[7])) + 
-  	(uint64_t(uint8_t(contents[6])) << 8) +
-  	(uint64_t(uint8_t(contents[5])) << 16) + 
-  	(uint64_t(uint8_t(contents[4])) << 24) + 
-  	(uint64_t(uint8_t(contents[3])) << 32) + 
-  	(uint64_t(uint8_t(contents[2])) << 40) + 
-  	(uint64_t(uint8_t(contents[1])) << 48) + 
-  	(uint64_t(uint8_t(contents[0])) << 56);
-  contents.remove_prefix(8);
-  unsigned char *dbuf = new unsigned char[dlen];
-  uLongf zliblen = dlen;
-  if (uncompress(dbuf, &zliblen, (unsigned char*)(contents.data()), contents.size()) != Z_OK) {
-    delete[] dbuf;
-    return NULL;
-  }
-  string_view sv((char *)dbuf, zliblen);
-  return sv;
-#else
-  return NULL;
-#endif
 }
 
 }  // namespace dwarf

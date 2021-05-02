@@ -27,9 +27,6 @@
 #include <limits.h>
 #include <stdlib.h>
 
-// Not present in the FreeBSD ELF headers.
-#define NT_GNU_BUILD_ID 3
-
 using absl::string_view;
 
 namespace bloaty {
@@ -168,6 +165,12 @@ class ElfFile {
   bool is_64bit() const { return is_64bit_; }
   bool is_native_endian() const { return is_native_endian_; }
 
+  template <class T32, class T64, class Munger>
+  void ReadStruct(absl::string_view contents, uint64_t offset, Munger munger,
+                  absl::string_view* range, T64* out) const {
+    StructReader(*this, contents).Read<T32>(offset, munger, range, out);
+  }
+
  private:
   friend class Section;
 
@@ -211,12 +214,6 @@ class ElfFile {
       memcpy(out, data_.data() + offset, sizeof(*out));
     }
   };
-
-  template <class T32, class T64, class Munger>
-  void ReadStruct(absl::string_view contents, uint64_t offset, Munger munger,
-                  absl::string_view* range, T64* out) const {
-    StructReader(*this, contents).Read<T32>(offset, munger, range, out);
-  }
 
   bool ok_;
   bool is_64bit_;
@@ -327,6 +324,15 @@ struct NoteMunger {
     to->n_namesz = func(from.n_namesz);
     to->n_descsz = func(from.n_descsz);
     to->n_type   = func(from.n_type);
+  }
+};
+
+struct ChdrMunger {
+  template <class From, class Func>
+  void operator()(const From& from, Elf64_Chdr* to, Func func) {
+    to->ch_type = func(from.ch_type);
+    to->ch_size = func(from.ch_size);
+    to->ch_addralign   = func(from.ch_addralign);
   }
 };
 
@@ -1157,33 +1163,48 @@ static void ReadELFSegments(RangeSink* sink) {
 // reader directly on them.  At the moment we don't attempt to make these
 // work with object files.
 
-static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
+static void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
+                              RangeSink *sink) {
   ElfFile elf(file.data());
   assert(elf.IsOpen());
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
     string_view name = section.GetName();
-    string_view *target = NULL;
-    bool decompress = false;
+    string_view contents = section.contents();
+    uint64_t uncompressed_size = 0;
 
-    if (name.find(".debug_") == 0) {
-      string_view suffix = name;
-      suffix.remove_prefix(string_view(".debug_").size());
-      target = dwarf->member_field_by_name(suffix);
-    } else if (name.find(".zdebug_") == 0) {
-      string_view suffix = name;
-      suffix.remove_prefix(string_view(".zdebug_").size());
-      decompress = true;
-      target = dwarf->member_field_by_name(suffix);
+    if (section.header().sh_flags & SHF_COMPRESSED) {
+      // Standard ELF section compression, produced when you link with
+      //   --compress-debug-sections=zlib-gabi
+      Elf64_Chdr chdr;
+      absl::string_view range;
+      elf.ReadStruct<Elf32_Chdr>(contents, 0, ChdrMunger(), &range, &chdr);
+      if (chdr.ch_type != ELFCOMPRESS_ZLIB) {
+        // Unknown compression format.
+        continue;
+      }
+      uncompressed_size = chdr.ch_size;
+      contents.remove_prefix(range.size());
     }
 
-    if (target != NULL) {
-      if (decompress) {
-        // XXX zdebug_decompress leaks an allocation XXX
-        *target = dwarf::zdebug_decompress(section.contents());
+    if (name.find(".debug_") == 0) {
+      name.remove_prefix(string_view(".debug_").size());
+    } else if (name.find(".zdebug_") == 0) {
+      // GNU format compressed debug info, produced when you link with
+      //   --compress-debug-sections=zlib-gnu
+      name.remove_prefix(string_view(".zdebug_").size());
+      if (ReadBytes(4, &contents) != "ZLIB") {
+        continue;  // Bad compression header.
+      }
+      uncompressed_size = ReadBigEndian<uint64_t>(&contents);
+    }
+
+    if (string_view* member = dwarf->GetFieldByName(name)) {
+      if (uncompressed_size) {
+        *member = sink->ZlibDecompress(contents, uncompressed_size);
       } else {
-        *target = section.contents();
+        *member = section.contents();
       }
     }
   }
@@ -1267,19 +1288,19 @@ class ElfObjectFile : public ObjectFile {
           RangeSink symbol_sink(&debug_file().file_data(),
                                 sink->options(),
                                 DataSource::kRawSymbols,
-                                &sinks[0]->MapAtIndex(0));
+                                &sinks[0]->MapAtIndex(0), nullptr);
           symbol_sink.AddOutput(&symbol_map, &empty_munger);
           ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symtab,
                          false);
           dwarf::File dwarf;
-          ReadDWARFSections(debug_file().file_data(), &dwarf);
+          ReadDWARFSections(debug_file().file_data(), &dwarf, sink);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
           break;
         }
         case DataSource::kInlines: {
           CheckNotObject("lineinfo", sink);
           dwarf::File dwarf;
-          ReadDWARFSections(debug_file().file_data(), &dwarf);
+          ReadDWARFSections(debug_file().file_data(), &dwarf, sink);
           ReadDWARFInlines(dwarf, sink, true);
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
@@ -1317,7 +1338,7 @@ class ElfObjectFile : public ObjectFile {
     DualMap base_map;
     NameMunger empty_munger;
     RangeSink base_sink(&file_data(), bloaty::Options(), DataSource::kSegments,
-                        nullptr);
+                        nullptr, nullptr);
     base_sink.AddOutput(&base_map, &empty_munger);
     std::vector<RangeSink*> sink_ptrs{&base_sink};
     ProcessFile(sink_ptrs);
@@ -1325,7 +1346,7 @@ class ElfObjectFile : public ObjectFile {
     // Could optimize this not to build the whole table if necessary.
     SymbolTable symbol_table;
     RangeSink symbol_sink(&file_data(), bloaty::Options(), symbol_source,
-                          &base_map);
+                          &base_map, nullptr);
     symbol_sink.AddOutput(&info->symbol_map, &empty_munger);
     ReadELFSymbols(debug_file().file_data(), &symbol_sink, &symbol_table,
                    false);

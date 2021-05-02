@@ -41,6 +41,7 @@
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <zlib.h>
 
 #include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
@@ -1049,12 +1050,11 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 
-RangeSink::RangeSink(const InputFile* file, const Options& options,
-                     DataSource data_source, const DualMap* translator)
-    : file_(file),
-      options_(options),
-      data_source_(data_source),
-      translator_(translator) {}
+RangeSink::RangeSink(const InputFile *file, const Options &options,
+                     DataSource data_source, const DualMap *translator,
+                     google::protobuf::Arena *arena)
+    : file_(file), options_(options), data_source_(data_source),
+      translator_(translator), arena_(arena) {}
 
 RangeSink::~RangeSink() {}
 
@@ -1343,6 +1343,22 @@ absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   return file_->data().substr(translated);
 }
 
+absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
+                                            uint64_t uncompressed_size) {
+  if (!arena_) {
+    THROW("This range sink isn't prepared to zlib decompress.");
+  }
+  unsigned char *dbuf =
+      arena_->google::protobuf::Arena::CreateArray<unsigned char>(
+          arena_, uncompressed_size);
+  uLongf zliblen = uncompressed_size;
+  if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) != Z_OK) {
+    THROW("Error decompressing debug info");
+  }
+  string_view sv(reinterpret_cast<char *>(dbuf), zliblen);
+  return sv;
+}
+
 // ThreadSafeIterIndex /////////////////////////////////////////////////////////
 
 class ThreadSafeIterIndex {
@@ -1475,10 +1491,14 @@ class Bloaty {
   std::vector<InputFileInfo> input_files_;
   std::vector<InputFileInfo> base_files_;
   std::map<std::string, std::string> debug_files_;
+
+  // For allocating memory, like to decompress compressed sections.
+  std::unique_ptr<google::protobuf::Arena> arena_;
 };
 
-Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
-    : file_factory_(factory), options_(options) {
+Bloaty::Bloaty(const InputFileFactory &factory, const Options &options)
+    : file_factory_(factory), options_(options),
+      arena_(std::make_unique<google::protobuf::Arena>()) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -1658,8 +1678,8 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   std::vector<RangeSink*> filename_sink_ptrs;
 
   // Base map always goes first.
-  sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
-                                               DataSource::kSegments, nullptr));
+  sinks.push_back(absl::make_unique<RangeSink>(
+      &file->file_data(), options_, DataSource::kSegments, nullptr, nullptr));
   NameMunger empty_munger;
   sinks.back()->AddOutput(maps.base_map(), &empty_munger);
   sink_ptrs.push_back(sinks.back().get());
@@ -1667,7 +1687,7 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   for (auto source : sources_) {
     sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
                                                  source->effective_source,
-                                                 maps.base_map()));
+                                                 maps.base_map(), arena_.get()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     // We handle the kInputFiles data source internally, without handing it off
     // to the file format implementation.  This seems slightly simpler, since

@@ -233,17 +233,28 @@ void AddSegmentAsFallback(string_view command_data, string_view file_data,
 template <class Segment, class Section>
 void ParseSegment(LoadCommand cmd, RangeSink* sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
-
-  if (segment->maxprot == VM_PROT_NONE) {
-    return;
-  }
-
   string_view segname = ArrayToStr(segment->segname, 16);
 
+  // For unknown reasons, some load commands will have maxprot = NONE
+  // indicating they are not accessible, but will also contain a vmaddr
+  // and vmsize.  In practice the vmaddr/vmsize of a section sometimes
+  // fall within the segment, but sometimes exceed it, leading to an
+  // error about exceeding the base map.
+  //
+  // Since such segments should not be mapped, we simply ignore the
+  // vmaddr/vmsize of such segments.
+  bool unmapped = segment->maxprot == VM_PROT_NONE;
+
   if (sink->data_source() == DataSource::kSegments) {
-    sink->AddRange(
-        "macho_segment", segname, segment->vmaddr, segment->vmsize,
-        StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+    if (unmapped) {
+      sink->AddFileRange(
+          "macho_segment", segname,
+          StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+    } else {
+      sink->AddRange(
+          "macho_segment", segname, segment->vmaddr, segment->vmsize,
+          StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+    }
   } else if (sink->data_source() == DataSource::kSections) {
     uint32_t nsects = segment->nsects;
     for (uint32_t j = 0; j < nsects; j++) {
@@ -263,8 +274,14 @@ void ParseSegment(LoadCommand cmd, RangeSink* sink) {
 
       std::string label = absl::StrJoin(
           std::make_tuple(segname, ArrayToStr(section->sectname, 16)), ",");
-      sink->AddRange("macho_section", label, section->addr, section->size,
-                     StrictSubstr(cmd.file_data, section->offset, filesize));
+      if (unmapped) {
+        sink->AddFileRange(
+            "macho_section", label,
+            StrictSubstr(cmd.file_data, section->offset, filesize));
+      } else {
+        sink->AddRange("macho_section", label, section->addr, section->size,
+                       StrictSubstr(cmd.file_data, section->offset, filesize));
+      }
     }
   } else {
     BLOATY_UNREACHABLE();
@@ -459,13 +476,9 @@ static void AddMachOFallback(RangeSink* sink) {
 }
 
 template <class Segment, class Section>
-void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf) {
+void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
+                                  RangeSink *sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
-
-  if (segment->maxprot == VM_PROT_NONE) {
-    return;
-  }
-
   string_view segname = ArrayToStr(segment->segname, 16);
 
   if (segname != "__DWARF") {
@@ -491,43 +504,37 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf) {
 
     string_view contents =
         StrictSubstr(cmd.file_data, section->offset, filesize);
-    string_view *target = NULL;
-    bool decompress = false;
 
     if (sectname.find("__debug_") == 0) {
-      string_view suffix = sectname;
-      suffix.remove_prefix(string_view("__debug_").size());
-      target = dwarf->member_field_by_name(suffix);
+      sectname.remove_prefix(string_view("__debug_").size());
+      dwarf->SetFieldByName(sectname, contents);
     } else if (sectname.find("__zdebug_") == 0) {
-      string_view suffix = sectname;
-      decompress = true;
-      suffix.remove_prefix(string_view("__zdebug_").size());
-      target = dwarf->member_field_by_name(suffix);
-    }
-
-    if (target != NULL) {
-      if (decompress) {
-        // XXX zdebug_decompress leaks an allocation XXX
-        *target = dwarf::zdebug_decompress(contents);
-      } else {
-        *target = contents;
+      sectname.remove_prefix(string_view("__zdebug_").size());
+      string_view *member = dwarf->GetFieldByName(sectname);
+      if (!member || ReadBytes(4, &contents) != "ZLIB") {
+        continue;
       }
+      auto uncompressed_size = ReadBigEndian<uint64_t>(&contents);
+      *member = sink->ZlibDecompress(contents, uncompressed_size);
     }
   }
 }
 
-static void ReadDebugSectionsFromMachO(const InputFile& file, dwarf::File* dwarf) {
-  ForEachLoadCommand(file.data(), nullptr, [dwarf](const LoadCommand& cmd) {
-    switch (cmd.cmd) {
-      case LC_SEGMENT_64:
-        ReadDebugSectionsFromSegment<segment_command_64, section_64>(cmd,
-                                                                     dwarf);
-        break;
-      case LC_SEGMENT:
-        ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf);
-        break;
-    }
-  });
+static void ReadDebugSectionsFromMachO(const InputFile &file,
+                                       dwarf::File *dwarf, RangeSink *sink) {
+  ForEachLoadCommand(
+      file.data(), nullptr, [dwarf, sink](const LoadCommand &cmd) {
+        switch (cmd.cmd) {
+        case LC_SEGMENT_64:
+          ReadDebugSectionsFromSegment<segment_command_64, section_64>(
+              cmd, dwarf, sink);
+          break;
+        case LC_SEGMENT:
+          ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf,
+                                                                 sink);
+          break;
+        }
+      });
 }
 
 class MachOObjectFile : public ObjectFile {
@@ -570,14 +577,13 @@ class MachOObjectFile : public ObjectFile {
           SymbolTable symtab;
           DualMap symbol_map;
           NameMunger empty_munger;
-          RangeSink symbol_sink(&debug_file().file_data(),
-                                sink->options(),
+          RangeSink symbol_sink(&debug_file().file_data(), sink->options(),
                                 DataSource::kRawSymbols,
-                                &sinks[0]->MapAtIndex(0));
+                                &sinks[0]->MapAtIndex(0), nullptr);
           symbol_sink.AddOutput(&symbol_map, &empty_munger);
           ParseSymbols(debug_file().file_data().data(), &symtab, &symbol_sink);
           dwarf::File dwarf;
-          ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf);
+          ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf, sink);
           ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
           ParseSymbols(sink->input_file().data(), nullptr, sink);
           break;
