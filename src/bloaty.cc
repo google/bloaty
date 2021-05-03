@@ -280,7 +280,10 @@ class Rollup {
     CreateRows(row, base, options, true);
   }
 
-  void SetFilterRegex(const ReImpl* regex) { filter_regex_ = regex; }
+  void SetFilterRegex(const ReImpl* regex_include, const ReImpl* regex_exclude) {
+    filter_regex_include_ = regex_include;
+    filter_regex_exclude_ = regex_exclude;
+  }
 
   // Add the values in "other" from this.
   void Add(const Rollup& other) {
@@ -316,7 +319,8 @@ class Rollup {
   int64_t filtered_vm_total_ = 0;
   int64_t filtered_file_total_ = 0;
 
-  const ReImpl* filter_regex_ = nullptr;
+  const ReImpl* filter_regex_include_ = nullptr;
+  const ReImpl* filter_regex_exclude_ = nullptr;
 
   // Putting Rollup by value seems to work on some compilers/libs but not
   // others.
@@ -335,20 +339,33 @@ class Rollup {
   // If there are more entries names[i+1, i+2, etc] add them to sub-rollups.
   void AddInternal(const std::vector<std::string>& names, size_t i,
                    uint64_t size, bool is_vmsize) {
-    if (filter_regex_ != nullptr) {
+    if (filter_regex_include_ != nullptr || filter_regex_exclude_ != nullptr) {
       // filter_regex_ is only set in the root rollup, which checks the full
       // label hierarchy for a match to determine whether a region should be
       // considered.
-      bool any_matched = false;
+      bool exclude = false;
+      if (filter_regex_include_ != nullptr) {
+        bool any_matched = false;
 
-      for (const auto& name : names) {
-        if (ReImpl::PartialMatch(name, *filter_regex_)) {
-          any_matched = true;
-          break;
+        for (const auto& name : names) {
+          if (ReImpl::PartialMatch(name, *filter_regex_include_)) {
+            any_matched = true;
+            break;
+          }
+        }
+        exclude = !any_matched;
+      }
+
+      if (!exclude && filter_regex_exclude_ != nullptr) {
+        for (const auto& name : names) {
+          if (ReImpl::PartialMatch(name, *filter_regex_exclude_)) {
+            exclude = true;
+            break;
+          }
         }
       }
 
-      if (!any_matched) {
+      if (exclude) {
         // Ignore this region in the rollup and don't visit sub-rollups.
         if (is_vmsize) {
           CheckedAdd(&filtered_vm_total_, size);
@@ -1810,13 +1827,17 @@ void Bloaty::ScanAndRollupFiles(const std::vector<std::string>& filenames,
   std::vector<std::thread> threads(num_threads);
   ThreadSafeIterIndex index(filenames.size());
 
-  std::unique_ptr<ReImpl> regex = nullptr;
+  std::unique_ptr<ReImpl> regex_include = nullptr;
+  std::unique_ptr<ReImpl> regex_exclude = nullptr;
   if (options_.has_source_filter()) {
-    regex = absl::make_unique<ReImpl>(options_.source_filter());
+    regex_include = absl::make_unique<ReImpl>(options_.source_filter());
+  }
+  if (options_.has_exclude_source_filter()) {
+    regex_exclude = absl::make_unique<ReImpl>(options_.exclude_source_filter());
   }
 
   for (int i = 0; i < num_threads; i++) {
-    thread_data[i].rollup.SetFilterRegex(regex.get());
+    thread_data[i].rollup.SetFilterRegex(regex_include.get(), regex_exclude.get());
 
     threads[i] = std::thread(
         [this, &index, &filenames](PerThreadData* data) {
@@ -1960,6 +1981,10 @@ Options:
   --list-sources     Show a list of available sources and exit.
   --source-filter=PATTERN
                      Only show keys with names matching this pattern.
+  --exclude-source-filter=PATTERN
+                     Exclude keys with names matching this pattern.
+                     When both --source-filter and --exclude-source-filter
+                     match the same data, the data will be excluded.
 
 Options for debugging Bloaty:
 
@@ -2159,6 +2184,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseOption("--source-filter", &option)) {
       options->set_source_filter(std::string(option));
+    } else if (args.TryParseOption("--exclude-source-filter", &option)) {
+      options->set_exclude_source_filter(std::string(option));
     } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
     } else if (args.TryParseFlag("-vv")) {
@@ -2264,7 +2291,14 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
   if (options.has_source_filter()) {
     ReImpl re(options.source_filter());
     if (!re.ok()) {
-      THROW("invalid regex for source_filter");
+      THROW("invalid regex for --source-filter");
+    }
+  }
+
+  if (options.has_exclude_source_filter()) {
+    ReImpl re(options.exclude_source_filter());
+    if (!re.ok()) {
+      THROW("invalid regex for --exclude-source-filter");
     }
   }
 
