@@ -152,9 +152,27 @@ enum DwarfForm {
   DW_FORM_exprloc = 0x18,
   DW_FORM_flag_present = 0x19,
   // DWARF 5.
+  DW_FORM_strx = 0x1a,
+  DW_FORM_addrx = 0x1b,
+  DW_FORM_ref_sup4 = 0x1c,
+  DW_FORM_strp_sup = 0x1d,
+  DW_FORM_data16 = 0x1e,
   DW_FORM_line_strp = 0x1f,
   // DWARF 4.
   DW_FORM_ref_sig8 = 0x20,
+  // DWARF 5.
+  DW_FORM_implicit_const = 0x21,
+  DW_FORM_loclistx = 0x22,
+  DW_FORM_rnglistx = 0x23,
+  DW_FORM_ref_sup8 = 0x24,
+  DW_FORM_strx1 = 0x25,
+  DW_FORM_strx2 = 0x26,
+  DW_FORM_strx3 = 0x27,
+  DW_FORM_strx4 = 0x28,
+  DW_FORM_addrx1 = 0x29,
+  DW_FORM_addrx2 = 0x2a,
+  DW_FORM_addrx3 = 0x2b,
+  DW_FORM_addrx4 = 0x2c,
   // Extensions for Fission.  See http://gcc.gnu.org/wiki/DebugFission.
   DW_FORM_GNU_addr_index = 0x1f01,
   DW_FORM_GNU_str_index = 0x1f02
@@ -261,6 +279,36 @@ enum DwarfAttribute {
   DW_AT_const_expr = 0x6c,
   DW_AT_enum_class = 0x6d,
   DW_AT_linkage_name = 0x6e,
+  // DWARF 5 values.
+  DW_AT_string_length_bit_size = 0x6f,
+  DW_AT_string_length_byte_size = 0x70,
+  DW_AT_rank = 0x71,
+  DW_AT_str_offsets_base = 0x72,
+  DW_AT_addr_base = 0x73,
+  DW_AT_rnglists_base = 0x74,
+  DW_AT_dwo_name = 0x76,
+  DW_AT_reference = 0x77,
+  DW_AT_rvalue_reference = 0x78,
+  DW_AT_macros = 0x79,
+  DW_AT_call_all_calls = 0x7a,
+  DW_AT_call_all_source_calls = 0x7b,
+  DW_AT_call_all_tail_calls = 0x7c,
+  DW_AT_call_return_pc = 0x7d,
+  DW_AT_call_value = 0x7e,
+  DW_AT_call_origin = 0x7f,
+  DW_AT_call_parameter = 0x80,
+  DW_AT_call_pc = 0x81,
+  DW_AT_call_tail_call = 0x82,
+  DW_AT_call_target = 0x83,
+  DW_AT_call_target_clobbered = 0x84,
+  DW_AT_call_data_location = 0x85,
+  DW_AT_call_data_value = 0x86,
+  DW_AT_noreturn = 0x87,
+  DW_AT_alignment = 0x88,
+  DW_AT_export_symbols = 0x89,
+  DW_AT_deleted = 0x8a,
+  DW_AT_defaulted = 0x8b,
+  DW_AT_loclists_base = 0x8c,
   // SGI/MIPS extensions.
   DW_AT_MIPS_fde = 0x2001,
   DW_AT_MIPS_loop_begin = 0x2002,
@@ -643,6 +691,17 @@ enum PointerEncoding {
   DW_EH_PE_indirect    = 0x80,
 
   DW_EH_PE_omit        = 0xff
+};
+
+enum RangeListEntry {
+  DW_RLE_end_of_list = 0x00,
+  DW_RLE_base_addressx = 0x01,
+  DW_RLE_startx_endx = 0x02,
+  DW_RLE_startx_length = 0x03,
+  DW_RLE_offset_pair = 0x04,
+  DW_RLE_base_address = 0x05,
+  DW_RLE_start_end = 0x06,
+  DW_RLE_start_length = 0x07,
 };
 
 }  // namespace dwarf2reader

@@ -134,11 +134,27 @@ class CompilationUnitSizes {
   // DWARF version of this unit.
   uint8_t dwarf_version() const { return dwarf_version_; }
 
+  uint64_t addr_base() const { return addr_base_; }
+  uint64_t str_offsets_base() const { return str_offsets_base_; }
+  uint64_t range_lists_base() const { return range_lists_base_; }
+
   void SetAddressSize(uint8_t address_size) {
     if (address_size != 4 && address_size != 8) {
       THROWF("Unexpected address size: $0", address_size);
     }
     address_size_ = address_size;
+  }
+
+  void SetAddrBase(uint64_t addr_base) {
+    addr_base_ = addr_base;
+  }
+
+  void SetStrOffsetsBase(uint64_t str_offsets_base) {
+    str_offsets_base_ = str_offsets_base;
+  }
+
+  void SetRangeListsBase(uint64_t range_lists_base) {
+    range_lists_base_ = range_lists_base;
   }
 
   // To allow this as the key in a map.
@@ -202,6 +218,9 @@ class CompilationUnitSizes {
   uint16_t dwarf_version_;
   bool dwarf64_;
   uint8_t address_size_;
+  uint64_t addr_base_ = 0;
+  uint64_t str_offsets_base_ = 0;
+  uint64_t range_lists_base_ = 0;
 };
 
 
@@ -285,7 +304,8 @@ string_view AbbrevTable::ReadAbbrevs(string_view data) {
         abbrev.has_child = false;
         break;
       default:
-        THROW("DWARF has_child is neither true nor false.");
+        THROWF("DWARF has_child is neither true nor false: $0, code=$1, tag=$2",
+               has_child, abbrev.code, abbrev.tag);
     }
 
     while (true) {
@@ -717,12 +737,25 @@ bool DIEReader::ReadCompilationUnitHeader() {
 
   unit_sizes_.ReadDWARFVersion(&remaining_);
 
-  if (unit_sizes_.dwarf_version() > 4) {
+  if (unit_sizes_.dwarf_version() > 5) {
     THROWF("Data for $0 is in DWARF $1 format which we don't understand",
         unit_name_, unit_sizes_.dwarf_version());
   }
 
-  debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+  if (unit_sizes_.dwarf_version() == 5) {
+    uint8_t unit_type = ReadFixed<uint8_t>(&remaining_);
+    unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
+    debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+  } else {
+    debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+    unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
+
+    if (section_ == Section::kDebugTypes) {
+      unit_type_signature_ = ReadFixed<uint64_t>(&remaining_);
+      unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+    }
+  }
+
   unit_abbrev_ = &abbrev_tables_[debug_abbrev_offset_];
 
   // If we haven't already read abbreviations for this debug_abbrev_offset_, we
@@ -731,13 +764,6 @@ bool DIEReader::ReadCompilationUnitHeader() {
     string_view abbrev_data = dwarf_.debug_abbrev;
     SkipBytes(debug_abbrev_offset_, &abbrev_data);
     unit_abbrev_->ReadAbbrevs(abbrev_data);
-  }
-
-  unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
-
-  if (section_ == Section::kDebugTypes) {
-    unit_type_signature_ = ReadFixed<uint64_t>(&remaining_);
-    unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
   }
 
   auto abbrev_id = std::make_pair(unit_abbrev_, unit_sizes_);
@@ -794,6 +820,12 @@ class AttrValue {
     return string_;
   }
 
+  void SetForm(uint16_t form) {
+    form_ = form;
+  }
+
+  uint16_t form() { return form_; }
+
  private:
   union {
     uint64_t uint_;
@@ -801,6 +833,7 @@ class AttrValue {
   };
 
   Type type_;
+  uint16_t form_;
 };
 
 template <class D>
@@ -821,6 +854,42 @@ string_view ReadIndirectString(const DIEReader& reader, string_view* data) {
   string_view ret = table.ReadEntry(ofs);
   reader.AddIndirectString(ret);
   return ret;
+}
+
+AttrValue ReadDoubleIndirectString(const DIEReader& reader, uint64_t ofs) {
+  string_view offsets = reader.dwarf().debug_str_offsets;
+  uint64_t ofs2;
+  if (reader.unit_sizes().dwarf64()) {
+    SkipBytes((ofs * 8) + reader.unit_sizes().str_offsets_base(), &offsets);
+    ofs2 = ReadFixed<uint64_t>(&offsets);
+  } else {
+    SkipBytes((ofs * 4) + reader.unit_sizes().str_offsets_base(), &offsets);
+    ofs2 = ReadFixed<uint32_t>(&offsets);
+  }
+  StringTable table(reader.dwarf().debug_str);
+  string_view ret = table.ReadEntry(ofs2);
+  reader.AddIndirectString(ret);
+  return AttrValue(ret);
+}
+
+uint64_t ReadIndirectAddress(const File &file,
+                             const CompilationUnitSizes &sizes, uint64_t ofs) {
+  string_view addrs = file.debug_addr;
+  switch (sizes.address_size()) {
+    case 4:
+      SkipBytes((ofs * 4) + sizes.addr_base(), &addrs);
+      return ReadFixed<uint32_t>(&addrs);
+    case 8:
+      SkipBytes((ofs * 8) + sizes.addr_base(), &addrs);
+      return ReadFixed<uint64_t>(&addrs);
+    default:
+      BLOATY_UNREACHABLE();
+  }
+}
+
+AttrValue ReadIndirectAddressAttr(const DIEReader& reader, uint64_t ofs) {
+  return AttrValue(
+      ReadIndirectAddress(reader.dwarf(), reader.unit_sizes(), ofs));
 }
 
 AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
@@ -853,6 +922,16 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
         default:
           BLOATY_UNREACHABLE();
       }
+    case DW_FORM_addrx1:
+      return ReadIndirectAddressAttr(reader, ReadFixed<uint8_t>(data));
+    case DW_FORM_addrx2:
+      return ReadIndirectAddressAttr(reader, ReadFixed<uint16_t>(data));
+    case DW_FORM_addrx3:
+      return ReadIndirectAddressAttr(reader, ReadFixed<uint32_t, 3>(data));
+    case DW_FORM_addrx4:
+      return ReadIndirectAddressAttr(reader, ReadFixed<uint32_t>(data));
+    case DW_FORM_addrx:
+      return ReadIndirectAddressAttr(reader, ReadLEB128<uint64_t>(data));
     case DW_FORM_ref_addr:
       if (reader.unit_sizes().dwarf_version() <= 2) {
         goto address_size;
@@ -883,6 +962,16 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       } else {
         return AttrValue(ReadIndirectString<uint32_t>(reader, data));
       }
+    case DW_FORM_strx1:
+      return ReadDoubleIndirectString(reader, ReadFixed<uint8_t>(data));
+    case DW_FORM_strx2:
+      return ReadDoubleIndirectString(reader, ReadFixed<uint16_t>(data));
+    case DW_FORM_strx3:
+      return ReadDoubleIndirectString(reader, ReadFixed<uint32_t, 3>(data));
+    case DW_FORM_strx4:
+      return ReadDoubleIndirectString(reader, ReadFixed<uint32_t>(data));
+    case DW_FORM_strx:
+      return ReadDoubleIndirectString(reader, ReadLEB128<uint64_t>(data));
     case DW_FORM_data1:
       return AttrValue(ReadBytes(1, data));
     case DW_FORM_data2:
@@ -891,6 +980,8 @@ AttrValue ParseAttr(const DIEReader& reader, uint8_t form, string_view* data) {
       return AttrValue(ReadBytes(4, data));
     case DW_FORM_data8:
       return AttrValue(ReadBytes(8, data));
+    case DW_FORM_rnglistx:
+      return AttrValue(ReadLEB128<uint64_t>(data));
 
     // Bloaty doesn't currently care about any bool or signed data.
     // So we fudge it a bit and just stuff these in a uint64.
@@ -926,6 +1017,8 @@ class AttrReader {
 
     for (auto attr : abbrev.attr) {
       AttrValue value = ParseAttr(*reader, attr.form, &data);
+      value.SetForm(attr.form);
+
       auto it = attributes_.find(attr.name);
       if (it != attributes_.end()) {
         it->second(container, value);
@@ -1293,8 +1386,12 @@ bool LineInfoReader::ReadLineInfo() {
 string_view* File::GetFieldByName(string_view name) {
   if (name == "aranges") {
     return &debug_aranges;
+  } else if (name == "addr") {
+    return &debug_addr;
   } else if (name == "str") {
     return &debug_str;
+  } else if (name == "str_offsets") {
+    return &debug_str_offsets;
   } else if (name == "info") {
     return &debug_info;
   } else if (name == "types") {
@@ -1311,6 +1408,8 @@ string_view* File::GetFieldByName(string_view name) {
     return &debug_pubtypes;
   } else if (name == "ranges") {
     return &debug_ranges;
+  } else if (name == "rnglists") {
+    return &debug_rnglists;
   } else {
     return nullptr;
   }
@@ -1396,6 +1495,7 @@ class GeneralDIE {
   bool has_location_uint64() const { return has_location_uint64_; }
   bool has_stmt_list() const { return has_stmt_list_; }
   bool has_ranges() const { return has_ranges_; }
+  bool has_range_list() const { return has_range_list_; }
   bool has_start_scope() const { return has_start_scope_; }
 
   std::string DebugString() {
@@ -1438,6 +1538,7 @@ class GeneralDIE {
   uint64_t location_uint64() const { return location_uint64_; }
   uint64_t stmt_list() const { return stmt_list_; }
   uint64_t ranges() const { return ranges_; }
+  uint64_t range_list() const { return range_list_; }
   uint64_t start_scope() const { return start_scope_; }
 
   void set_name(string_view val) {
@@ -1472,6 +1573,10 @@ class GeneralDIE {
     has_ranges_ = true;
     ranges_ = val;
   }
+  void set_range_list(uint64_t val) {
+    has_range_list_ = true;
+    range_list_ = val;
+  }
   void set_start_scope(uint64_t val) {
     has_start_scope_ = true;
     start_scope_ = val;
@@ -1486,6 +1591,7 @@ class GeneralDIE {
   bool has_location_uint64_ = false;
   bool has_stmt_list_ = false;
   bool has_ranges_ = false;
+  bool has_range_list_ = false;
   bool has_start_scope_ = false;
 
   string_view name_;
@@ -1496,6 +1602,7 @@ class GeneralDIE {
   uint64_t location_uint64_ = 0;
   uint64_t stmt_list_ = 0;
   uint64_t ranges_ = 0;
+  uint64_t range_list_ = 0;
   uint64_t start_scope_ = 0;
 };
 
@@ -1613,6 +1720,62 @@ void AddDIE(const dwarf::File& file, const std::string& name,
               "bloaty: warning: DWARF debug range out of range, "
               "ranges_offset=%" PRIx64 "\n",
               ranges_offset);
+    }
+  }
+
+  // DWARF 5 range list is the same information as "ranges" but in a different
+  // format.
+  if (die.has_range_list()) {
+    string_view data = StrictSubstr(
+        file.debug_rnglists, sizes.range_lists_base() + die.range_list());
+    fprintf(stderr, "YO: %.*s %zu, ofs=%zu + %zu = %zu\n", (int)name.size(), name.data(), data.size(), (size_t)sizes.range_lists_base(), (size_t)die.range_list(), (size_t)(sizes.range_lists_base() + die.range_list()));
+    bool done = false;
+    uint64_t base_address = sizes.addr_base();
+    while (!done) {
+      fprintf(stderr, "YO2\n");
+      switch (ReadFixed<uint8_t>(&data)) {
+        case DW_RLE_end_of_list:
+          fprintf(stderr, "YO3\n");
+          done = true;
+          break;
+        case DW_RLE_base_addressx:
+          fprintf(stderr, "YO4\n");
+          base_address = ReadIndirectAddress(
+              file, sizes, dwarf::ReadLEB128<uint64_t>(&data));
+          break;
+        case DW_RLE_startx_endx: {
+          fprintf(stderr, "YO5\n");
+          uint64_t start = ReadIndirectAddress(
+              file, sizes, dwarf::ReadLEB128<uint64_t>(&data));
+          uint64_t end = ReadIndirectAddress(
+              file, sizes, dwarf::ReadLEB128<uint64_t>(&data));
+          sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, end - start,
+                                          name);
+          break;
+        }
+        case DW_RLE_startx_length: {
+          fprintf(stderr, "YO6\n");
+          uint64_t start = ReadIndirectAddress(
+              file, sizes, dwarf::ReadLEB128<uint64_t>(&data));
+          uint64_t length = dwarf::ReadLEB128<uint64_t>(&data);
+          sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, length,
+                                          name);
+          break;
+        }
+        case DW_RLE_offset_pair: {
+          uint64_t start = dwarf::ReadLEB128<uint64_t>(&data) + base_address;
+          uint64_t end = dwarf::ReadLEB128<uint64_t>(&data) + base_address;
+          fprintf(stderr, "YO7 %zx %zx\n", (size_t)start, (size_t)end);
+          sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, end - start,
+                                          name);
+          break;
+        }
+        case DW_RLE_base_address:
+        case DW_RLE_start_end:
+        case DW_RLE_start_length:
+          THROW("NYI");
+          break;
+      }
     }
   }
 }
@@ -1952,7 +2115,11 @@ static void ReadDWARFDebugInfo(
                           [](GeneralDIE* die, dwarf::AttrValue val) {
                             absl::optional<uint64_t> uint = val.ToUint();
                             if (!uint.has_value()) return;
-                            die->set_ranges(uint.value());
+                            if (val.form() == DW_FORM_rnglistx) {
+                              die->set_range_list(uint.value());
+                            } else {
+                              die->set_ranges(uint.value());
+                            }
                           });
   attr_reader.OnAttribute(DW_AT_start_scope,
                           [](GeneralDIE* die, dwarf::AttrValue val) {
@@ -1969,6 +2136,23 @@ static void ReadDWARFDebugInfo(
     GeneralDIE compileunit_die;
     attr_reader.ReadAttributes(&die_reader, &compileunit_die);
     std::string compileunit_name = std::string(compileunit_die.name());
+
+      if (abbrev.tag == DW_TAG_compile_unit) {
+        // For the compilation unit DIE, some attributes are "special" in the
+        // sense that they influence how subsequent attributes are interpreted. We
+        // check for these here, regardless of our caller's interest in them.
+        switch (attr.name) {
+          case DW_AT_addr_base:
+            reader->unit_sizes_.SetAddrBase(value.GetUint());
+            break;
+          case DW_AT_str_offsets_base:
+            reader->unit_sizes_.SetStrOffsetsBase(value.GetUint());
+            break;
+          case DW_AT_rnglists_base:
+            reader->unit_sizes_.SetRangeListsBase(value.GetUint());
+            break;
+        }
+      }
 
     if (compileunit_die.has_stmt_list()) {
       uint64_t stmt_list = compileunit_die.stmt_list();

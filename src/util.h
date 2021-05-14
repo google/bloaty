@@ -133,13 +133,14 @@ template <class T> constexpr T ByteSwap(T val) {
     return _BS<sizeof(T)>(val);
 }
 
-template <class T> T ReadFixed(absl::string_view *data) {
-  T val;
-  if (data->size() < sizeof(T)) {
+template <class T, size_t N = sizeof(T)> T ReadFixed(absl::string_view *data) {
+  static_assert(N <= sizeof(N), "N too big for this data type");
+  T val = 0;
+  if (data->size() < N) {
     THROW("premature EOF reading fixed-length data");
   }
-  memcpy(&val, data->data(), sizeof(T));
-  data->remove_prefix(sizeof(T));
+  memcpy(&val, data->data(), N);
+  data->remove_prefix(N);
   return val;
 }
 
