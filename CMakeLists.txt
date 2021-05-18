@@ -14,7 +14,6 @@ option(BLOATY_ENABLE_RE2 "Enable the support for regular expression functions." 
 
 if(UNIX)
 find_package(PkgConfig)
-if(PKG_CONFIG_FOUND)
 if(BLOATY_ENABLE_RE2)
   pkg_search_module(RE2 re2)
 endif()
@@ -42,9 +41,6 @@ if (ZLIB_FOUND)
   MESSAGE(STATUS "System zlib found, using")
 else()
   MESSAGE(STATUS "System zlib not found, using bundled version")
-endif()
-else()
-  MESSAGE(STATUS "pkg-config not found, using bundled dependencies")
 endif()
 endif()
 
