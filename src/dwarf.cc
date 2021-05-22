@@ -1730,7 +1730,7 @@ void AddDIE(const dwarf::File& file, const std::string& name,
     // debug_ranges.
     if (die.ranges && die.ranges->IsUint()) {
       ranges_offset = die.ranges->GetUint(die_reader);
-    } else if (die.start_scope) {
+    } else if (die.start_scope && die.start_scope->IsUint()) {
       ranges_offset = die.start_scope->GetUint(die_reader);
     }
 
