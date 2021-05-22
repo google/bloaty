@@ -1,0 +1,8 @@
+sections	vmsize	filesize
+.rdata	8236	8704
+.text	5340	5632
+.data	5624	512
+.pdata	588	1024
+[PE Headers]	696	696
+.reloc	52	512
+[Unmapped]	0	328
