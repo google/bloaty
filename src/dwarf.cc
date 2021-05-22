@@ -467,44 +467,6 @@ string_view GetLocationListRange(CompilationUnitSizes sizes,
   return available.substr(0, list.read_offset() - available.data());
 }
 
-
-// RangeList ///////////////////////////////////////////////////////////////////
-
-// Code for reading entries out of a range list.
-// For the moment we only care about finding the bounds of a list given its
-// offset, so we don't actually vend any of the data.
-
-class RangeList {
- public:
-  RangeList(CompilationUnitSizes sizes, string_view data)
-      : sizes_(sizes), remaining_(data) {}
-
-  const char* read_offset() const { return remaining_.data(); }
-  bool NextEntry();
-
- private:
-  CompilationUnitSizes sizes_;
-  string_view remaining_;
-};
-
-bool RangeList::NextEntry() {
-  uint64_t start, end;
-  start = sizes_.ReadAddress(&remaining_);
-  end = sizes_.ReadAddress(&remaining_);
-  if (start == 0 && end == 0) {
-    return false;
-  }
-  return true;
-}
-
-string_view GetRangeListRange(CompilationUnitSizes sizes,
-                              string_view available) {
-  RangeList list(sizes, available);
-  while (list.NextEntry()) {
-  }
-  return available.substr(0, list.read_offset() - available.data());
-}
-
 // DIEReader ///////////////////////////////////////////////////////////////////
 
 // Reads a sequence of DWARF DIE's (Debugging Information Entries) from the
@@ -1016,6 +978,7 @@ bool DIEReader::ReadCompilationUnitHeader() {
 
   if (unit_sizes_.dwarf_version() == 5) {
     uint8_t unit_type = ReadFixed<uint8_t>(&remaining_);
+    (void)unit_type;  // We don't use this currently.
     unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
     debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
   } else {
@@ -1088,7 +1051,23 @@ void DIEReader::ReadAttributes(T&& func) {
   }
 }
 
-// DWARF form parsing //////////////////////////////////////////////////////////
+// RangeList ///////////////////////////////////////////////////////////////////
+
+void ReadRangeList(const DIEReader& die_reader, uint64_t low_pc,
+                   string_view name, RangeSink* sink, string_view* data) {
+  std::string name_str(name);
+  while (true) {
+    uint64_t start, end;
+    start = die_reader.unit_sizes().ReadAddress(data);
+    end = die_reader.unit_sizes().ReadAddress(data);
+    if (start == 0 && end == 0) {
+      return;
+    }
+    uint64_t size = end - start;
+    sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
+                                    name_str);
+  }
+}
 
 // LineInfoReader //////////////////////////////////////////////////////////////
 
@@ -1593,13 +1572,14 @@ void AddDIE(const dwarf::File& file, const std::string& name,
             const GeneralDIE& die, const SymbolTable& symtab,
             const DualMap& symbol_map, const dwarf::DIEReader& die_reader,
             RangeSink* sink) {
+  uint64_t low_pc = 0;
   // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
   // functions).
   if (die.low_pc && die.low_pc->IsUint() && die.high_pc &&
       die.high_pc->IsUint() &&
       dwarf::IsValidDwarfAddress(die.low_pc->GetUint(die_reader),
                                  die_reader.unit_sizes().address_size())) {
-    uint64_t low_pc = die.low_pc->GetUint(die_reader);
+    low_pc = die.low_pc->GetUint(die_reader);
     uint64_t high_pc = die.high_pc->GetUint(die_reader);
 
     // It appears that some compilers make high_pc a size, and others make it an
@@ -1736,9 +1716,11 @@ void AddDIE(const dwarf::File& file, const std::string& name,
 
     if (ranges_offset != UINT64_MAX) {
       if (ranges_offset < file.debug_ranges.size()) {
-        absl::string_view ranges_range = file.debug_ranges.substr(ranges_offset);
-        ranges_range = GetRangeListRange(die_reader.unit_sizes(), ranges_range);
-        sink->AddFileRange("dwarf_debugrange", name, ranges_range);
+        absl::string_view data = file.debug_ranges.substr(ranges_offset);
+        const char* start = data.data();
+        ReadRangeList(die_reader, low_pc, name, sink, &data);
+        string_view all(start, data.data() - start);
+        sink->AddFileRange("dwarf_debugrange", name, all);
       } else if (verbose_level > 0) {
         fprintf(stderr,
                 "bloaty: warning: DWARF debug range out of range, "
