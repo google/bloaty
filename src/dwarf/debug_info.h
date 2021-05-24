@@ -223,11 +223,10 @@ class CUIter {
 
  private:
   friend class InfoReader;
-  CUIter(const File& dwarf, InfoReader::Section section, absl::string_view next_unit)
-      : dwarf_(dwarf), section_(section), next_unit_(next_unit) {}
+  CUIter(InfoReader::Section section, absl::string_view next_unit)
+      : section_(section), next_unit_(next_unit) {}
 
   // Data for the next compilation unit.
-  const File& dwarf_;
   InfoReader::Section section_;
   absl::string_view next_unit_;
 };

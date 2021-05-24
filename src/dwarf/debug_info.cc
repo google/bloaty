@@ -89,7 +89,7 @@ CUIter InfoReader::GetCUIter(Section section, uint64_t offset) {
   }
 
   SkipBytes(offset, &data);
-  return CUIter(dwarf_, section, data);
+  return CUIter(section, data);
 }
 
 bool CUIter::NextCU(InfoReader& reader, CU* cu) {
@@ -104,7 +104,7 @@ bool CUIter::NextCU(InfoReader& reader, CU* cu) {
   unit_sizes.ReadDWARFVersion(&data_range);
 
   if (unit_sizes.dwarf_version() > 5) {
-    THROWF("Data is in DWARF $1 format which we don't understand",
+    THROWF("Data is in DWARF $0 format which we don't understand",
            unit_sizes.dwarf_version());
   }
 
