@@ -134,27 +134,11 @@ class CompilationUnitSizes {
   // DWARF version of this unit.
   uint8_t dwarf_version() const { return dwarf_version_; }
 
-  uint64_t addr_base() const { return addr_base_; }
-  uint64_t str_offsets_base() const { return str_offsets_base_; }
-  uint64_t range_lists_base() const { return range_lists_base_; }
-
   void SetAddressSize(uint8_t address_size) {
     if (address_size != 4 && address_size != 8) {
       THROWF("Unexpected address size: $0", address_size);
     }
     address_size_ = address_size;
-  }
-
-  void SetAddrBase(uint64_t addr_base) {
-    addr_base_ = addr_base;
-  }
-
-  void SetStrOffsetsBase(uint64_t str_offsets_base) {
-    str_offsets_base_ = str_offsets_base;
-  }
-
-  void SetRangeListsBase(uint64_t range_lists_base) {
-    range_lists_base_ = range_lists_base;
   }
 
   // To allow this as the key in a map.
@@ -179,6 +163,16 @@ class CompilationUnitSizes {
       return ReadFixed<uint64_t>(data);
     } else if (address_size_ == 4) {
       return ReadFixed<uint32_t>(data);
+    } else {
+      BLOATY_UNREACHABLE();
+    }
+  }
+
+  uint64_t MaxAddress() const {
+    if (address_size_ == 8) {
+      return 0xffffffffffffffff;
+    } else if (address_size_ == 4) {
+      return 0xffffffff;
     } else {
       BLOATY_UNREACHABLE();
     }
@@ -218,9 +212,6 @@ class CompilationUnitSizes {
   uint16_t dwarf_version_;
   bool dwarf64_;
   uint8_t address_size_;
-  uint64_t addr_base_ = 0;
-  uint64_t str_offsets_base_ = 0;
-  uint64_t range_lists_base_ = 0;
 };
 
 
@@ -239,7 +230,7 @@ class CompilationUnitSizes {
 class AbbrevTable {
  public:
   // Reads abbreviations until a terminating abbreviation is seen.
-  string_view ReadAbbrevs(string_view data);
+  void ReadAbbrevs(string_view data);
 
   // In a DWARF abbreviation, each attribute has a name and a form.
   struct Attribute {
@@ -256,6 +247,7 @@ class AbbrevTable {
   };
 
   bool IsEmpty() const { return abbrev_.empty(); }
+  string_view abbrev_data() const { return abbrev_data_; }
 
   // Looks for an abbreviation with the given code.  Returns true if the lookup
   // succeeded.
@@ -268,20 +260,24 @@ class AbbrevTable {
       return false;
     }
   }
+  
 
  private:
   // Keyed by abbreviation code.
   // Generally we expect these to be small, so we could almost use a vector<>.
   // But you never know what crazy input data is going to do...
   std::unordered_map<uint32_t, Abbrev> abbrev_;
+  string_view abbrev_data_;
 };
 
-string_view AbbrevTable::ReadAbbrevs(string_view data) {
+void AbbrevTable::ReadAbbrevs(string_view data) {
+  const char* start = data.data();
   while (true) {
     uint32_t code = ReadLEB128<uint32_t>(&data);
 
     if (code == 0) {
-      return data;  // Terminator entry.
+      abbrev_data_ = string_view(start, data.data() - start);
+      return;
     }
 
     Abbrev& abbrev = abbrev_[code];
@@ -469,22 +465,18 @@ string_view GetLocationListRange(CompilationUnitSizes sizes,
 
 // DIEReader ///////////////////////////////////////////////////////////////////
 
-// Reads a sequence of DWARF DIE's (Debugging Information Entries) from the
-// .debug_info or .debug_types section of a binary.
-//
-// Each DIE contains a tag and a set of attribute/value pairs.  We rely on the
-// abbreviations in an AbbrevTable to decode the DIEs.
+class CUIter;
+class CU;
+class CUIter;
+class DIEReader;
 
-class DIEReader {
+class InfoReader {
  public:
-  // Constructs a new DIEReader.  Cannot be used until you call one of the
-  // Seek() methods below.
-  DIEReader(const File& file) : dwarf_(file) {}
-  DIEReader(const DIEReader&) = delete;
-  DIEReader& operator=(const DIEReader&) = delete;
+  InfoReader(const File& file) : dwarf_(file) {}
+  InfoReader(const InfoReader&) = delete;
+  InfoReader& operator=(const InfoReader&) = delete;
 
-  // Returns true if we are at the end of DIEs for this compilation unit.
-  bool IsEof() const { return state_ == State::kEof; }
+  const File& dwarf() const { return dwarf_; }
 
   // DIEs exist in both .debug_info and .debug_types.
   enum class Section {
@@ -492,60 +484,46 @@ class DIEReader {
     kDebugTypes
   };
 
-  // Seeks to the overall start or the start of a specific compilation unit.
-  // Note that |header_offset| is the offset of the compilation unit *header*,
-  // not the offset of the first DIE.
-  bool SeekToCompilationUnit(Section section, uint64_t header_offset);
-  bool SeekToStart(Section section) {
-    return SeekToCompilationUnit(section, 0);
-  }
+  CUIter GetCUIter(Section section, uint64_t offset = 0);
 
-  bool NextCompilationUnit();
+ private:
+  friend class CUIter;
+  const File& dwarf_;
 
-  // Advances to the next overall DIE, ignoring whether it happens to be a
-  // child, a sibling, or an uncle/aunt.  Returns false at error or EOF.
-  bool NextDIE();
+  std::unordered_map<uint64_t, std::string> stmt_list_map_;
 
-  // Skips children of the current DIE, so that the next call to NextDIE()
-  // will read the next sibling (or parent, if no sibling exists).
-  bool SkipChildren();
+  // All of the AbbrevTables we've read from .debug_abbrev, indexed by their
+  // offset within .debug_abbrev.
+  std::unordered_map<uint64_t, AbbrevTable> abbrev_tables_;
+};
 
-  const AbbrevTable::Abbrev& GetAbbrev() const {
-    assert(!IsEof());
-    return *current_abbrev_;
-  }
+class CUIter {
+ public:
+  bool NextCU(InfoReader& reader, CU* cu);
 
-  // Returns the current read offset within the current compilation unit.
-  int64_t GetReadOffset() const { return remaining_.data() - start_; }
+ private:
+  friend class InfoReader;
+  CUIter(const File& dwarf, InfoReader::Section section, string_view next_unit)
+      : dwarf_(dwarf), section_(section), next_unit_(next_unit) {}
 
-  int GetDepth() const { return depth_; }
+  // Data for the next compilation unit.
+  const File& dwarf_;
+  InfoReader::Section section_;
+  string_view next_unit_;
+};
 
-  // Returns the tag of the current DIE.
-  // Requires that ReadCode() has been called at least once.
-  uint16_t GetTag() const { return GetAbbrev().tag; }
+class CU {
+ public:
+  DIEReader GetDIEReader();
 
-  // Returns whether the current DIE has a child.
-  // Requires that ReadCode() has been called at least once.
-  bool HasChild() const { return GetAbbrev().has_child; }
-
-  template <class T>
-  void ReadAttributes(T&& func);
-
-  const File& dwarf() const { return dwarf_; }
-
-  string_view unit_range() const { return unit_range_; }
+  const File& dwarf() const { return *dwarf_; }
   const CompilationUnitSizes& unit_sizes() const { return unit_sizes_; }
-  uint32_t abbrev_version() const { return abbrev_version_; }
-  uint64_t debug_abbrev_offset() const { return debug_abbrev_offset_; }
-
-  // If both compileunit_name and strp_sink are set, this will automatically
-  // call strp_sink->AddFileRange(compileunit_name, <string range>) for every
-  // DW_FORM_strp attribute encountered.  These strings occur in the .debug_str
-  // section.
-  void set_compileunit_name(absl::string_view name) {
-    unit_name_ = std::string(name);
-  }
-  void set_strp_sink(RangeSink* sink) { strp_sink_ = sink; }
+  const std::string& unit_name() const { return unit_name_; }
+  string_view unit_range() const { return unit_range_; }
+  uint64_t addr_base() const { return addr_base_; }
+  uint64_t str_offsets_base() const { return str_offsets_base_; }
+  uint64_t range_lists_base() const { return range_lists_base_; }
+  const AbbrevTable& unit_abbrev() const { return *unit_abbrev_; }
 
   void AddIndirectString(string_view range) const {
     if (strp_sink_) {
@@ -553,70 +531,61 @@ class DIEReader {
     }
   }
 
-  CompilationUnitSizes* mutable_unit_sizes() { return &unit_sizes_; }
+  void set_strp_sink(RangeSink* strp_sink) { strp_sink_ = strp_sink; }
 
  private:
-  // Internal APIs.
+  friend class CUIter;
+  friend class DIEReader;
 
-  bool ReadCompilationUnitHeader();
-  bool ReadCode();
-  void SkipNullEntries();
+  const File* dwarf_;
 
-  enum class State {
-    kReadyToReadAttributes,
-    kReadyToNext,
-    kEof,
-  } state_;
-
-  std::string error_;
-
-  const File& dwarf_;
-  RangeSink* strp_sink_ = nullptr;
-  const char *start_ = nullptr;
-
-  // Abbreviation for the current entry.
-  const AbbrevTable::Abbrev* current_abbrev_;
-
-  // Our current read position.
-  string_view remaining_;
-  uint64_t sibling_offset_;
-  int depth_ = 0;
-
-  // Data for the next compilation unit.
-  string_view next_unit_;
-
-  // All of the AbbrevTables we've read from .debug_abbrev, indexed by their
-  // offset within .debug_abbrev.
-  std::unordered_map<uint64_t, AbbrevTable> abbrev_tables_;
-
-  // Whether we are in .debug_types or .debug_info.
-  Section section_;
-
-  // Information about the current compilation unit.
-  uint64_t debug_abbrev_offset_;
-  std::string unit_name_;
-  string_view unit_range_;
+  // Info that comes from the CU header.
+  string_view unit_range_;  // Range of the entire CU.
+  string_view data_range_;  // Range of data (excludes CU header).
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
-
-  // A small integer that uniquely identifies the combination of unit_abbrev_
-  // and unit_sizes_.  Attribute readers use this to know when they can reuse an
-  // existing (abbrev code) -> (Actions) mapping, since this table depends on
-  // both the current abbrev. table and the sizes.
-  uint32_t abbrev_version_;
-
-  std::map<std::pair<AbbrevTable*, CompilationUnitSizes>, uint32_t>
-      abbrev_versions_;
 
   // Only for .debug_types
   uint64_t unit_type_signature_;
   uint64_t unit_type_offset_;
+
+  // Info that comes from the top-level DIE.
+  std::string unit_name_;
+  uint64_t addr_base_ = 0;
+  uint64_t str_offsets_base_ = 0;
+  uint64_t range_lists_base_ = 0;
+
+  RangeSink* strp_sink_ = nullptr;
 };
+
+class DIEReader {
+ public:
+  // Abbreviation for the current entry.
+  const AbbrevTable::Abbrev* ReadCode(const CU& cu);
+
+  template <class T>
+  void ReadAttributes(const CU& cu, const AbbrevTable::Abbrev* code, T&& func);
+
+  void SkipChildren(const CU& cu, const AbbrevTable::Abbrev* code);
+
+ private:
+  // Internal APIs.
+  friend class CU;
+
+  DIEReader(string_view data) : remaining_(data) {}
+
+  void SkipNullEntries();
+
+  // Our current read position.
+  string_view remaining_;
+  int depth_ = 0;
+};
+
+DIEReader CU::GetDIEReader() { return DIEReader(data_range_); }
 
 class AttrValue {
  public:
-  static AttrValue ParseAttr(const DIEReader &reader, uint8_t form,
-                             string_view *data);
+  static AttrValue ParseAttr(const CU& cu, uint8_t form, string_view* data);
 
   AttrValue(const AttrValue &) = default;
   AttrValue &operator=(const AttrValue &) = default;
@@ -629,9 +598,9 @@ class AttrValue {
     return type_ == Type::kString || type_ == Type::kUnresolvedString;
   }
 
-  absl::optional<uint64_t> ToUint(const DIEReader& reader) const {
-    if (IsUint()) return GetUint(reader);
-    string_view str = GetString(reader);
+  absl::optional<uint64_t> ToUint(const CU& cu) const {
+    if (IsUint()) return GetUint(cu);
+    string_view str = GetString(cu);
     switch (str.size()) {
       case 1:
         return ReadFixed<uint8_t>(&str);
@@ -645,18 +614,18 @@ class AttrValue {
     return absl::nullopt;
   }
 
-  uint64_t GetUint(const DIEReader& reader) const {
+  uint64_t GetUint(const CU& cu) const {
     if (type_ == Type::kUnresolvedUint) {
-      return ResolveIndirectAddress(reader);
+      return ResolveIndirectAddress(cu);
     } else {
       assert(type_ == Type::kUint);
       return uint_;
     }
   }
 
-  string_view GetString(const DIEReader& reader) const {
+  string_view GetString(const CU& cu) const {
     if (type_ == Type::kUnresolvedString) {
-      return ResolveDoubleIndirectString(reader);
+      return ResolveDoubleIndirectString(cu);
     } else {
       assert(type_ == Type::kString);
       return string_;
@@ -680,7 +649,7 @@ class AttrValue {
  private:
   explicit AttrValue(uint64_t val) : uint_(val), type_(Type::kUint) {}
   explicit AttrValue(string_view val) : string_(val), type_(Type::kString) {}
-  
+
   // Some attribute values remain unresolved after being parsed.
   // We have to delay the resolution of some indirect values because they are
   // dependent on bases that come after it in the sequence of attributes, eg.
@@ -728,27 +697,180 @@ class AttrValue {
   static string_view ReadBlock(string_view* data);
   static string_view ReadVariableBlock(string_view* data);
   template <class D>
-  static string_view ReadIndirectString(const DIEReader &reader,
-                                        string_view *data);
-  static string_view ResolveIndirectString(const DIEReader &reader,
-                                           uint64_t ofs);
+  static string_view ReadIndirectString(const CU& cu, string_view* data);
+  static string_view ResolveIndirectString(const CU& cu, uint64_t ofs);
 
-  string_view ResolveDoubleIndirectString(const DIEReader &reader) const;
-  uint64_t ResolveIndirectAddress(const DIEReader& reader) const;
+  string_view ResolveDoubleIndirectString(const CU &cu) const;
+  uint64_t ResolveIndirectAddress(const CU& cu) const;
 };
 
-uint64_t ReadIndirectAddress(const DIEReader& reader, uint64_t val) {
-  string_view addrs = reader.dwarf().debug_addr;
-  const dwarf::CompilationUnitSizes& sizes = reader.unit_sizes();
+uint64_t ReadIndirectAddress(const CU& cu, uint64_t val) {
+  string_view addrs = cu.dwarf().debug_addr;
+  const dwarf::CompilationUnitSizes& sizes = cu.unit_sizes();
   switch (sizes.address_size()) {
     case 4:
-      SkipBytes((val * 4) + sizes.addr_base(), &addrs);
+      SkipBytes((val * 4) + cu.addr_base(), &addrs);
       return ReadFixed<uint32_t>(&addrs);
     case 8:
-      SkipBytes((val * 8) + sizes.addr_base(), &addrs);
+      SkipBytes((val * 8) + cu.addr_base(), &addrs);
       return ReadFixed<uint64_t>(&addrs);
     default:
       BLOATY_UNREACHABLE();
+  }
+}
+
+CUIter InfoReader::GetCUIter(Section section, uint64_t offset) {
+  string_view data;
+
+  if (section == Section::kDebugInfo) {
+    data = dwarf_.debug_info;
+  } else {
+    data = dwarf_.debug_types;
+  }
+
+  SkipBytes(offset, &data);
+  return CUIter(dwarf_, section, data);
+}
+
+bool CUIter::NextCU(InfoReader& reader, CU* cu) {
+  if (next_unit_.empty()) return false;
+
+  string_view unit_range = next_unit_;
+  string_view data_range = cu->unit_sizes_.ReadInitialLength(&next_unit_);
+  cu->unit_range_ = unit_range.substr(
+      0, data_range.size() + (data_range.data() - unit_range.data()));
+
+  CompilationUnitSizes unit_sizes;
+  unit_sizes.ReadDWARFVersion(&data_range);
+
+  if (unit_sizes.dwarf_version() > 5) {
+    THROWF("Data is in DWARF $1 format which we don't understand",
+           unit_sizes.dwarf_version());
+  }
+
+  uint64_t debug_abbrev_offset;
+
+  if (unit_sizes.dwarf_version() == 5) {
+    uint8_t unit_type = ReadFixed<uint8_t>(&data_range);
+    (void)unit_type;  // We don't use this currently.
+    unit_sizes.SetAddressSize(ReadFixed<uint8_t>(&data_range));
+    debug_abbrev_offset = unit_sizes.ReadDWARFOffset(&data_range);
+  } else {
+    debug_abbrev_offset = unit_sizes.ReadDWARFOffset(&data_range);
+    unit_sizes.SetAddressSize(ReadFixed<uint8_t>(&data_range));
+
+    if (section_ == InfoReader::Section::kDebugTypes) {
+      cu->unit_type_signature_ = ReadFixed<uint64_t>(&data_range);
+      cu->unit_type_offset_ = unit_sizes.ReadDWARFOffset(&data_range);
+    }
+  }
+
+  cu->unit_abbrev_ = &reader.abbrev_tables_[debug_abbrev_offset];
+
+  // If we haven't already read abbreviations for this debug_abbrev_offset_, we
+  // need to do so now.
+  if (cu->unit_abbrev_->IsEmpty()) {
+    string_view abbrev_data = reader.dwarf_.debug_abbrev;
+    SkipBytes(debug_abbrev_offset, &abbrev_data);
+    cu->unit_abbrev_->ReadAbbrevs(abbrev_data);
+  }
+
+  cu->dwarf_ = &reader.dwarf_;
+  cu->unit_sizes_ = unit_sizes;
+  cu->data_range_ = data_range;
+
+  // We now read the root-level DIE in order to populate these base addresses
+  // on which other attributes depend.
+  DIEReader die_reader = cu->GetDIEReader();
+  const auto* abbrev = die_reader.ReadCode(*cu);
+  absl::optional<uint64_t> stmt_list;
+  cu->unit_name_.clear();
+  die_reader.ReadAttributes(
+      *cu, abbrev, [cu, &stmt_list](uint16_t tag, dwarf::AttrValue value) {
+        switch (tag) {
+          case DW_AT_name:
+            cu->unit_name_ = std::string(value.GetString(*cu));
+            break;
+          case DW_AT_stmt_list:
+            stmt_list = value.ToUint(*cu);
+            break;
+          case DW_AT_addr_base:
+            cu->addr_base_ = value.GetUint(*cu);
+            break;
+          case DW_AT_str_offsets_base:
+            cu->str_offsets_base_ = value.GetUint(*cu);
+            break;
+          case DW_AT_rnglists_base:
+            cu->range_lists_base_ = value.GetUint(*cu);
+            break;
+        }
+      });
+
+  if (stmt_list) {
+    if (cu->unit_name_.empty()) {
+      auto iter = reader.stmt_list_map_.find(*stmt_list);
+      if (iter != reader.stmt_list_map_.end()) {
+        cu->unit_name_ = iter->second;
+      }
+    } else {
+      (reader.stmt_list_map_)[*stmt_list] = cu->unit_name_;
+    }
+  }
+
+  return true;
+}
+
+void DIEReader::SkipNullEntries() {
+  while (!remaining_.empty() && remaining_[0] == 0) {
+    // null entry terminates a chain of sibling entries.
+    remaining_.remove_prefix(1);
+    depth_--;
+  }
+}
+
+const AbbrevTable::Abbrev* DIEReader::ReadCode(const CU& cu) {
+  SkipNullEntries();
+  if (remaining_.empty()) {
+    return nullptr;
+  }
+  uint32_t code = ReadLEB128<uint32_t>(&remaining_);
+  const AbbrevTable::Abbrev* ret;
+  if (!cu.unit_abbrev_->GetAbbrev(code, &ret)) {
+    THROW("couldn't find abbreviation for code");
+  }
+  if (ret->has_child) {
+    depth_++;
+  }
+  return ret;
+}
+
+void DIEReader::SkipChildren(const CU& cu, const AbbrevTable::Abbrev* abbrev) {
+  if (!abbrev->has_child) {
+    return;
+  }
+
+  int target_depth = depth_ - 1;
+  SkipNullEntries();
+  while (depth_ > target_depth) {
+    // TODO(haberman): use DW_AT_sibling to optimize skipping when it is
+    // available.
+    abbrev = ReadCode(cu);
+    if (!abbrev) {
+      return;
+    }
+    ReadAttributes(cu, abbrev, [](uint16_t, dwarf::AttrValue) {});
+    SkipNullEntries();
+  }
+}
+
+// Reads all attributes for this DIE, storing the ones we were expecting.
+template <class T>
+void DIEReader::ReadAttributes(const CU& cu, const AbbrevTable::Abbrev* abbrev,
+                               T&& func) {
+  for (auto attr : abbrev->attr) {
+    AttrValue value = AttrValue::ParseAttr(cu, attr.form, &remaining_);
+    value.SetForm(attr.form);
+    func(attr.name, value);
   }
 }
 
@@ -763,51 +885,48 @@ string_view AttrValue::ReadVariableBlock(string_view* data) {
   return ReadBytes(len, data);
 }
 
-string_view AttrValue::ResolveIndirectString(const DIEReader &reader,
-                                             uint64_t ofs) {
-  StringTable table(reader.dwarf().debug_str);
+string_view AttrValue::ResolveIndirectString(const CU& cu, uint64_t ofs) {
+  StringTable table(cu.dwarf().debug_str);
   string_view ret = table.ReadEntry(ofs);
-  reader.AddIndirectString(ret);
+  cu.AddIndirectString(ret);
   return ret;
 }
 
 template <class D>
-string_view AttrValue::ReadIndirectString(const DIEReader &reader,
-                                          string_view *data) {
-  return ResolveIndirectString(reader, ReadFixed<D>(data));
+string_view AttrValue::ReadIndirectString(const CU& cu, string_view* data) {
+  return ResolveIndirectString(cu, ReadFixed<D>(data));
 }
 
 string_view
-AttrValue::ResolveDoubleIndirectString(const DIEReader &reader) const {
+AttrValue::ResolveDoubleIndirectString(const CU &cu) const {
   uint64_t ofs = uint_;
-  string_view offsets = reader.dwarf().debug_str_offsets;
+  string_view offsets = cu.dwarf().debug_str_offsets;
   uint64_t ofs2;
-  if (reader.unit_sizes().dwarf64()) {
-    SkipBytes((ofs * 8) + reader.unit_sizes().str_offsets_base(), &offsets);
+  if (cu.unit_sizes().dwarf64()) {
+    SkipBytes((ofs * 8) + cu.str_offsets_base(), &offsets);
     ofs2 = ReadFixed<uint64_t>(&offsets);
   } else {
-    SkipBytes((ofs * 4) + reader.unit_sizes().str_offsets_base(), &offsets);
+    SkipBytes((ofs * 4) + cu.str_offsets_base(), &offsets);
     ofs2 = ReadFixed<uint32_t>(&offsets);
   }
-  StringTable table(reader.dwarf().debug_str);
+  StringTable table(cu.dwarf().debug_str);
   string_view ret = table.ReadEntry(ofs2);
-  reader.AddIndirectString(ret);
+  cu.AddIndirectString(ret);
   return ret;
 }
 
-uint64_t AttrValue::ResolveIndirectAddress(const DIEReader& reader) const {
-  return ReadIndirectAddress(reader, uint_);
+uint64_t AttrValue::ResolveIndirectAddress(const CU& cu) const {
+  return ReadIndirectAddress(cu, uint_);
 }
 
-AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
-                               string_view *data) {
+AttrValue AttrValue::ParseAttr(const CU& cu, uint8_t form, string_view* data) {
   switch (form) {
     case DW_FORM_indirect: {
       uint16_t indirect_form = ReadLEB128<uint16_t>(data);
       if (indirect_form == DW_FORM_indirect) {
         THROW("indirect attribute has indirect form type");
       }
-      return ParseAttr(reader, indirect_form, data);
+      return ParseAttr(cu, indirect_form, data);
     }
     case DW_FORM_ref1:
       return AttrValue(ReadFixed<uint8_t>(data));
@@ -839,7 +958,7 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
       return AttrValue::UnresolvedUint(ReadLEB128<uint64_t>(data));
     case DW_FORM_addr:
     address_size:
-      switch (reader.unit_sizes().address_size()) {
+      switch (cu.unit_sizes().address_size()) {
         case 4:
           return AttrValue(ReadFixed<uint32_t>(data));
         case 8:
@@ -848,12 +967,12 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
           BLOATY_UNREACHABLE();
       }
     case DW_FORM_ref_addr:
-      if (reader.unit_sizes().dwarf_version() <= 2) {
+      if (cu.unit_sizes().dwarf_version() <= 2) {
         goto address_size;
       }
       ABSL_FALLTHROUGH_INTENDED;
     case DW_FORM_sec_offset:
-      if (reader.unit_sizes().dwarf64()) {
+      if (cu.unit_sizes().dwarf64()) {
         return AttrValue(ReadFixed<uint64_t>(data));
       } else {
         return AttrValue(ReadFixed<uint32_t>(data));
@@ -872,10 +991,10 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
     case DW_FORM_string:
       return AttrValue(ReadNullTerminated(data));
     case DW_FORM_strp:
-      if (reader.unit_sizes().dwarf64()) {
-        return AttrValue(ReadIndirectString<uint64_t>(reader, data));
+      if (cu.unit_sizes().dwarf64()) {
+        return AttrValue(ReadIndirectString<uint64_t>(cu, data));
       } else {
-        return AttrValue(ReadIndirectString<uint32_t>(reader, data));
+        return AttrValue(ReadIndirectString<uint32_t>(cu, data));
       }
     case DW_FORM_data1:
       return AttrValue(ReadBytes(1, data));
@@ -903,169 +1022,24 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
   }
 }
 
-void DIEReader::SkipNullEntries() {
-  while (!remaining_.empty() && remaining_[0] == 0) {
-    // null entry terminates a chain of sibling entries.
-    remaining_.remove_prefix(1);
-    depth_--;
-  }
-}
-
-bool DIEReader::ReadCode() {
-  SkipNullEntries();
-  if (remaining_.empty()) {
-    state_ = State::kEof;
-    return false;
-  }
-  uint32_t code = ReadLEB128<uint32_t>(&remaining_);
-  if (!unit_abbrev_->GetAbbrev(code, &current_abbrev_)) {
-    THROW("couldn't find abbreviation for code");
-  }
-  state_ = State::kReadyToReadAttributes;
-  sibling_offset_ = 0;
-
-  if (HasChild()) {
-    depth_++;
-  }
-
-  return true;
-}
-
-bool DIEReader::NextCompilationUnit() {
-  return ReadCompilationUnitHeader();
-}
-
-bool DIEReader::NextDIE() {
-  if (state_ == State::kEof) {
-    return false;
-  }
-
-  assert(state_ == State::kReadyToNext);
-  return ReadCode();
-}
-
-bool DIEReader::SeekToCompilationUnit(Section section, uint64_t offset) {
-  section_ = section;
-
-  if (section == Section::kDebugInfo) {
-    next_unit_ = dwarf_.debug_info;
-  } else {
-    next_unit_ = dwarf_.debug_types;
-  }
-
-  start_ = next_unit_.data();
-  SkipBytes(offset, &next_unit_);
-  return ReadCompilationUnitHeader();
-}
-
-bool DIEReader::ReadCompilationUnitHeader() {
-  if (next_unit_.empty()) {
-    state_ = State::kEof;
-    return false;
-  }
-
-  unit_range_ = next_unit_;
-  remaining_ = unit_sizes_.ReadInitialLength(&next_unit_);
-  unit_range_ = unit_range_.substr(
-      0, remaining_.size() + (remaining_.data() - unit_range_.data()));
-
-  unit_sizes_.ReadDWARFVersion(&remaining_);
-
-  if (unit_sizes_.dwarf_version() > 5) {
-    THROWF("Data for $0 is in DWARF $1 format which we don't understand",
-        unit_name_, unit_sizes_.dwarf_version());
-  }
-
-  if (unit_sizes_.dwarf_version() == 5) {
-    uint8_t unit_type = ReadFixed<uint8_t>(&remaining_);
-    (void)unit_type;  // We don't use this currently.
-    unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
-    debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
-  } else {
-    debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
-    unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
-
-    if (section_ == Section::kDebugTypes) {
-      unit_type_signature_ = ReadFixed<uint64_t>(&remaining_);
-      unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
-    }
-  }
-
-  unit_abbrev_ = &abbrev_tables_[debug_abbrev_offset_];
-
-  // If we haven't already read abbreviations for this debug_abbrev_offset_, we
-  // need to do so now.
-  if (unit_abbrev_->IsEmpty()) {
-    string_view abbrev_data = dwarf_.debug_abbrev;
-    SkipBytes(debug_abbrev_offset_, &abbrev_data);
-    unit_abbrev_->ReadAbbrevs(abbrev_data);
-  }
-
-  auto abbrev_id = std::make_pair(unit_abbrev_, unit_sizes_);
-  auto insert_pair = abbrev_versions_.insert(
-      std::make_pair(abbrev_id, abbrev_versions_.size()));
-
-  // This will be either the newly inserted value or the existing one, if there
-  // was one.
-  abbrev_version_ = insert_pair.first->second;
-
-  return ReadCode();
-}
-
-bool DIEReader::SkipChildren() {
-  assert(state_ == State::kReadyToNext);
-  if (!HasChild()) {
-    return true;
-  }
-
-  int target_depth = depth_ - 1;
-  SkipNullEntries();
-  while (depth_ > target_depth) {
-    // TODO(haberman): use DW_AT_sibling to optimize skipping when it is
-    // available.
-    if (!NextDIE()) {
-      return false;
-    }
-    ReadAttributes([](uint16_t, dwarf::AttrValue) {});
-    SkipNullEntries();
-  }
-  return true;
-}
-
-// Reads all attributes for this DIE, storing the ones we were expecting.
-template <class T>
-void DIEReader::ReadAttributes(T&& func) {
-  assert(state_ == State::kReadyToReadAttributes);
-
-  for (auto attr : GetAbbrev().attr) {
-    AttrValue value = AttrValue::ParseAttr(*this, attr.form, &remaining_);
-    value.SetForm(attr.form);
-    func(attr.name, value);
-  }
-
-  if (remaining_.data() == nullptr) {
-    THROW("premature EOF reading DWARF attributes");
-  } else {
-    sibling_offset_ = 0;
-    state_ = State::kReadyToNext;
-  }
-}
-
 // RangeList ///////////////////////////////////////////////////////////////////
 
-void ReadRangeList(const DIEReader& die_reader, uint64_t low_pc,
-                   string_view name, RangeSink* sink, string_view* data) {
+void ReadRangeList(const CU& cu, uint64_t low_pc, string_view name,
+                   RangeSink* sink, string_view* data) {
   std::string name_str(name);
   while (true) {
     uint64_t start, end;
-    start = die_reader.unit_sizes().ReadAddress(data);
-    end = die_reader.unit_sizes().ReadAddress(data);
+    start = cu.unit_sizes().ReadAddress(data);
+    end = cu.unit_sizes().ReadAddress(data);
     if (start == 0 && end == 0) {
       return;
+    } else if (start == cu.unit_sizes().MaxAddress()) {
+      low_pc = end;
+    } else {
+      uint64_t size = end - start;
+      sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
+                                      name_str);
     }
-    uint64_t size = end - start;
-    sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
-                                    name_str);
   }
 }
 
@@ -1445,7 +1419,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
   class FilenameMap {
    public:
     FilenameMap(const dwarf::File& file)
-        : die_reader_(file),
+        : info_reader_(file),
           missing_("[DWARF is missing filename]") {}
 
     std::string GetFilename(uint64_t compilation_unit_offset) {
@@ -1457,39 +1431,27 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
     }
 
    private:
-    bool ReadName(string_view* name, uint64_t offset) {
-      auto sec = dwarf::DIEReader::Section::kDebugInfo;
-      if (!die_reader_.SeekToCompilationUnit(sec, offset) ||
-          die_reader_.GetTag() != DW_TAG_compile_unit) {
+    bool ReadName(std::string* name, uint64_t offset) {
+      auto sec = dwarf::InfoReader::Section::kDebugInfo;
+      dwarf::CUIter iter = info_reader_.GetCUIter(sec, offset);
+      dwarf::CU cu;
+      if (!iter.NextCU(info_reader_, &cu)) {
           return false;
       }
-
-      absl::optional<dwarf::AttrValue> attr;
-
-      die_reader_.ReadAttributes([&attr](uint16_t tag, dwarf::AttrValue data) {
-        if (tag == DW_AT_name && data.IsString()) {
-          attr = data;
-        }
-      });
-      
-      if (attr && attr->IsString()) {
-        *name = attr->GetString(die_reader_);
-        return true;
-      } else {
-        return false;
-      }
+      *name = cu.unit_name();
+      return true;
     }
 
     std::string LookupFilename(uint64_t compilation_unit_offset) {
-      string_view name;
+      std::string name;
       if (ReadName(&name, compilation_unit_offset)) {
-        return std::string(name);
+        return name;
       } else {
         return missing_;
       }
     }
 
-    dwarf::DIEReader die_reader_;
+    dwarf::InfoReader info_reader_;
     std::unordered_map<uint64_t, std::string> map_;
     std::string missing_;
   } map(file);
@@ -1511,107 +1473,112 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 }
 
 struct GeneralDIE {
-  absl::optional<dwarf::AttrValue> name;
-  absl::optional<dwarf::AttrValue> linkage_name;
-  absl::optional<dwarf::AttrValue> location;
-  absl::optional<dwarf::AttrValue> low_pc;
-  absl::optional<dwarf::AttrValue> high_pc;
-  absl::optional<dwarf::AttrValue> stmt_list;
-  absl::optional<dwarf::AttrValue> ranges;
-  absl::optional<dwarf::AttrValue> start_scope;
+  absl::optional<string_view> name;
+  absl::optional<string_view> linkage_name;
+  absl::optional<string_view> location_string;
+  absl::optional<uint64_t> location_uint64;
+  absl::optional<uint64_t> low_pc;
+  absl::optional<uint64_t> high_pc;
+  absl::optional<uint64_t> stmt_list;
+  absl::optional<uint64_t> rnglistx;
+  absl::optional<uint64_t> ranges;
+  absl::optional<uint64_t> start_scope;
 };
 
-void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, GeneralDIE *die) {
+void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
+                        GeneralDIE* die) {
   switch (tag) {
     case DW_AT_name:
-      die->name = val;
+      if (val.IsString()) {
+        die->name = val.GetString(cu);
+      }
       break;
     case DW_AT_linkage_name:
-      die->linkage_name = val;
+      if (val.IsString()) die->linkage_name = val.GetString(cu);
       break;
     case DW_AT_location:
-      die->location = val;
+      if (val.IsString()) {
+        die->location_string = val.GetString(cu);
+      } else {
+        die->location_uint64 = val.GetUint(cu);
+      }
       break;
     case DW_AT_low_pc:
-      die->low_pc = val;
+      if (auto uint = val.ToUint(cu)) {
+        die->low_pc = *uint;
+      }
       break;
     case DW_AT_high_pc:
-      die->high_pc = val;
+      if (auto uint = val.ToUint(cu)) {
+        die->high_pc = *uint;
+      }
       break;
     case DW_AT_stmt_list:
-      die->stmt_list = val;
+      if (auto uint = val.ToUint(cu)) {
+        die->stmt_list = *uint;
+      }
       break;
     case DW_AT_ranges:
-      die->ranges = val;
+      if (auto uint = val.ToUint(cu)) {
+        if (val.form() == DW_FORM_rnglistx) {
+          die->rnglistx = *uint;
+        } else {
+          die->ranges = *uint;
+        }
+      }
       break;
     case DW_AT_start_scope:
-      die->start_scope = val;
+      if (auto uint = val.ToUint(cu)) {
+        die->start_scope = *uint;
+      }
       break;
   }
 }
 
-class InlinesDIE {
- public:
-  bool has_stmt_list() const { return has_stmt_list_; }
-
-  uint64_t stmt_list() const { return stmt_list_; }
-
-  void set_stmt_list(uint64_t val) {
-    has_stmt_list_ = true;
-    stmt_list_ = val;
-  }
-
- private:
-  bool has_stmt_list_ = false;
-  uint64_t stmt_list_ = 0;
-};
-
 // To view DIEs for a given file, try:
 //   readelf --debug-dump=info foo.bin
-void AddDIE(const dwarf::File& file, const std::string& name,
-            const GeneralDIE& die, const SymbolTable& symtab,
-            const DualMap& symbol_map, const dwarf::DIEReader& die_reader,
+void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
+            const SymbolTable& symtab, const DualMap& symbol_map,
             RangeSink* sink) {
   uint64_t low_pc = 0;
   // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
   // functions).
-  if (die.low_pc && die.low_pc->IsUint() && die.high_pc &&
-      die.high_pc->IsUint() &&
-      dwarf::IsValidDwarfAddress(die.low_pc->GetUint(die_reader),
-                                 die_reader.unit_sizes().address_size())) {
-    low_pc = die.low_pc->GetUint(die_reader);
-    uint64_t high_pc = die.high_pc->GetUint(die_reader);
+  if (die.low_pc && die.high_pc &&
+      dwarf::IsValidDwarfAddress(*die.low_pc, cu.unit_sizes().address_size())) {
+    uint64_t high_pc = *die.high_pc;
+    low_pc = *die.low_pc;
 
     // It appears that some compilers make high_pc a size, and others make it an
     // address.
     if (high_pc >= low_pc) {
       high_pc -= low_pc;
     }
-    sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, name);
+
+    sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, cu.unit_name());
   }
 
   // Sometimes a DIE has a linkage_name, which we can look up in the symbol
   // table.
-  if (die.linkage_name && die.linkage_name->IsString()) {
-    auto it = symtab.find(die.linkage_name->GetString(die_reader));
+  if (die.linkage_name) {
+    auto it = symtab.find(*die.linkage_name);
     if (it != symtab.end()) {
       sink->AddVMRangeIgnoreDuplicate("dwarf_linkagename", it->second.first,
-                                      it->second.second, name);
+                                      it->second.second, cu.unit_name());
     }
   }
 
   // Sometimes the DIE has a "location", which gives the location as an address.
   // This parses a very small subset of the overall DWARF expression grammar.
-  if (die.location && die.location->IsString()) {
-    string_view location = die.location->GetString(die_reader);
-    if (location.size() == die_reader.unit_sizes().address_size() + 1 &&
+  if (die.location_string) {
+    string_view location = *die.location_string;
+    if (location.size() == cu.unit_sizes().address_size() + 1 &&
         location[0] == DW_OP_addr) {
       location.remove_prefix(1);
       uint64_t addr;
       // TODO(haberman): endian?
-      if (die_reader.unit_sizes().address_size() == 4) {
+      if (cu.unit_sizes().address_size() == 4) {
         addr = ReadFixed<uint32_t>(&location);
-      } else if (die_reader.unit_sizes().address_size() == 8) {
+      } else if (cu.unit_sizes().address_size() == 8) {
         addr = ReadFixed<uint64_t>(&location);
       } else {
         BLOATY_UNREACHABLE();
@@ -1621,25 +1588,26 @@ void AddDIE(const dwarf::File& file, const std::string& name,
       // up in the symbol map.
       uint64_t size;
       if (symbol_map.vm_map.TryGetSize(addr, &size)) {
-        sink->AddVMRangeIgnoreDuplicate("dwarf_location", addr, size, name);
+        sink->AddVMRangeIgnoreDuplicate("dwarf_location", addr, size,
+                                        cu.unit_name());
       } else {
         if (verbose_level > 0) {
           fprintf(stderr,
                   "bloaty: warning: couldn't find DWARF location in symbol "
                   "table, address: %" PRIx64 ", name: %s\n",
-                  addr, name.c_str());
+                  addr, cu.unit_name().c_str());
         }
       }
     }
   }
 
   // Sometimes a location is given as an offset into debug_loc.
-  if (die.location && die.location->IsUint()) {
-    uint64_t location = die.location->GetUint(die_reader);
-    if (location < file.debug_loc.size()) {
-      absl::string_view loc_range = file.debug_loc.substr(location);
-      loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
-      sink->AddFileRange("dwarf_locrange", name, loc_range);
+  if (die.location_uint64) {
+    uint64_t location = *die.location_uint64;;
+    if (location < cu.dwarf().debug_loc.size()) {
+      absl::string_view loc_range = cu.dwarf().debug_loc.substr(location);
+      loc_range = GetLocationListRange(cu.unit_sizes(), loc_range);
+      sink->AddFileRange("dwarf_locrange", cu.unit_name(), loc_range);
     } else if (verbose_level > 0) {
       fprintf(stderr,
               "bloaty: warning: DWARF location out of range, location=%" PRIx64
@@ -1650,48 +1618,48 @@ void AddDIE(const dwarf::File& file, const std::string& name,
 
   // DWARF 5 range list is the same information as "ranges" but in a different
   // format.
-  if (die.ranges && die.ranges->form() == DW_FORM_rnglistx && die.ranges->IsUint()) {
-    uint64_t range_list = die.ranges->GetUint(die_reader);
-    const dwarf::CompilationUnitSizes& sizes = die_reader.unit_sizes();
-    string_view offset_data = StrictSubstr(
-        file.debug_rnglists, die_reader.unit_sizes().range_lists_base() + range_list);
-    uint64_t offset = die_reader.unit_sizes().ReadDWARFOffset(&offset_data);
+  if (die.rnglistx) {
+    uint64_t range_list = *die.rnglistx;
+    string_view offset_data =
+        StrictSubstr(cu.dwarf().debug_rnglists,
+                     cu.range_lists_base() + range_list);
+    uint64_t offset = cu.unit_sizes().ReadDWARFOffset(&offset_data);
     string_view data = StrictSubstr(
-        file.debug_rnglists, die_reader.unit_sizes().range_lists_base() + offset);
+        cu.dwarf().debug_rnglists, cu.range_lists_base() + offset);
     const char* start = data.data();
     bool done = false;
-    uint64_t base_address = sizes.addr_base();
+    uint64_t base_address = cu.addr_base();
     while (!done) {
       switch (ReadFixed<uint8_t>(&data)) {
         case DW_RLE_end_of_list:
           done = true;
           break;
         case DW_RLE_base_addressx:
-          base_address = ReadIndirectAddress(
-              die_reader, dwarf::ReadLEB128<uint64_t>(&data));
+          base_address =
+              ReadIndirectAddress(cu, dwarf::ReadLEB128<uint64_t>(&data));
           break;
         case DW_RLE_startx_endx: {
-          uint64_t start = ReadIndirectAddress(
-              die_reader, dwarf::ReadLEB128<uint64_t>(&data));
-          uint64_t end = ReadIndirectAddress(
-              die_reader, dwarf::ReadLEB128<uint64_t>(&data));
+          uint64_t start =
+              ReadIndirectAddress(cu, dwarf::ReadLEB128<uint64_t>(&data));
+          uint64_t end =
+              ReadIndirectAddress(cu, dwarf::ReadLEB128<uint64_t>(&data));
           sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, end - start,
-                                          name);
+                                          cu.unit_name());
           break;
         }
         case DW_RLE_startx_length: {
-          uint64_t start = ReadIndirectAddress(
-              die_reader, dwarf::ReadLEB128<uint64_t>(&data));
+          uint64_t start =
+              ReadIndirectAddress(cu, dwarf::ReadLEB128<uint64_t>(&data));
           uint64_t length = dwarf::ReadLEB128<uint64_t>(&data);
           sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, length,
-                                          name);
+                                          cu.unit_name());
           break;
         }
         case DW_RLE_offset_pair: {
           uint64_t start = dwarf::ReadLEB128<uint64_t>(&data) + base_address;
           uint64_t end = dwarf::ReadLEB128<uint64_t>(&data) + base_address;
           sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, end - start,
-                                          name);
+                                          cu.unit_name());
           break;
         }
         case DW_RLE_base_address:
@@ -1702,25 +1670,25 @@ void AddDIE(const dwarf::File& file, const std::string& name,
       }
     }
     string_view all(start, data.data() - start);
-    sink->AddFileRange("dwarf_rangelst_addrs", name, all);
+    sink->AddFileRange("dwarf_rangelst_addrs", cu.unit_name(), all);
   } else {
     uint64_t ranges_offset = UINT64_MAX;
 
     // There are two different attributes that sometimes contain an offset into
     // debug_ranges.
-    if (die.ranges && die.ranges->IsUint()) {
-      ranges_offset = die.ranges->GetUint(die_reader);
-    } else if (die.start_scope && die.start_scope->IsUint()) {
-      ranges_offset = die.start_scope->GetUint(die_reader);
+    if (die.ranges) {
+      ranges_offset = *die.ranges;
+    } else if (die.start_scope) {
+      ranges_offset = *die.start_scope;
     }
 
     if (ranges_offset != UINT64_MAX) {
-      if (ranges_offset < file.debug_ranges.size()) {
-        absl::string_view data = file.debug_ranges.substr(ranges_offset);
+      if (ranges_offset < cu.dwarf().debug_ranges.size()) {
+        absl::string_view data = cu.dwarf().debug_ranges.substr(ranges_offset);
         const char* start = data.data();
-        ReadRangeList(die_reader, low_pc, name, sink, &data);
+        ReadRangeList(cu, low_pc, cu.unit_name(), sink, &data);
         string_view all(start, data.data() - start);
-        sink->AddFileRange("dwarf_debugrange", name, all);
+        sink->AddFileRange("dwarf_debugrange", cu.unit_name(), all);
       } else if (verbose_level > 0) {
         fprintf(stderr,
                 "bloaty: warning: DWARF debug range out of range, "
@@ -1731,9 +1699,8 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   }
 }
 
-static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
+static void ReadDWARFPubNames(dwarf::InfoReader& reader, string_view section,
                               RangeSink* sink) {
-  dwarf::DIEReader die_reader(file);
   string_view remaining = section;
 
   while (remaining.size() > 0) {
@@ -1744,20 +1711,12 @@ static void ReadDWARFPubNames(const dwarf::File& file, string_view section,
         full_unit.substr(0, unit.size() + (unit.data() - full_unit.data()));
     sizes.ReadDWARFVersion(&unit);
     uint64_t debug_info_offset = sizes.ReadDWARFOffset(&unit);
-    bool ok = die_reader.SeekToCompilationUnit(
-        dwarf::DIEReader::Section::kDebugInfo, debug_info_offset);
-    if (!ok) {
-      THROW("Couldn't seek to debug_info section");
-    }
-    string_view compileunit_name;
-    die_reader.ReadAttributes(
-        [&compileunit_name, &die_reader](uint16_t tag, dwarf::AttrValue data) {
-          if (tag == DW_AT_name && data.IsString()) {
-            compileunit_name = data.GetString(die_reader);
-          }
-        });
-    if (!compileunit_name.empty()) {
-      sink->AddFileRange("dwarf_pubnames", compileunit_name, full_unit);
+
+    dwarf::CUIter iter = reader.GetCUIter(
+        dwarf::InfoReader::Section::kDebugInfo, debug_info_offset);
+    dwarf::CU cu;
+    if (iter.NextCU(reader, &cu) && !cu.unit_name().empty()) {
+      sink->AddFileRange("dwarf_pubnames", cu.unit_name(), full_unit);
     }
   }
 }
@@ -2000,108 +1959,68 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
   }
 }
 
-static void ReadDWARFStmtListRange(const dwarf::File& file, uint64_t offset,
-                                   string_view unit_name, RangeSink* sink) {
-  string_view data = file.debug_line;
+static void ReadDWARFStmtListRange(const dwarf::CU& cu, uint64_t offset,
+                                   RangeSink* sink) {
+  string_view data = cu.dwarf().debug_line;
   SkipBytes(offset, &data);
   string_view data_with_length = data;
   dwarf::CompilationUnitSizes sizes;
   data = sizes.ReadInitialLength(&data);
   data = data_with_length.substr(
       0, data.size() + (data.data() - data_with_length.data()));
-  sink->AddFileRange("dwarf_stmtlistrange", unit_name, data);
+  sink->AddFileRange("dwarf_stmtlistrange", cu.unit_name(), data);
 }
 
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
-static void ReadDWARFDebugInfo(
-    const dwarf::File& file, dwarf::DIEReader::Section section,
-    const SymbolTable& symtab, const DualMap& symbol_map, RangeSink* sink,
-    std::unordered_map<uint64_t, std::string>* stmt_list_map) {
-  dwarf::DIEReader die_reader(file);
-  die_reader.set_strp_sink(sink);
+static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
+                               dwarf::InfoReader::Section section,
+                               const SymbolTable& symtab,
+                               const DualMap& symbol_map, RangeSink* sink) {
+  dwarf::CUIter iter = reader.GetCUIter(section);
+  dwarf::CU cu;
+  cu.set_strp_sink(sink);
 
-  if (!die_reader.SeekToStart(section)) {
-    return;
-  }
-
-  do {
+  while (iter.NextCU(reader, &cu)) {
+    dwarf::DIEReader die_reader = cu.GetDIEReader();
     GeneralDIE compileunit_die;
+    auto* abbrev = die_reader.ReadCode(cu);
     die_reader.ReadAttributes(
-        [&die_reader, &compileunit_die](uint16_t tag, dwarf::AttrValue value) {
-          switch (tag) {
-            case DW_AT_addr_base:
-              die_reader.mutable_unit_sizes()->SetAddrBase(value.GetUint(die_reader));
-              break;
-            case DW_AT_str_offsets_base:
-              die_reader.mutable_unit_sizes()->SetStrOffsetsBase(value.GetUint(die_reader));
-              break;
-            case DW_AT_rnglists_base:
-              die_reader.mutable_unit_sizes()->SetRangeListsBase(value.GetUint(die_reader));
-              break;
-            default:
-              ReadGeneralDIEAttr(tag, value, &compileunit_die);
-              break;
-            }
+        cu, abbrev,
+        [&cu, &compileunit_die](uint16_t tag, dwarf::AttrValue value) {
+          ReadGeneralDIEAttr(tag, value, cu, &compileunit_die);
         });
-    std::string compileunit_name;
-    if (compileunit_die.name && compileunit_die.name->IsString()) {
-      compileunit_name =
-          std::string(compileunit_die.name->GetString(die_reader));
-    }
 
-    uint64_t stmt_list = UINT64_MAX;
-
-    if (compileunit_die.stmt_list && compileunit_die.stmt_list->IsUint()) {
-      stmt_list = compileunit_die.stmt_list->GetUint(die_reader);
-      if (compileunit_name.empty()) {
-        auto iter = stmt_list_map->find(stmt_list);
-        if (iter != stmt_list_map->end()) {
-          compileunit_name = iter->second;
-        }
-      } else {
-        (*stmt_list_map)[stmt_list] = compileunit_name;
-      }
-    }
-
-    if (compileunit_name.empty()) {
+    if (cu.unit_name().empty()) {
       continue;
     }
 
-    die_reader.set_compileunit_name(compileunit_name);
-    sink->AddFileRange("dwarf_debuginfo", compileunit_name,
-                       die_reader.unit_range());
-    AddDIE(file, compileunit_name, compileunit_die, symtab, symbol_map,
-           die_reader, sink);
+    sink->AddFileRange("dwarf_debuginfo", cu.unit_name(), cu.unit_range());
+    AddDIE(cu, compileunit_die, symtab, symbol_map, sink);
 
-    if (stmt_list != UINT64_MAX) {
-      ReadDWARFStmtListRange(file, stmt_list, compileunit_name, sink);
+    if (compileunit_die.stmt_list) {
+      ReadDWARFStmtListRange(cu, *compileunit_die.stmt_list, sink);
     }
 
-    string_view abbrev_data = file.debug_abbrev;
-    SkipBytes(die_reader.debug_abbrev_offset(), &abbrev_data);
-    dwarf::AbbrevTable unit_abbrev;
-    abbrev_data = unit_abbrev.ReadAbbrevs(abbrev_data);
-    sink->AddFileRange("dwarf_abbrev", compileunit_name, abbrev_data);
+    sink->AddFileRange("dwarf_abbrev", cu.unit_name(), cu.unit_abbrev().abbrev_data());
 
-    while (die_reader.NextDIE()) {
+    while (auto abbrev = die_reader.ReadCode(cu)) {
       GeneralDIE die;
-      die_reader.ReadAttributes([&die](uint16_t tag, dwarf::AttrValue value) {
-        ReadGeneralDIEAttr(tag, value, &die);
-      });
+      die_reader.ReadAttributes(
+          cu, abbrev, [&cu, &die](uint16_t tag, dwarf::AttrValue value) {
+            ReadGeneralDIEAttr(tag, value, cu, &die);
+          });
 
       // low_pc == 0 is a signal that this routine was stripped out of the
       // final binary.  Skip this DIE and all of its children.
-      if (die.low_pc && die.low_pc->IsUint() &&
-          die.low_pc->GetUint(die_reader) == 0) {
-        die_reader.SkipChildren();
+      if (die.low_pc && *die.low_pc == 0) {
+        die_reader.SkipChildren(cu, abbrev);
       } else {
-        AddDIE(file, compileunit_name, die, symtab, symbol_map, die_reader,
-               sink);
+        AddDIE(cu, die, symtab, symbol_map, sink);
       }
     }
-  } while (die_reader.NextCompilationUnit());
+  }
 }
 
 void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
@@ -2114,13 +2033,15 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
     ReadDWARFAddressRanges(file, sink);
   }
 
-  std::unordered_map<uint64_t, std::string> stmt_list_map;
-  ReadDWARFDebugInfo(file, dwarf::DIEReader::Section::kDebugInfo, symtab,
-                     symbol_map, sink, &stmt_list_map);
-  ReadDWARFDebugInfo(file, dwarf::DIEReader::Section::kDebugTypes, symtab,
-                     symbol_map, sink, &stmt_list_map);
-  ReadDWARFPubNames(file, file.debug_pubnames, sink);
-  ReadDWARFPubNames(file, file.debug_pubtypes, sink);
+  // Share a reader to avoid re-parsing debug abbreviations.
+  dwarf::InfoReader reader(file);
+
+  ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugInfo, symtab,
+                     symbol_map, sink);
+  ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugTypes, symtab,
+                     symbol_map, sink);
+  ReadDWARFPubNames(reader, file.debug_pubnames, sink);
+  ReadDWARFPubNames(reader, file.debug_pubtypes, sink);
 }
 
 static std::string LineInfoKey(const std::string& file, uint32_t line,
@@ -2169,34 +2090,28 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
     THROW("no debug info");
   }
 
-  dwarf::DIEReader die_reader(file);
+  dwarf::InfoReader reader(file);
+  dwarf::CUIter iter = reader.GetCUIter(dwarf::InfoReader::Section::kDebugInfo);
+  dwarf::CU cu;
+  dwarf::DIEReader die_reader = cu.GetDIEReader();
   dwarf::LineInfoReader line_info_reader(file);
 
-  if (!die_reader.SeekToStart(dwarf::DIEReader::Section::kDebugInfo)) {
+  if (!iter.NextCU(reader, &cu)) {
     THROW("debug info is present, but empty");
   }
 
-  while (true) {
-    InlinesDIE die;
+  while (auto abbrev = die_reader.ReadCode(cu)) {
+    absl::optional<uint64_t> stmt_list;
     die_reader.ReadAttributes(
-        [&die, &die_reader](uint16_t tag, dwarf::AttrValue val) {
-          switch (tag) {
-          case DW_AT_stmt_list:
-            if (auto uint = val.ToUint(die_reader))
-              die.set_stmt_list(uint.value());
-            break;
+        cu, abbrev, [&stmt_list, &cu](uint16_t tag, dwarf::AttrValue val) {
+          if (tag == DW_AT_stmt_list) {
+            stmt_list = val.ToUint(cu);
           }
         });
 
-    if (die.has_stmt_list()) {
-      uint64_t offset = die.stmt_list();
-      line_info_reader.SeekToOffset(offset,
-                                    die_reader.unit_sizes().address_size());
+    if (stmt_list) {
+      line_info_reader.SeekToOffset(*stmt_list, cu.unit_sizes().address_size());
       ReadDWARFStmtList(include_line, &line_info_reader, sink);
-    }
-
-    if (!die_reader.NextCompilationUnit()) {
-      return;
     }
   }
 }
