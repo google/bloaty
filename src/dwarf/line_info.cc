@@ -26,6 +26,53 @@ extern int verbose_level;
 
 namespace dwarf {
 
+const std::string& LineInfoReader::GetExpandedFilename(size_t index) {
+  if (index >= filenames_.size()) {
+    THROW("filename index out of range");
+  }
+
+  // Generate these lazily.
+  if (expanded_filenames_.size() <= index) {
+    expanded_filenames_.resize(filenames_.size());
+  }
+
+  std::string& ret = expanded_filenames_[index];
+  if (ret.empty()) {
+    const FileName& filename = filenames_[index];
+    absl::string_view directory = include_directories_[filename.directory_index];
+    ret = std::string(directory);
+    if (!ret.empty()) {
+      ret += "/";
+    }
+    ret += std::string(filename.name);
+  }
+  return ret;
+}
+
+void LineInfoReader::Advance(uint64_t amount) {
+  if (params_.maximum_operations_per_instruction == 1) {
+    // This is by far the common case (only false on VLIW architectuers),
+    // and this inlining/specialization avoids a costly division.
+    DoAdvance(amount, 1);
+  } else {
+    DoAdvance(amount, params_.maximum_operations_per_instruction);
+  }
+}
+
+void LineInfoReader::DoAdvance(uint64_t advance, uint8_t max_per_instr) {
+  info_.address += params_.minimum_instruction_length *
+                    ((info_.op_index + advance) / max_per_instr);
+  info_.op_index = (info_.op_index + advance) % max_per_instr;
+}
+
+void LineInfoReader::SpecialOpcodeAdvance(uint8_t op) {
+  Advance(AdjustedOpcode(op) / params_.line_range);
+}
+
+uint8_t LineInfoReader::AdjustedOpcode(uint8_t op) {
+  return op - params_.opcode_base;
+}
+
 void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   string_view data = file_.debug_line;
   SkipBytes(offset, &data);

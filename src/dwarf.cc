@@ -61,6 +61,8 @@ class AddressRanges {
   // Address and length for this range.
   uint64_t address() { return address_; }
   uint64_t length() { return length_; }
+  // The range of the file where this data occurs.
+  string_view data() { return data_; }
 
   // Advance to the next range.  The values will be available in address() and
   // length().  Returns false when the end of this compilation unit is hit.
@@ -75,6 +77,7 @@ class AddressRanges {
 
  private:
   CompilationUnitSizes sizes_;
+  string_view data_;
   string_view section_;
   string_view unit_remaining_;
   string_view next_unit_;
@@ -88,8 +91,10 @@ bool AddressRanges::NextRange() {
     return false;
   }
 
+  const char* start = unit_remaining_.data();
   address_ = sizes_.ReadAddress(&unit_remaining_);
   length_ = sizes_.ReadAddress(&unit_remaining_);
+  data_ = string_view(start, unit_remaining_.data() - start);
   return true;
 }
 
@@ -281,6 +286,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
         sink->AddVMRangeIgnoreDuplicate("dwarf_aranges", ranges.address(),
                                         ranges.length(), filename);
       }
+      sink->AddFileRange("dwarf_aranges_data", filename, ranges.data());
     }
   }
 

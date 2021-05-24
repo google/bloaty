@@ -305,8 +305,7 @@ class DIEReader {
 
 inline uint64_t ReadIndirectAddress(const CU& cu, uint64_t val) {
   absl::string_view addrs = cu.dwarf().debug_addr;
-  const dwarf::CompilationUnitSizes& sizes = cu.unit_sizes();
-  switch (sizes.address_size()) {
+  switch (cu.unit_sizes().address_size()) {
     case 4:
       SkipBytes((val * 4) + cu.addr_base(), &addrs);
       return ReadFixed<uint32_t>(&addrs);

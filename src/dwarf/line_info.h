@@ -20,7 +20,18 @@
 #include "absl/strings/string_view.h"
 #include "dwarf/debug_info.h"
 
-// Code to read the .line_info programs in a DWARF file.
+// Code to read the .line_info programs in a DWARF file.  Currently we use this
+// for the "inlines" data source, but I think we should probably use the
+// inlining info in debug_info instead.
+//
+// Usage overview:
+//   dwarf::LineInfoReader reader(file);
+//   
+//   reader.SeekToOffset(ofs, cu.unit_sizes().address_size());
+//   while (reader->ReadLineInfo()) {
+//     const dwarf::LineInfo& info = reader->lineinfo();
+//     // ...
+//   }
 
 namespace bloaty {
 namespace dwarf {
@@ -60,28 +71,7 @@ class LineInfoReader {
     return include_directories_[i];
   }
 
-  const std::string& GetExpandedFilename(size_t index) {
-    if (index >= filenames_.size()) {
-      THROW("filename index out of range");
-    }
-
-    // Generate these lazily.
-    if (expanded_filenames_.size() <= index) {
-      expanded_filenames_.resize(filenames_.size());
-    }
-
-    std::string& ret = expanded_filenames_[index];
-    if (ret.empty()) {
-      const FileName& filename = filenames_[index];
-      absl::string_view directory = include_directories_[filename.directory_index];
-      ret = std::string(directory);
-      if (!ret.empty()) {
-        ret += "/";
-      }
-      ret += std::string(filename.name);
-    }
-    return ret;
-  }
+  const std::string& GetExpandedFilename(size_t index);
 
  private:
   struct Params {
@@ -116,27 +106,10 @@ class LineInfoReader {
 
   LineInfo info_;
 
-  void DoAdvance(uint64_t advance, uint8_t max_per_instr) {
-    info_.address += params_.minimum_instruction_length *
-                     ((info_.op_index + advance) / max_per_instr);
-    info_.op_index = (info_.op_index + advance) % max_per_instr;
-  }
-
-  void Advance(uint64_t amount) {
-    if (params_.maximum_operations_per_instruction == 1) {
-      // This is by far the common case (only false on VLIW architectuers),
-      // and this inlining/specialization avoids a costly division.
-      DoAdvance(amount, 1);
-    } else {
-      DoAdvance(amount, params_.maximum_operations_per_instruction);
-    }
-  }
-
-  uint8_t AdjustedOpcode(uint8_t op) { return op - params_.opcode_base; }
-
-  void SpecialOpcodeAdvance(uint8_t op) {
-    Advance(AdjustedOpcode(op) / params_.line_range);
-  }
+  void DoAdvance(uint64_t advance, uint8_t max_per_instr);
+  void Advance(uint64_t amount);
+  uint8_t AdjustedOpcode(uint8_t op);
+  void SpecialOpcodeAdvance(uint8_t op);
 };
 
 }  // namespace dwarf

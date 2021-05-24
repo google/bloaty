@@ -57,9 +57,9 @@ class AttrValue {
   explicit AttrValue(uint16_t form, absl::string_view val)
       : string_(val), form_(form), type_(Type::kString) {}
 
-  // Some attribute values remain unresolved after being parsed.
-  // We have to delay the resolution of some indirect values because they are
-  // dependent on bases that come after it in the sequence of attributes, eg.
+  // We delay the resolution of indirect strings and addresses, both to avoid
+  // unnecessary work and because they may depend on base values that occur
+  // after them in the sequence of attributes, eg.
   //
   // $ dwarfdump -i bloaty
   //   COMPILE_UNIT<header overall offset = 0x00000000>:
