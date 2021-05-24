@@ -216,8 +216,14 @@ add_library(libbloaty STATIC
     src/bloaty.h
     src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
+    src/dwarf/attr.h
+    src/dwarf/attr.cc
+    src/dwarf/dwarf_util.cc
+    src/dwarf/debug_info.cc
+    src/dwarf/line_info.cc
     src/dwarf.cc
     src/dwarf_constants.h
+    src/eh_frame.cc
     src/elf.cc
     src/macho.cc
     src/pe.cc
