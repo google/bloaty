@@ -293,16 +293,19 @@ std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
 namespace dwarf {
 
 struct File {
-  absl::string_view debug_info;
-  absl::string_view debug_types;
-  absl::string_view debug_str;
   absl::string_view debug_abbrev;
+  absl::string_view debug_addr;
   absl::string_view debug_aranges;
+  absl::string_view debug_info;
   absl::string_view debug_line;
   absl::string_view debug_loc;
   absl::string_view debug_pubnames;
   absl::string_view debug_pubtypes;
   absl::string_view debug_ranges;
+  absl::string_view debug_rnglists;
+  absl::string_view debug_str;
+  absl::string_view debug_str_offsets;
+  absl::string_view debug_types;
 
   absl::string_view* GetFieldByName(absl::string_view name);
   void SetFieldByName(absl::string_view name, absl::string_view contents) {
