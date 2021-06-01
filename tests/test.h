@@ -140,7 +140,7 @@ class BloatyTest : public ::testing::Test {
   void CheckConsistency(const bloaty::Options& options) {
     ASSERT_EQ(options.base_filename_size() > 0, output_->diff_mode());
 
-    if (!output_->diff_mode()) {
+    if (!output_->diff_mode() && !options.has_source_filter() && !options.has_not_source_filter()) {
       size_t total_input_size = 0;
       for (const auto& filename : options.filename()) {
         uint64_t size;

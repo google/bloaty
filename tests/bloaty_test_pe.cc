@@ -110,15 +110,21 @@ TEST_P(BloatyOutputTest, CheckOutput) {
 }
 
 static BloatyTestEntry  tests[] = {
+  // Normal tests on MSVC 15 (2017)
   { "MSVCR15DLL", {}, "msvc-15.0-foo-bar.dll", "msvc-15.0-foo-bar.dll.txt" },
   { "MSVCR15DLLSEG", {"-d", "segments"}, "msvc-15.0-foo-bar.dll", "msvc-15.0-foo-bar.dll.seg.txt" },
   { "MSVC15EXE", {}, "msvc-15.0-foo-bar-main-cv.bin", "msvc-15.0-foo-bar-main-cv.bin.txt" },
   { "MSVC15EXESEG", {"-d", "segments"}, "msvc-15.0-foo-bar-main-cv.bin", "msvc-15.0-foo-bar-main-cv.bin.seg.txt" },
 
+  // Normal tests on MSVC 16 (2019)
   { "MSVCR16DLL", {}, "msvc-16.0-foo-bar.dll", "msvc-16.0-foo-bar.dll.txt" },
   { "MSVCR16DLLSEG", {"-d", "segments"}, "msvc-16.0-foo-bar.dll", "msvc-16.0-foo-bar.dll.seg.txt" },
   { "MSVC16EXE", {}, "msvc-16.0-foo-bar-main-cv.bin", "msvc-16.0-foo-bar-main-cv.bin.txt" },
   { "MSVC16EXESEG", {"-d", "segments"}, "msvc-16.0-foo-bar-main-cv.bin", "msvc-16.0-foo-bar-main-cv.bin.seg.txt" },
+
+  // Filter tests
+  { "FILTERINCLUDE", {"--source-filter", "text"}, "msvc-15.0-foo-bar.dll", "filter_include.txt" },
+  { "FILTEREXCLUDE", {"--not-source-filter", "text"}, "msvc-15.0-foo-bar.dll", "filter_exclude.txt" },
 };
 
 INSTANTIATE_TEST_SUITE_P(BloatyTest,

@@ -72,6 +72,9 @@ message Options {
 
   // Regex with which to filter names in the data sources.
   optional string source_filter = 13;
+
+  // Regex with which to exclude names in the data sources.
+  optional string not_source_filter = 14;
 }
 
 // A custom data source allows users to create their own label space by

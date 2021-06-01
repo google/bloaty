@@ -1,0 +1,2 @@
+sections	vmsize	filesize
+.text	3587	4096
