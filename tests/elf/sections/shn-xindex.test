@@ -1,0 +1,36 @@
+# Tests two special cases for the ELF format:
+#   - If the section count in the ELF headers is 0, then, the true value
+#     is read out of section 0.
+#   - If the section string index in the ELF headers is SHN_XINDEX, the
+#     true value is read out of section 0.
+#
+# These special cases are documented here:
+#  https://docs.oracle.com/cd/E19683-01/817-3677/chapter6-94076/index.html
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+  EShNum:          0
+  EShStrNdx:       0xffff ## SHN_XINDEX
+Sections:
+  - Type: SHT_NULL
+    Link: .shstrtab
+    Size: 0x3
+...
+
+$ bloaty --raw-map 1
+Maps for 1:
+
+FILE MAP:
+000-040	         64		[ELF Headers]
+040-041	          1		.strtab
+041-058	         23		.shstrtab
+058-098	         64		[ELF Headers]
+098-0d8	         64		.strtab
+0d8-118	         64		.shstrtab
+
+VM MAP:
+

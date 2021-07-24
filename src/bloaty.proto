@@ -72,6 +72,9 @@ message Options {
 
   // Regex with which to filter names in the data sources.
   optional string source_filter = 13;
+
+  // Dump raw memory map instead of printing normal output.
+  optional bool dump_raw_map = 14;
 }
 
 // A custom data source allows users to create their own label space by

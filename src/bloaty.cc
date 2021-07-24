@@ -1062,13 +1062,13 @@ uint64_t debug_vmaddr = -1;
 uint64_t debug_fileoff = -1;
 
 bool RangeSink::ContainsVerboseVMAddr(uint64_t vmaddr, uint64_t vmsize) {
-  return options_.verbose_level() > 2 ||
+  return options_.verbose_level() > 1 ||
          (options_.has_debug_vmaddr() && options_.debug_vmaddr() >= vmaddr &&
           options_.debug_vmaddr() < (vmaddr + vmsize));
 }
 
 bool RangeSink::ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize) {
-  return options_.verbose_level() > 2 ||
+  return options_.verbose_level() > 1 ||
          (options_.has_debug_fileoff() && options_.debug_fileoff() >= fileoff &&
           options_.debug_fileoff() < (fileoff + filesize));
 }
@@ -1184,7 +1184,7 @@ void RangeSink::AddFileRangeForVMAddr(const char* analyzer,
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              file_offset, file_range.size(), label);
       }
-    } else if (verbose_level > 2) {
+    } else if (verbose_level > 1) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
   }
@@ -1214,7 +1214,7 @@ void RangeSink::AddFileRangeForFileRange(const char* analyzer,
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              file_offset, file_range.size(), label);
       }
-    } else if (verbose_level > 2) {
+    } else if (verbose_level > 1) {
       printf("No label found for file range [%" PRIx64 ", %zx]\n",
              from_file_offset, from_file_range.size());
     }
@@ -1238,11 +1238,11 @@ void RangeSink::AddVMRangeForVMAddr(const char* analyzer,
       bool ok = pair.first->vm_map.AddRangeWithTranslation(
           addr, size, label, translator_->vm_map, verbose,
           &pair.first->file_map);
-      if (!ok && verbose_level > 0) {
+      if (!ok && verbose_level > 1) {
         WARN("VM range ($0, $1) for label $2 extends beyond base map", addr,
              size, label);
       }
-    } else if (verbose_level > 2) {
+    } else if (verbose_level > 1) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
   }
@@ -1765,7 +1765,8 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   (void)filesize;
   assert(filesize == file->file_data().data().size());
 
-  if (verbose_level > 0) {
+  if (verbose_level > 0 || options_.dump_raw_map()) {
+    printf("Maps for %s:\n\n", filename.c_str());
     printf("FILE MAP:\n");
     maps.PrintFileMaps();
     printf("VM MAP:\n");
@@ -2071,6 +2072,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       output_options->output_format = OutputFormat::kCSV;
     } else if (args.TryParseFlag("--tsv")) {
       output_options->output_format = OutputFormat::kTSV;
+    } else if (args.TryParseFlag("--raw-map")) {
+      options->set_dump_raw_map(true);
     } else if (args.TryParseOption("-c", &option)) {
       std::ifstream input_file(std::string(option), std::ios::in);
       if (!input_file.is_open()) {

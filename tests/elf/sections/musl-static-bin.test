@@ -1,0 +1,601 @@
+# A fully statically-linked binary linked with musl.
+# Program text was:
+#
+#   char x[123] = {0};
+#   char y[456] = {1, 2, 3};
+#   const char z[789] = {1, 2, 3};
+#
+#   int main() {
+#     volatile long addr = (long)&x;
+#     addr = (long)&y;
+#     addr = (long)&z;
+#     return 5;
+#   }
+#
+# This example uses musl because it can produce fully statically linked
+# binaries of reasonable size.
+#
+# This binary does not successfully run due to bugs in obj2yaml
+# (or possibly yaml2obj). The binary did not fully round-trip successfully.
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_EXEC
+  Machine:         EM_X86_64
+  Entry:           0x000000000040105A
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_R ]
+    VAddr:           0x0000000000400000
+    Align:           0x0000000000001000
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    Sections:
+      - Section:         .init
+      - Section:         .text
+      - Section:         .fini
+    VAddr:           0x0000000000401000
+    Align:           0x0000000000001000
+  - Type:            PT_LOAD
+    Flags:           [ PF_R ]
+    Sections:
+      - Section:         .rodata
+      - Section:         .eh_frame
+    VAddr:           0x0000000000402000
+    Align:           0x0000000000001000
+  - Type:            PT_LOAD
+    Flags:           [ PF_W, PF_R ]
+    Sections:
+      - Section:         .init_array
+      - Section:         .fini_array
+      - Section:         .got
+      - Section:         .got.plt
+      - Section:         .data
+      - Section:         .bss
+    VAddr:           0x0000000000403FE8
+    FileSize:        0x228
+    MemSize:         0x510
+    Align:           0x0000000000001000
+  - Type:            PT_GNU_STACK
+    Flags:           [ PF_W, PF_R ]
+    Align:           0x0000000000000010
+  - Type:            PT_GNU_RELRO
+    Flags:           [ PF_R ]
+    Sections:
+      - Section:         .init_array
+      - Section:         .fini_array
+      - Section:         .got
+    VAddr:           0x0000000000403FE8
+Sections:
+  - Name:            .init
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x0000000000401000
+    AddressAlign:    0x0000000000000001
+    Content:         5058C3
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x0000000000401010
+    AddressAlign:    0x0000000000000010
+    Content:         5589FDE858040000E86304000031C0E84C04000089EFE8E50700000F1F440000488D050932000048894424F8488D05FD2F000048894424F8488D05B10F000048894424F8B805000000C34831ED4889E7488D3599EFBFFF4883E4F0E800000000488B37488D57084531C949C7C06918400048C7C10010400048C7C730104000E99C030000662E0F1F8400000000006690488D3D69310000488D05623100004839F8741548C7C0000000004885C07409FFE00F1F8000000000C30F1F8000000000488D3D39310000488D35323100004829FE4889F048C1EE3F48C1F8034801C648D1FE741448C7C0000000004885C07408FFE0660F1F440000C30F1F8000000000803D0931000000752F5548833DD62E0000004889E5740C488B3DF22E0000E8CDEEBFFFE868FFFFFFC605E1300000015DC30F1F8000000000C30F1F8000000000E97BFFFFFF662E0F1F84000000000090C3662E0F1F8400000000000F1F440000C3662E0F1F8400000000000F1F4400004881EC580100004889FA31C0B9260000004C8D44242048833A004C89C7F348AB48C7C0484340004889100F84D801000031C0660F1F4400004889C14883C00148833CC20075F2488D04CD100000004801D0488B104889050D3100004883C0084885D20F84B00100000F1F8400000000004883FA257708488B0848894CD420488B50084883C0104885D275E5488B8C24A0000000488B842420010000488B54245048890DB13000004885C074074889058D300000488915D63000004885F60F840D01000048C7C0C842400048C7C2D04240004889304889320FB60684C0741C4883C601660F1F4400003C2F75034889320FB6064883C60184C075EE4C89C7E83E030000488BBC24E8000000E8E1FEFFFF488B84248000000048394424780F847E000000660FEFC04889E7B80700000031D248C744241000000000BE030000000F110424C744241002000000C7442408010000000F0585C07901F44889FA4C8D44241841B902000000BE02800000488D3D22100000F6420620740B4C89C80F054885C07901F44883C2084939D075E6C605CE2F0000014881C458010000C30F1F4000488B84249000000048398424880000000F856CFFFFFF4883BC24D8000000000F855DFFFFFFEBCD660F1F840000000000488BB424180100004885F60F85E2FEFFFF48C7C2C8424000488D05AF0F000048890248C7C2D0424000488902E9F9FEFFFF0F1F8000000000B808000000E93CFEFFFF660F1F44000048C705352F000000000000E98BFEFFFF0F1F84000000000055534883EC08E845FCFFFF48C7C3E83F400048C7C5F03F40004839EB730D6690FF134883C3084839EB72F54883C4085B5DC3662E0F1F8400000000000F1F400041554863C641544C8D6CC2084989D4554889C5534889FB4883EC08E8A0FFFFFF89EF4C89EA4C89E6FFD389C7E8EFFBFFFF662E0F1F8400000000000F1F44000041554863C64989FD4154488D7CC2084989D455488B324889C5E832FDFFFF4C89E289EE4C89EF488D0593FFFFFF5D415C415DFFE0662E0F1F8400000000006690C3662E0F1F8400000000000F1F44000055534883EC0848C7C3F83F400048C7C5F03F40004839EB76140F1F80000000004883EB0831C0FF134839EB77F34883C40831C05B5DE9AF030000660F1F440000534889FB48893FE88D03000085C078547507C605072E000001C7433802000000B8DA000000488D3D043000000F05894330488D05202E0000488983A8000000488D838800000048898388000000488B05AC2D000048895B104889432031C048895B185BC3B8FFFFFFFF5BC30F1F44000041554989FD415455534883EC08488B05B42D00004C8B25B52D0000488B1D9E2D0000488D840738FFFFFF49F7DC4921C44885DB7436488D6F080F1F80000000004C89E0482B4328488B73084C89E748894500488B53104883C508482B7B28E894020000488B1B4885DB75D5488B05662D0000498945004C89E04D896C24084883C4085B5D415C415DC30F1F800000000055534883EC08488B4F284C8B5F184885C90F8411020000448B0D2E2C0000488B7F204C89D831DB31F64531C0BD00008000EB230F1F44000083FA020F84AF01000083FA070F856A0100004989C04801F84883E90174178B1083FA0675DB4C89DE482B70104801F84883E90175E984DB740744890DD42B00004D85C00F84A7010000498B402049037010488D0D102D0000498B50284889350D2D00004889050E2D0000498B403048C705972C000001000000488905082D000048890D712C00004801D6488D48FF48F7DE4821CE4801D6488D90DF000000488935DB2C0000488935E42C00004883F807771548C705CB2C000008000000BAE7000000B8080000004801D6488905372C0000488D3DD02C00004883E6F84889351D2C00004881FE50010000762141BA220000004531C9B80900000031FF49C7C0FFFFFFFFBA030000000F054889C7E826FEFFFF4889004889C74889C3E84101000085C00F88BC0000000F84AA000000C7433802000000B8DA000000488D3DB72D00000F05894330488D05D32B0000488983A8000000488D838800000048898388000000488B055F2B000048895B104889432048895B184883C4085B5DC381FA51E574640F858DFEFFFF488B50284589CA4C39D20F867DFEFFFF4881FA00008000BB01000000480F47D54989D1E965FEFFFF0F1F84000000000048C7C2000000004885D20F844DFEFFFF4889D6482B7010E941FEFFFF0F1F4000C605092B000001E94AFFFFFFF44883C4085B5DC30F1F4000488B15892B0000488B35722B0000488B05832B0000E97DFEFFFF662E0F1F8400000000000F1F40004863FFB8E70000000F05BA3C000000904889D00F05EBF94889F84883FA087214F7C707000000740CA448FFCAF7C70700000075F44889D148C1E903F348A583E2077405A4FFCA75FBC34889FEBF02100000B89E0000000F05C3
+  - Name:            .fini
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x0000000000401869
+    AddressAlign:    0x0000000000000001
+    Content:         5058C3
+  - Name:            .rodata
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC ]
+    Address:         0x0000000000402000
+    AddressAlign:    0x0000000000000020
+    Content:         0102030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002F6465762F6E756C6C00
+  - Name:            .eh_frame
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC ]
+    Address:         0x0000000000402320
+    AddressAlign:    0x0000000000000008
+    Content:         1400000000000000017A5200017810011B0C070890010000100000001C000000F0ECFFFF2A0000000000000000000000
+  - Name:            .init_array
+    Type:            SHT_INIT_ARRAY
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    Address:         0x0000000000403FE8
+    AddressAlign:    0x0000000000000008
+    EntSize:         0x0000000000000008
+    Content:         '5011400000000000'
+  - Name:            .fini_array
+    Type:            SHT_FINI_ARRAY
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    Address:         0x0000000000403FF0
+    AddressAlign:    0x0000000000000008
+    EntSize:         0x0000000000000008
+    Content:         '1011400000000000'
+  - Name:            .got
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    Address:         0x0000000000403FF8
+    AddressAlign:    0x0000000000000008
+    Content:         '0000000000000000'
+  - Name:            .got.plt
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    Address:         0x0000000000404000
+    AddressAlign:    0x0000000000000008
+    EntSize:         0x0000000000000008
+    Content:         '000000000000000000000000000000000000000000000000'
+  - Name:            .data
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    Address:         0x0000000000404020
+    AddressAlign:    0x0000000000000020
+    Content:         '20404000000000000000000000000000000000000000000000000000000000000102030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000200'
+  - Name:            .bss
+    Type:            SHT_NOBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    Address:         0x0000000000404220
+    AddressAlign:    0x0000000000000020
+    Size:            0x00000000000002D8
+  - Name:            .comment
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_MERGE, SHF_STRINGS ]
+    AddressAlign:    0x0000000000000001
+    EntSize:         0x0000000000000001
+    Content:         4743433A202844656269616E2031302E322E312D33292031302E322E31203230323031323234004743433A202844656269616E2031302E322E312D362B6275696C6432292031302E322E3120323032313031313000
+Symbols:
+  - Name:            dummy
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0000000000401470
+    Size:            0x0000000000000001
+  - Name:            libc_exit_fini
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0000000000401480
+    Size:            0x000000000000003A
+  - Name:            deregister_tm_clones
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x00000000004010A0
+  - Name:            register_tm_clones
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x00000000004010D0
+  - Name:            __do_global_dtors_aux
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0000000000401110
+  - Name:            completed.0
+    Type:            STT_OBJECT
+    Section:         .bss
+    Value:           0x0000000000404220
+    Size:            0x0000000000000001
+  - Name:            __do_global_dtors_aux_fini_array_entry
+    Type:            STT_OBJECT
+    Section:         .fini_array
+    Value:           0x0000000000403FF0
+  - Name:            frame_dummy
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0000000000401150
+  - Name:            __frame_dummy_init_array_entry
+    Type:            STT_OBJECT
+    Section:         .init_array
+    Value:           0x0000000000403FE8
+  - Name:            'dummy (1)'
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0000000000401160
+    Size:            0x0000000000000001
+  - Name:            dummy1
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0000000000401170
+    Size:            0x0000000000000001
+  - Name:            libc_start_init
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x00000000004013B0
+    Size:            0x0000000000000032
+  - Name:            libc_start_main_stage2
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x00000000004013F0
+    Size:            0x0000000000000031
+  - Name:            static_init_tls
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x00000000004015C0
+    Size:            0x0000000000000242
+  - Name:            main_tls
+    Type:            STT_OBJECT
+    Section:         .bss
+    Value:           0x0000000000404360
+    Size:            0x0000000000000030
+  - Name:            builtin_tls
+    Type:            STT_OBJECT
+    Section:         .bss
+    Value:           0x00000000004043A0
+    Size:            0x0000000000000150
+  - Name:            __FRAME_END__
+    Type:            STT_OBJECT
+    Section:         .eh_frame
+    Value:           0x000000000040234C
+  - Name:            __fini_array_end
+    Section:         .fini_array
+    Value:           0x0000000000403FF8
+  - Name:            __fini_array_start
+    Section:         .fini_array
+    Value:           0x0000000000403FF0
+  - Name:            __init_array_end
+    Section:         .init_array
+    Value:           0x0000000000403FF0
+  - Name:            _GLOBAL_OFFSET_TABLE_
+    Type:            STT_OBJECT
+    Section:         .got.plt
+    Value:           0x0000000000404000
+  - Name:            __init_array_start
+    Section:         .init_array
+    Value:           0x0000000000403FE8
+  - Name:            .init
+    Type:            STT_SECTION
+    Section:         .init
+    Value:           0x0000000000401000
+  - Name:            .text
+    Type:            STT_SECTION
+    Section:         .text
+    Value:           0x0000000000401010
+  - Name:            .fini
+    Type:            STT_SECTION
+    Section:         .fini
+    Value:           0x0000000000401869
+  - Name:            .rodata
+    Type:            STT_SECTION
+    Section:         .rodata
+    Value:           0x0000000000402000
+  - Name:            .eh_frame
+    Type:            STT_SECTION
+    Section:         .eh_frame
+    Value:           0x0000000000402320
+  - Name:            .init_array
+    Type:            STT_SECTION
+    Section:         .init_array
+    Value:           0x0000000000403FE8
+  - Name:            .fini_array
+    Type:            STT_SECTION
+    Section:         .fini_array
+    Value:           0x0000000000403FF0
+  - Name:            .got
+    Type:            STT_SECTION
+    Section:         .got
+    Value:           0x0000000000403FF8
+  - Name:            .got.plt
+    Type:            STT_SECTION
+    Section:         .got.plt
+    Value:           0x0000000000404000
+  - Name:            .data
+    Type:            STT_SECTION
+    Section:         .data
+    Value:           0x0000000000404020
+  - Name:            .bss
+    Type:            STT_SECTION
+    Section:         .bss
+    Value:           0x0000000000404220
+  - Name:            .comment
+    Type:            STT_SECTION
+    Section:         .comment
+  - Name:            __thread_list_lock
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004044F0
+    Size:            0x0000000000000004
+    Other:           [ STV_HIDDEN ]
+  - Name:            __init_libc
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401180
+    Size:            0x0000000000000228
+    Other:           [ STV_HIDDEN ]
+  - Name:            x
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404240
+    Size:            0x000000000000007B
+  - Name:            __hwcap
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004042D8
+    Size:            0x0000000000000008
+    Other:           [ STV_HIDDEN ]
+  - Name:            memcpy
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401827
+  - Name:            __TMC_END__
+    Type:            STT_OBJECT
+    Section:         .data
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404210
+    Other:           [ STV_HIDDEN ]
+  - Name:            __libc
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004042E0
+    Size:            0x0000000000000068
+    Other:           [ STV_HIDDEN ]
+  - Name:            __dso_handle
+    Type:            STT_OBJECT
+    Section:         .data
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404020
+    Other:           [ STV_HIDDEN ]
+  - Name:            __set_thread_area
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401859
+    Other:           [ STV_HIDDEN ]
+  - Name:            __copy_tls
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401530
+    Size:            0x0000000000000089
+    Other:           [ STV_HIDDEN ]
+  - Name:            _environ
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_WEAK
+    Value:           0x0000000000404348
+    Size:            0x0000000000000008
+  - Name:            __environ
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404348
+    Size:            0x0000000000000008
+  - Name:            _Exit
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401810
+    Size:            0x0000000000000017
+  - Name:            __init_tls
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_WEAK
+    Value:           0x00000000004015C0
+    Size:            0x0000000000000242
+    Other:           [ STV_HIDDEN ]
+  - Name:            _init
+    Section:         .init
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401000
+  - Name:            __funcs_on_exit
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_WEAK
+    Value:           0x0000000000401470
+    Size:            0x0000000000000001
+    Other:           [ STV_HIDDEN ]
+  - Name:            __memcpy_fwd
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401827
+    Other:           [ STV_HIDDEN ]
+  - Name:            environ
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_WEAK
+    Value:           0x0000000000404348
+    Size:            0x0000000000000008
+  - Name:            z
+    Type:            STT_OBJECT
+    Section:         .rodata
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000402000
+    Size:            0x0000000000000315
+  - Name:            ___environ
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_WEAK
+    Value:           0x0000000000404348
+    Size:            0x0000000000000008
+  - Name:            __progname
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004042D0
+    Size:            0x0000000000000008
+  - Name:            _start
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x000000000040105A
+  - Name:            _start_c
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401070
+    Size:            0x0000000000000024
+  - Name:            program_invocation_short_name
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_WEAK
+    Value:           0x00000000004042D0
+    Size:            0x0000000000000008
+  - Name:            __libc_start_init
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_WEAK
+    Value:           0x00000000004013B0
+    Size:            0x0000000000000032
+    Other:           [ STV_HIDDEN ]
+  - Name:            __init_tp
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004014C0
+    Size:            0x000000000000006B
+    Other:           [ STV_HIDDEN ]
+  - Name:            __init_ssp
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_WEAK
+    Value:           0x0000000000401170
+    Size:            0x0000000000000001
+    Other:           [ STV_HIDDEN ]
+  - Name:            __bss_start
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404210
+  - Name:            main
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401030
+    Size:            0x000000000000002A
+  - Name:            __stdio_exit
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_WEAK
+    Value:           0x0000000000401470
+    Size:            0x0000000000000001
+  - Name:            y
+    Type:            STT_OBJECT
+    Section:         .data
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404040
+    Size:            0x00000000000001C8
+  - Name:            _fini
+    Section:         .fini
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401869
+  - Name:            __libc_exit_fini
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_WEAK
+    Value:           0x0000000000401480
+    Size:            0x000000000000003A
+    Other:           [ STV_HIDDEN ]
+  - Name:            _edata
+    Section:         .data
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404210
+  - Name:            _end
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004044F8
+  - Name:            exit
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401010
+    Size:            0x000000000000001B
+  - Name:            __libc_start_main
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000401430
+    Size:            0x0000000000000034
+  - Name:            program_invocation_name
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_WEAK
+    Value:           0x00000000004042C8
+    Size:            0x0000000000000008
+  - Name:            __default_stacksize
+    Type:            STT_OBJECT
+    Section:         .data
+    Binding:         STB_GLOBAL
+    Value:           0x000000000040420C
+    Size:            0x0000000000000004
+    Other:           [ STV_HIDDEN ]
+  - Name:            __default_guardsize
+    Type:            STT_OBJECT
+    Section:         .data
+    Binding:         STB_GLOBAL
+    Value:           0x0000000000404208
+    Size:            0x0000000000000004
+    Other:           [ STV_HIDDEN ]
+  - Name:            __sysinfo
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004042C0
+    Size:            0x0000000000000008
+    Other:           [ STV_HIDDEN ]
+  - Name:            __progname_full
+    Type:            STT_OBJECT
+    Section:         .bss
+    Binding:         STB_GLOBAL
+    Value:           0x00000000004042C8
+    Size:            0x0000000000000008
+...
+
+$ bloaty --raw-map 1
+Maps for 1:
+
+FILE MAP:
+0000-0040	         64		[ELF Headers]
+0040-0078	         56		[LOAD #0 [R]]
+0078-00b0	         56		[LOAD #1 [RX]]
+00b0-00e8	         56		[LOAD #2 [R]]
+00e8-0120	         56		[LOAD #3 [RW]]
+0120-0158	         56		[LOAD #4 [RW]]
+0158-0190	         56		[LOAD #5 [R]]
+0190-01a0	         16		.init
+01a0-09f9	       2137		.text
+09f9-0a00	          7		.fini
+0a00-0d20	        800		.rodata
+0d20-0d50	         48		.eh_frame
+0d50-0d58	          8		.init_array
+0d58-0d60	          8		.fini_array
+0d60-0d68	          8		.got
+0d68-0d80	         24		.got.plt
+0d80-0f78	        504		.data
+0f78-0f80	          8		.data
+0f80-0fd8	         88		.comment
+0fd8-1710	       1848		.symtab
+1710-1a43	        819		.strtab
+1a43-1ac0	        125		.shstrtab
+1ac0-1b00	         64		[ELF Headers]
+1b00-1b40	         64		.init
+1b40-1b80	         64		.text
+1b80-1bc0	         64		.fini
+1bc0-1c00	         64		.rodata
+1c00-1c40	         64		.eh_frame
+1c40-1c80	         64		.init_array
+1c80-1cc0	         64		.fini_array
+1cc0-1d00	         64		.got
+1d00-1d40	         64		.got.plt
+1d40-1d80	         64		.data
+1d80-1dc0	         64		.bss
+1dc0-1e00	         64		.comment
+1e00-1e40	         64		.symtab
+1e40-1e80	         64		.strtab
+1e80-1ec0	         64		.shstrtab
+
+VM MAP:
+000000-401000	    4198400		[-- Nothing mapped --]
+401000-401010	         16		.init
+401010-401869	       2137		.text
+401869-40186c	          3		.fini
+40186c-402000	       1940		[-- Nothing mapped --]
+402000-402320	        800		.rodata
+402320-402350	         48		.eh_frame
+402350-403fe8	       7320		[-- Nothing mapped --]
+403fe8-403ff0	          8		.init_array
+403ff0-403ff8	          8		.fini_array
+403ff8-404000	          8		.got
+404000-404020	         32		.got.plt
+404020-404220	        512		.data
+404220-4044f8	        728		.bss
+

@@ -1054,6 +1054,7 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
                            contents);
           } else if (report_by == kReportBySectionName) {
             sink->AddRange("elf_section", name, full_addr, vmsize, contents);
+            sink->AddFileRange("elf_section_header", name, section.range());
           } else if (report_by == kReportByEscapedSectionName) {
             if (!sink->IsBaseMap()) {
               sink->AddFileRangeForFileRange("elf_section", contents,
@@ -1080,56 +1081,79 @@ enum ReportSegmentsBy {
   kReportByEscapedSegmentName,
 };
 
+std::string GetSegmentName(const ElfFile::Segment& segment, Elf64_Xword i,
+                           ReportSegmentsBy report_by) {
+  const auto& header = segment.header();
+
+  // Include the segment index in the label, to support embedded.
+  //
+  // Including the index in the segment label differentiates
+  // segments with the same access control (e.g. RWX vs RW). In
+  // ELF files built for embedded microcontroller projects, a
+  // segment is used for each distinct type of memory. In simple
+  // cases, there is a segment for the flash (which will store
+  // code and read-only data) and a segment for RAM (which
+  // usually stores globals, stacks, and maybe a heap). In more
+  // involved projects, there may be special segments for faster
+  // RAM (e.g. core coupled RAM or CCRAM), or there may even be
+  // memory overlays to support manual paging of code from flash
+  // (which may be slow) into RAM.
+  std::string name(absl::StrCat("LOAD #", i, " ["));
+
+  if (header.p_flags & PF_R) {
+    name += 'R';
+  }
+
+  if (header.p_flags & PF_W) {
+    name += 'W';
+  }
+
+  if (header.p_flags & PF_X) {
+    name += 'X';
+  }
+
+  name += ']';
+
+  if (report_by == kReportByEscapedSegmentName) {
+    return absl::StrCat("[", name, "]");
+  } else {
+    return name;
+  }
+}
+
 static void DoReadELFSegments(RangeSink* sink, ReportSegmentsBy report_by) {
+  if (!sink->IsBaseMap()) {
+    ForEachElf(sink->input_file(), sink,
+               [=](const ElfFile& elf, string_view /*filename*/,
+                   uint32_t /*index_base*/) {
+                 for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
+                   ElfFile::Segment segment;
+                   elf.ReadSegment(i, &segment);
+                   std::string name = GetSegmentName(segment, i, report_by);
+
+                   sink->AddFileRange("elf_segment_header", name,
+                                      segment.range());
+                 }
+               });
+  }
+
   ForEachElf(sink->input_file(), sink,
              [=](const ElfFile& elf, string_view /*filename*/,
                  uint32_t /*index_base*/) {
                for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
                  ElfFile::Segment segment;
                  elf.ReadSegment(i, &segment);
-                 const auto& header = segment.header();
+                 std::string name = GetSegmentName(segment, i, report_by);
 
-                 if (header.p_type != PT_LOAD) {
+                 if (segment.header().p_type != PT_LOAD) {
                    continue;
                  }
 
-                 // Include the segment index in the label, to support embedded.
-                 //
-                 // Including the index in the segment label differentiates
-                 // segments with the same access control (e.g. RWX vs RW). In
-                 // ELF files built for embedded microcontroller projects, a
-                 // segment is used for each distinct type of memory. In simple
-                 // cases, there is a segment for the flash (which will store
-                 // code and read-only data) and a segment for RAM (which
-                 // usually stores globals, stacks, and maybe a heap). In more
-                 // involved projects, there may be special segments for faster
-                 // RAM (e.g. core coupled RAM or CCRAM), or there may even be
-                 // memory overlays to support manual paging of code from flash
-                 // (which may be slow) into RAM.
-                 std::string name(absl::StrCat("LOAD #", i, " ["));
-
-                 if (header.p_flags & PF_R) {
-                   name += 'R';
-                 }
-
-                 if (header.p_flags & PF_W) {
-                   name += 'W';
-                 }
-
-                 if (header.p_flags & PF_X) {
-                   name += 'X';
-                 }
-
-                 name += ']';
-
-                 if (report_by == kReportByEscapedSegmentName) {
-                   name = absl::StrCat("[", name, "]");
-                 }
-
-                 sink->AddRange("elf_segment", name, header.p_vaddr,
-                                header.p_memsz, segment.contents());
+                 sink->AddRange("elf_segment", name, segment.header().p_vaddr,
+                                segment.header().p_memsz, segment.contents());
                }
              });
+
   ForEachElf(sink->input_file(), sink,
              [=](const ElfFile& elf, string_view /*filename*/,
                  uint32_t /*index_base*/) {
@@ -1137,10 +1161,10 @@ static void DoReadELFSegments(RangeSink* sink, ReportSegmentsBy report_by) {
                  ElfFile::Segment segment;
                  elf.ReadSegment(i, &segment);
                  const auto& header = segment.header();
-                 if(header.p_type != PT_TLS) continue;
+                 if (header.p_type != PT_TLS) continue;
                  std::string name = "TLS";
-                 sink->AddRange("elf_segment", "TLS", header.p_vaddr, header.p_memsz,
-                                segment.contents());
+                 sink->AddRange("elf_segment", "TLS", header.p_vaddr,
+                                header.p_memsz, segment.contents());
                }
              });
 }
@@ -1265,6 +1289,9 @@ class ElfObjectFile : public ObjectFile {
 
   void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
     for (auto sink : sinks) {
+      if (verbose_level > 1) {
+        printf("Scanning source %d\n", (int)sink->data_source());
+      }
       switch (sink->data_source()) {
         case DataSource::kSegments:
           ReadELFSegments(sink);
