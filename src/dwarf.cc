@@ -1651,8 +1651,10 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   if (die.ranges && die.ranges->form() == DW_FORM_rnglistx && die.ranges->IsUint()) {
     uint64_t range_list = die.ranges->GetUint(die_reader);
     const dwarf::CompilationUnitSizes& sizes = die_reader.unit_sizes();
+    size_t offset_size = die_reader.unit_sizes().dwarf64() ? 8 : 4;
     string_view offset_data = StrictSubstr(
-        file.debug_rnglists, die_reader.unit_sizes().range_lists_base() + range_list);
+        file.debug_rnglists, die_reader.unit_sizes().range_lists_base() +
+                                 (range_list * offset_size));
     uint64_t offset = die_reader.unit_sizes().ReadDWARFOffset(&offset_data);
     string_view data = StrictSubstr(
         file.debug_rnglists, die_reader.unit_sizes().range_lists_base() + offset);
