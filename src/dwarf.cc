@@ -885,10 +885,8 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
       return AttrValue(ReadBytes(4, data));
     case DW_FORM_data8:
       return AttrValue(ReadBytes(8, data));
-    case DW_FORM_rnglistx: {
-      auto val = AttrValue(ReadLEB128<uint64_t>(data));
-      return val;
-    }
+    case DW_FORM_rnglistx:
+      return AttrValue(ReadLEB128<uint64_t>(data));
 
     // Bloaty doesn't currently care about any bool or signed data.
     // So we fudge it a bit and just stuff these in a uint64.
