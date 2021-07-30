@@ -596,6 +596,8 @@ class DIEReader {
   uint64_t debug_abbrev_offset_;
   std::string unit_name_;
   string_view unit_range_;
+  UnitType unit_type_;
+  uint64_t dwo_id_;
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
 
@@ -975,10 +977,34 @@ bool DIEReader::ReadCompilationUnitHeader() {
   }
 
   if (unit_sizes_.dwarf_version() == 5) {
-    uint8_t unit_type = ReadFixed<uint8_t>(&remaining_);
-    (void)unit_type;  // We don't use this currently.
+    unit_type_ = static_cast<UnitType>(ReadFixed<uint8_t>(&remaining_));
     unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
     debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+    switch (unit_type_) {
+    case DW_UT_skeleton:
+    case DW_UT_split_compile:
+    case DW_UT_split_type:
+      dwo_id_ = ReadFixed<uint64_t>(&remaining_);
+      break;
+    case DW_UT_type:
+      unit_type_signature_ = ReadFixed<uint64_t>(&remaining_);
+      unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+      break;
+    case DW_UT_compile:
+    case DW_UT_partial:
+      break;
+#if defined(_GNUC)
+    case DW_UT_lo_user ... DW_UT_hi_user:
+#else
+    case DW_UT_lo_user:
+    case DW_UT_hi_user:
+#endif
+      // User defined unit types which we do not really know about ...
+      if (verbose_level > 0) {
+        fprintf(stderr, "Unknown DWARF Unit Type in user defined range\n");
+      }
+      break;
+    }
   } else {
     debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
     unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
