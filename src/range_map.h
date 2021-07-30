@@ -268,6 +268,7 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
     return;
   }
 
+  iters.reserve(range_maps.size());
   for (auto range_map : range_maps) {
     iters.push_back(range_map->mappings_.begin());
   }
