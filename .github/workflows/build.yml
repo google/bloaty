@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - master
-  workflow_request:
+  workflow_run:
 
 jobs:
   windows:
