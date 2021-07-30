@@ -887,6 +887,7 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
       return AttrValue(ReadBytes(4, data));
     case DW_FORM_data8:
       return AttrValue(ReadBytes(8, data));
+    case DW_FORM_loclistx:
     case DW_FORM_rnglistx:
       return AttrValue(ReadLEB128<uint64_t>(data));
 
@@ -1660,15 +1661,18 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   // Sometimes a location is given as an offset into debug_loc.
   if (die.location && die.location->IsUint()) {
     uint64_t location = die.location->GetUint(die_reader);
-    if (location < file.debug_loc.size()) {
-      absl::string_view loc_range = file.debug_loc.substr(location);
-      loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
-      sink->AddFileRange("dwarf_locrange", name, loc_range);
-    } else if (verbose_level > 0) {
-      fprintf(stderr,
-              "bloaty: warning: DWARF location out of range, location=%" PRIx64
-              "\n",
-              location);
+    if (die.location->form() == DW_FORM_sec_offset) {
+      if (location < file.debug_loc.size()) {
+        absl::string_view loc_range = file.debug_loc.substr(location);
+        loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
+        sink->AddFileRange("dwarf_locrange", name, loc_range);
+      } else if (verbose_level > 0) {
+        fprintf(
+            stderr,
+            "bloaty: warning: DWARF location out of range, location=%" PRIx64
+            "\n",
+            location);
+      }
     }
   }
 
