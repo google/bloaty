@@ -23,39 +23,43 @@ namespace pe {
 const uint16_t dos_magic = 0x5A4D;  // MZ
 
 //! Sizes in bytes of various things in the COFF format.
-namespace STRUCT_SIZES {
-enum {
-  Header16Size = 20,
-  Header32Size = 56,
-  NameSize = 8,
-  Symbol16Size = 18,
-  Symbol32Size = 20,
-  SectionSize = 40,
-  RelocationSize = 10,
-  BaseRelocationBlockSize = 8,
-  ImportDirectoryTableEntrySize = 20,
-  ResourceDirectoryTableSize = 16,
-  ResourceDirectoryEntriesSize = 8,
-  ResourceDataEntrySize = 16
+enum class StructSizes {
+  kHeader16Size = 20,
+  kHeader32Size = 56,
+  kNameSize = 8,
+  kSymbol16Size = 18,
+  kSymbol32Size = 20,
+  kSectionSize = 40,
+  kRelocationSize = 10,
+  kBaseRelocationBlockSize = 8,
+  kImportDirectoryTableEntrySize = 20,
+  kResourceDirectoryTableSize = 16,
+  kResourceDirectoryEntriesSize = 8,
+  kResourceDataEntrySize = 16,
 };
-}
 
 #include "third_party/lief_pe/pe_structures.h"
 
-static_assert(STRUCT_SIZES::SectionSize == sizeof(pe_section), "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::RelocationSize == sizeof(pe_relocation), "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::BaseRelocationBlockSize ==
+static_assert(static_cast<size_t>(StructSizes::kSectionSize) ==
+                  sizeof(pe_section),
+              "Compiler options broke LIEF struct layout");
+static_assert(static_cast<size_t>(StructSizes::kRelocationSize) ==
+                  sizeof(pe_relocation),
+              "Compiler options broke LIEF struct layout");
+static_assert(static_cast<size_t>(StructSizes::kBaseRelocationBlockSize) ==
                   sizeof(pe_base_relocation_block),
               "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ImportDirectoryTableEntrySize == sizeof(pe_import),
-              "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ResourceDirectoryTableSize ==
+static_assert(
+    static_cast<size_t>(StructSizes::kImportDirectoryTableEntrySize) ==
+        sizeof(pe_import),
+    "Compiler options broke LIEF struct layout");
+static_assert(static_cast<size_t>(StructSizes::kResourceDirectoryTableSize) ==
                   sizeof(pe_resource_directory_table),
               "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ResourceDirectoryEntriesSize ==
+static_assert(static_cast<size_t>(StructSizes::kResourceDirectoryEntriesSize) ==
                   sizeof(pe_resource_directory_entries),
               "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ResourceDataEntrySize ==
+static_assert(static_cast<size_t>(StructSizes::kResourceDataEntrySize) ==
                   sizeof(pe_resource_data_entry),
               "Compiler options broke LIEF struct layout");
 
@@ -159,8 +163,9 @@ class Section {
     // For longer names, this member contains a forward slash (/) followed by an
     // ASCII representation of a decimal number that is an offset into the
     // string table.
-    name = std::string(header_.Name,
-                       strnlen(header_.Name, STRUCT_SIZES::NameSize));
+    name = std::string(
+        header_.Name,
+        strnlen(header_.Name, static_cast<size_t>(StructSizes::kNameSize)));
   }
 
  private:
