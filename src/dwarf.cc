@@ -607,7 +607,7 @@ class DIEReader {
   // both the current abbrev. table and the sizes.
   uint32_t abbrev_version_;
 
-  std::map<std::pair<AbbrevTable*, CompilationUnitSizes>, uint32_t>
+  std::map<std::pair<AbbrevTable*, CompilationUnitSizes>, size_t>
       abbrev_versions_;
 
   // Only for .debug_types
