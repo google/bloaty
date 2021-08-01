@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: configure
-        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S . -D CMAKE_CXX_FLAGS_Debug="/MTd /Zi /Ob0 /Od /RTC1"
+        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S .
       - name: build
         run: cmake --build build --config Debug
       - name: test
