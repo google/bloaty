@@ -29,12 +29,18 @@ def TestFile(filename):
     bloaty_invocation = os.path.join(cwd, lines[0][2:]) + ' > actual'
     lines.pop(0)
     expected_output = "\n".join(lines) + "\n"
-    subprocess.check_call(bloaty_invocation, shell=True, cwd=tmpdir)
-    with open(os.path.join(tmpdir, 'expected'), 'w') as expected:
-      expected.write(expected_output)
-    if subprocess.call('diff -u expected actual', shell=True, cwd=tmpdir) != 0:
-      print("FAILED: {}".format(filename))
-      print("FAILED: output in " + tmpdir)
+    failure = None
+    if subprocess.call(bloaty_invocation, shell=True, cwd=tmpdir) != 0:
+      failure = "CRASHED"
+    else:
+      with open(os.path.join(tmpdir, 'expected'), 'w') as expected:
+        expected.write(expected_output)
+      if subprocess.call('diff -u expected actual', shell=True, cwd=tmpdir) != 0:
+        failure = "FAILED"
+
+    if failure:
+      print("{}: {}".format(failure, filename))
+      print("{}: output in {}".format(failure, tmpdir))
       failures.append((filename, tmpdir))
     else:
       successes += 1
