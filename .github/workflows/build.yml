@@ -22,7 +22,7 @@ jobs:
       - name: build
         run: cmake --build build --config Debug
       - name: test
-        run: ctest build
+        run: cmake --build build --config Debug --target RUN_TESTS
 
   macOS:
     runs-on: macos-latest
@@ -40,7 +40,7 @@ jobs:
       - name: build
         run: cmake --build build --config Debug
       - name: test
-        run: ctest build
+        run: cmake --build build --config Debug --target test
 
   ubuntu:
     runs-on: ubuntu-latest
@@ -61,4 +61,4 @@ jobs:
       - name: build
         run: cmake --build build --config Debug
       - name: test
-        run: ctest build
+        run: cmake --build build --config Debug --target test
