@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0048 NEW)
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
 project (Bloaty VERSION 1.1)
 include(CTest)
 set(CMAKE_CXX_STANDARD 17)
@@ -67,17 +70,21 @@ endif()
 
 # Set MSVC runtime before including thirdparty libraries
 if(MSVC)
-  # Link also the runtime library statically so that MSVCR*.DLL is not required at runtime.
-  # https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
-  # This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
-  # http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    if (flag_var MATCHES "/MD")
-      string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-    endif()
-  endforeach()
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.15)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>)
+  else()
+    # Link also the runtime library statically so that MSVCR*.DLL is not required at runtime.
+    # https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
+    # This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
+    # http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if (flag_var MATCHES "/MD")
+        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+      endif()
+    endforeach()
+  endif()
 endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)

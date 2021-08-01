@@ -777,60 +777,70 @@ static void CheckNotObject(const char* source, RangeSink* sink) {
   }
 }
 
-static void ElfMachineToCapstone(Elf64_Half e_machine, cs_arch* arch,
+static bool ElfMachineToCapstone(Elf64_Half e_machine, cs_arch* arch,
                                  cs_mode* mode) {
   switch (e_machine) {
     case EM_386:
       *arch = CS_ARCH_X86;
       *mode = CS_MODE_32;
-      break;
+      return true;
     case EM_X86_64:
       *arch = CS_ARCH_X86;
       *mode = CS_MODE_64;
-      break;
+      return true;
 
     // These aren't tested, but we include them on the off-chance
     // that it will work.
     case EM_ARM:
       *arch = CS_ARCH_ARM;
       *mode = CS_MODE_LITTLE_ENDIAN;
-      break;
+      return true;
     case EM_AARCH64:
       *arch = CS_ARCH_ARM64;
       *mode = CS_MODE_ARM;
-      break;
+      return true;
     case EM_MIPS:
       *arch = CS_ARCH_MIPS;
-      break;
+      return true;
     case EM_PPC:
       *arch = CS_ARCH_PPC;
       *mode = CS_MODE_32;
-      break;
+      return true;
     case EM_PPC64:
       *arch = CS_ARCH_PPC;
       *mode = CS_MODE_64;
-      break;
+      return true;
     case EM_SPARC:
       *arch = CS_ARCH_SPARC;
       *mode = CS_MODE_BIG_ENDIAN;
-      break;
+      return true;
     case EM_SPARCV9:
       *arch = CS_ARCH_SPARC;
       *mode = CS_MODE_V9;
-      break;
+      return true;
+
     default:
-      THROWF("Unknown ELF machine value: $0'", e_machine);
+      if (verbose_level > 1) {
+        printf(
+            "Unable to map to capstone target, disassembly will be "
+            "unavailable");
+      }
+      return false;
   }
 }
 
-static void ReadElfArchMode(const InputFile& file, cs_arch* arch, cs_mode* mode) {
+static bool ReadElfArchMode(const InputFile& file, cs_arch* arch, cs_mode* mode) {
+  bool capstone_available = true;
   ForEachElf(file, nullptr,
-             [=](const ElfFile& elf, string_view /*filename*/,
-                 uint32_t /*index_base*/) {
+             [&capstone_available, arch, mode](const ElfFile& elf,
+                                               string_view /*filename*/,
+                                               uint32_t /*index_base*/) {
                // Last .o file wins?  (For .a files)?  It's kind of arbitrary,
                // but a single .a file shouldn't have multiple archs in it.
-               ElfMachineToCapstone(elf.header().e_machine, arch, mode);
+               capstone_available &=
+                   ElfMachineToCapstone(elf.header().e_machine, arch, mode);
              });
+  return capstone_available;
 }
 
 static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
@@ -838,7 +848,7 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
   bool is_object = IsObjectFile(file.data());
   DisassemblyInfo info;
   DisassemblyInfo* infop = &info;
-  ReadElfArchMode(file, &info.arch, &info.mode);
+  bool capstone_available = ReadElfArchMode(file, &info.arch, &info.mode);
 
   ForEachElf(
       file, sink,
@@ -882,7 +892,7 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
             string_view name = strtab_section.ReadString(sym.st_name);
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
-            if (sink && !disassemble) {
+            if (sink && !(capstone_available && disassemble)) {
               sink->AddVMRangeAllowAlias(
                   "elf_symbols", full_addr, sym.st_size,
                   ItaniumDemangle(name, sink->data_source()));
@@ -891,7 +901,8 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               table->insert(
                   std::make_pair(name, std::make_pair(full_addr, sym.st_size)));
             }
-            if (disassemble && ELF64_ST_TYPE(sym.st_info) == STT_FUNC) {
+            if (capstone_available && disassemble &&
+                ELF64_ST_TYPE(sym.st_info) == STT_FUNC) {
               if (verbose_level > 1) {
                 printf("Disassembling function: %s\n", name.data());
               }
@@ -1401,8 +1412,7 @@ class ElfObjectFile : public ObjectFile {
       info->start_address = vmaddr;
     }
 
-    ReadElfArchMode(file_data(), &info->arch, &info->mode);
-    return true;
+    return ReadElfArchMode(file_data(), &info->arch, &info->mode);
   }
 };
 

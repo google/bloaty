@@ -596,6 +596,8 @@ class DIEReader {
   uint64_t debug_abbrev_offset_;
   std::string unit_name_;
   string_view unit_range_;
+  UnitType unit_type_;
+  uint64_t dwo_id_;
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
 
@@ -605,7 +607,7 @@ class DIEReader {
   // both the current abbrev. table and the sizes.
   uint32_t abbrev_version_;
 
-  std::map<std::pair<AbbrevTable*, CompilationUnitSizes>, uint32_t>
+  std::map<std::pair<AbbrevTable*, CompilationUnitSizes>, size_t>
       abbrev_versions_;
 
   // Only for .debug_types
@@ -885,10 +887,9 @@ AttrValue AttrValue::ParseAttr(const DIEReader &reader, uint8_t form,
       return AttrValue(ReadBytes(4, data));
     case DW_FORM_data8:
       return AttrValue(ReadBytes(8, data));
-    case DW_FORM_rnglistx: {
-      auto val = AttrValue(ReadLEB128<uint64_t>(data));
-      return val;
-    }
+    case DW_FORM_loclistx:
+    case DW_FORM_rnglistx:
+      return AttrValue(ReadLEB128<uint64_t>(data));
 
     // Bloaty doesn't currently care about any bool or signed data.
     // So we fudge it a bit and just stuff these in a uint64.
@@ -977,10 +978,34 @@ bool DIEReader::ReadCompilationUnitHeader() {
   }
 
   if (unit_sizes_.dwarf_version() == 5) {
-    uint8_t unit_type = ReadFixed<uint8_t>(&remaining_);
-    (void)unit_type;  // We don't use this currently.
+    unit_type_ = static_cast<UnitType>(ReadFixed<uint8_t>(&remaining_));
     unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
     debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+    switch (unit_type_) {
+    case DW_UT_skeleton:
+    case DW_UT_split_compile:
+    case DW_UT_split_type:
+      dwo_id_ = ReadFixed<uint64_t>(&remaining_);
+      break;
+    case DW_UT_type:
+      unit_type_signature_ = ReadFixed<uint64_t>(&remaining_);
+      unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
+      break;
+    case DW_UT_compile:
+    case DW_UT_partial:
+      break;
+#if defined(_GNUC)
+    case DW_UT_lo_user ... DW_UT_hi_user:
+#else
+    case DW_UT_lo_user:
+    case DW_UT_hi_user:
+#endif
+      // User defined unit types which we do not really know about ...
+      if (verbose_level > 0) {
+        fprintf(stderr, "Unknown DWARF Unit Type in user defined range\n");
+      }
+      break;
+    }
   } else {
     debug_abbrev_offset_ = unit_sizes_.ReadDWARFOffset(&remaining_);
     unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&remaining_));
@@ -1636,15 +1661,18 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   // Sometimes a location is given as an offset into debug_loc.
   if (die.location && die.location->IsUint()) {
     uint64_t location = die.location->GetUint(die_reader);
-    if (location < file.debug_loc.size()) {
-      absl::string_view loc_range = file.debug_loc.substr(location);
-      loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
-      sink->AddFileRange("dwarf_locrange", name, loc_range);
-    } else if (verbose_level > 0) {
-      fprintf(stderr,
-              "bloaty: warning: DWARF location out of range, location=%" PRIx64
-              "\n",
-              location);
+    if (die.location->form() == DW_FORM_sec_offset) {
+      if (location < file.debug_loc.size()) {
+        absl::string_view loc_range = file.debug_loc.substr(location);
+        loc_range = GetLocationListRange(die_reader.unit_sizes(), loc_range);
+        sink->AddFileRange("dwarf_locrange", name, loc_range);
+      } else if (verbose_level > 0) {
+        fprintf(
+            stderr,
+            "bloaty: warning: DWARF location out of range, location=%" PRIx64
+            "\n",
+            location);
+      }
     }
   }
 
@@ -1653,8 +1681,10 @@ void AddDIE(const dwarf::File& file, const std::string& name,
   if (die.ranges && die.ranges->form() == DW_FORM_rnglistx && die.ranges->IsUint()) {
     uint64_t range_list = die.ranges->GetUint(die_reader);
     const dwarf::CompilationUnitSizes& sizes = die_reader.unit_sizes();
+    size_t offset_size = die_reader.unit_sizes().dwarf64() ? 8 : 4;
     string_view offset_data = StrictSubstr(
-        file.debug_rnglists, die_reader.unit_sizes().range_lists_base() + range_list);
+        file.debug_rnglists, die_reader.unit_sizes().range_lists_base() +
+                                 (range_list * offset_size));
     uint64_t offset = die_reader.unit_sizes().ReadDWARFOffset(&offset_data);
     string_view data = StrictSubstr(
         file.debug_rnglists, die_reader.unit_sizes().range_lists_base() + offset);

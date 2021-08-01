@@ -1,0 +1,64 @@
+name: build
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ["Win32", "x64"] # "ARM64"
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: configure
+        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S .
+      - name: build
+        run: cmake --build build --config Debug
+      - name: test
+        run: ctest build
+
+  macOS:
+    runs-on: macos-latest
+
+    strategy:
+      matrix:
+        include:
+          - { cflags: "", cxxflags: "" }
+          - { cflags: "-fmodules", cxxflags: "-fmodules" }
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: configure
+        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -D CMAKE_C_FLAGS=${{ matrix.cflags }} -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} -S .
+      - name: build
+        run: cmake --build build --config Debug
+      - name: test
+        run: ctest build
+
+  ubuntu:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - { CC: gcc, CXX: g++ }
+          - { CC: clang, CXX: clang++ }
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: configure
+        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -S .
+        env:
+          CC: ${{ matrix.CC }}
+          CXX: ${{ matrix.CXX }}
+      - name: build
+        run: cmake --build build --config Debug
+      - name: test
+        run: ctest build

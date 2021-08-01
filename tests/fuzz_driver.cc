@@ -21,7 +21,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
-    std::ifstream in(argv[i]);
+    std::ifstream in(argv[i], std::ios_base::in | std::ios_base::binary);
     in.seekg(0, in.end);
     size_t length = in.tellg();
     in.seekg (0, in.beg);
