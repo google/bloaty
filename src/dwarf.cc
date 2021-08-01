@@ -184,6 +184,16 @@ class CompilationUnitSizes {
     }
   }
 
+  uint64_t GetMaxAddress() const {
+    if (address_size_ == 8) {
+      return UINT64_MAX;
+    } else if (address_size_ == 4) {
+      return UINT32_MAX;
+    } else {
+      BLOATY_UNREACHABLE();
+    }
+  }
+
   // Reads an "initial length" as specified in many DWARF headers.  This
   // contains either a 32-bit or a 64-bit length, and signals whether we are
   // using the 32-bit or 64-bit DWARF format (so it sets dwarf64 appropriately).
@@ -1081,16 +1091,20 @@ void DIEReader::ReadAttributes(T&& func) {
 void ReadRangeList(const DIEReader& die_reader, uint64_t low_pc,
                    string_view name, RangeSink* sink, string_view* data) {
   std::string name_str(name);
+  uint64_t max_address = die_reader.unit_sizes().GetMaxAddress();
   while (true) {
     uint64_t start, end;
     start = die_reader.unit_sizes().ReadAddress(data);
     end = die_reader.unit_sizes().ReadAddress(data);
     if (start == 0 && end == 0) {
       return;
+    } else if (start == max_address) {
+      low_pc = end;
+    } else {
+      uint64_t size = end - start;
+      sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
+                                      name_str);
     }
-    uint64_t size = end - start;
-    sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
-                                    name_str);
   }
 }
 
