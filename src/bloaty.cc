@@ -65,6 +65,7 @@ namespace bloaty {
 // otherwise.  We would make this thread_local but that's not supported on OS X
 // right now.
 int verbose_level = 0;
+ShowDomain show = ShowDomain::kShowBoth;
 
 struct DataSourceDefinition {
   DataSource number;
@@ -1767,10 +1768,14 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
 
   if (verbose_level > 0 || options_.dump_raw_map()) {
     printf("Maps for %s:\n\n", filename.c_str());
-    printf("FILE MAP:\n");
-    maps.PrintFileMaps();
-    printf("VM MAP:\n");
-    maps.PrintVMMaps();
+    if (show != ShowDomain::kShowVM) {
+      printf("FILE MAP:\n");
+      maps.PrintFileMaps();
+    }
+    if (show != ShowDomain::kShowFile) {
+      printf("VM MAP:\n");
+      maps.PrintVMMaps();
+    }
   }
 }
 
@@ -2122,11 +2127,11 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
     } else if (args.TryParseOption("--domain", &option)) {
       has_domain = true;
       if (option == "vm") {
-        output_options->show = ShowDomain::kShowVM;
+        show = output_options->show = ShowDomain::kShowVM;
       } else if (option == "file") {
-        output_options->show = ShowDomain::kShowFile;
+        show = output_options->show = ShowDomain::kShowFile;
       } else if (option == "both") {
-        output_options->show = ShowDomain::kShowBoth;
+        show = output_options->show = ShowDomain::kShowBoth;
       } else {
         THROWF("unknown value for --domain: $0", option);
       }
