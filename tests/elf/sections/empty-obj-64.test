@@ -1,0 +1,70 @@
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x1
+  - Name:            .data
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x1
+  - Name:            .bss
+    Type:            SHT_NOBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x1
+  - Name:            .comment
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_MERGE, SHF_STRINGS ]
+    AddressAlign:    0x1
+    EntSize:         0x1
+    Content:         004743433A202844656269616E2031302E322E312D362B6275696C6432292031302E322E3120323032313031313000
+  - Name:            .note.GNU-stack
+    Type:            SHT_PROGBITS
+    AddressAlign:    0x1
+Symbols:
+  - Name:            'null'
+    Type:            STT_FILE
+    Index:           SHN_ABS
+  - Name:            .text
+    Type:            STT_SECTION
+    Section:         .text
+  - Name:            .data
+    Type:            STT_SECTION
+    Section:         .data
+  - Name:            .bss
+    Type:            STT_SECTION
+    Section:         .bss
+  - Name:            .note.GNU-stack
+    Type:            STT_SECTION
+    Section:         .note.GNU-stack
+  - Name:            .comment
+    Type:            STT_SECTION
+    Section:         .comment
+...
+
+$ bloaty --raw-map 1
+Maps for 1:
+
+FILE MAP:
+000-040	         64		[ELF Headers]
+040-070	         48		.comment
+070-118	        168		.symtab
+118-148	         48		.strtab
+148-190	         72		.shstrtab
+190-1d0	         64		[ELF Headers]
+1d0-210	         64		.text
+210-250	         64		.data
+250-290	         64		.bss
+290-2d0	         64		.comment
+2d0-310	         64		.note.GNU-stack
+310-350	         64		.symtab
+350-390	         64		.strtab
+390-3d0	         64		.shstrtab
+
+VM MAP:
+
