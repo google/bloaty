@@ -7,6 +7,9 @@
 # These special cases are documented here:
 #  https://docs.oracle.com/cd/E19683-01/817-3677/chapter6-94076/index.html
 
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s
+
 --- !ELF
 FileHeader:
   Class:           ELFCLASS64
@@ -21,16 +24,12 @@ Sections:
     Size: 0x3
 ...
 
-$ bloaty --raw-map 1
-Maps for 1:
+# CHECK: FILE MAP:
+# CHECK: 000-040	         64		[ELF Headers]
+# CHECK: 040-041	          1		.strtab
+# CHECK: 041-058	         23		.shstrtab
+# CHECK: 058-098	         64		[ELF Headers]
+# CHECK: 098-0d8	         64		.strtab
+# CHECK: 0d8-118	         64		.shstrtab
 
-FILE MAP:
-000-040	         64		[ELF Headers]
-040-041	          1		.strtab
-041-058	         23		.shstrtab
-058-098	         64		[ELF Headers]
-098-0d8	         64		.strtab
-0d8-118	         64		.shstrtab
-
-VM MAP:
-
+# CHECK: VM MAP:

@@ -1,3 +1,6 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s
+
 --- !ELF
 FileHeader:
   Class:           ELFCLASS64
@@ -83,43 +86,39 @@ Symbols:
     Size:            0x0000000000000315
 ...
 
-$ bloaty --raw-map 1
-Maps for 1:
+# CHECK: FILE MAP:
+# CHECK: 000-040	         64		[ELF Headers]
+# CHECK: 040-050	         16		.text
+# CHECK: 050-220	        464		.data
+# CHECK: 220-535	        789		.rodata
+# CHECK: 535-558	         35		.comment
+# CHECK: 558-590	         56		.eh_frame
+# CHECK: 590-5a8	         24		.rela.eh_frame
+# CHECK: 5a8-650	        168		.symtab
+# CHECK: 650-66b	         27		.strtab
+# CHECK: 66b-6d8	        109		.shstrtab
+# CHECK: 6d8-718	         64		[ELF Headers]
+# CHECK: 718-758	         64		.text
+# CHECK: 758-798	         64		.bss
+# CHECK: 798-7d8	         64		.data
+# CHECK: 7d8-818	         64		.rodata
+# CHECK: 818-858	         64		.comment
+# CHECK: 858-898	         64		.note.GNU-stack
+# CHECK: 898-8d8	         64		.eh_frame
+# CHECK: 8d8-918	         64		.rela.eh_frame
+# CHECK: 918-958	         64		.llvm_addrsig
+# CHECK: 958-998	         64		.symtab
+# CHECK: 998-9d8	         64		.strtab
+# CHECK: 9d8-a18	         64		.shstrtab
 
-FILE MAP:
-000-040	         64		[ELF Headers]
-040-050	         16		.text
-050-220	        464		.data
-220-535	        789		.rodata
-535-558	         35		.comment
-558-590	         56		.eh_frame
-590-5a8	         24		.rela.eh_frame
-5a8-650	        168		.symtab
-650-66b	         27		.strtab
-66b-6d8	        109		.shstrtab
-6d8-718	         64		[ELF Headers]
-718-758	         64		.text
-758-798	         64		.bss
-798-7d8	         64		.data
-7d8-818	         64		.rodata
-818-858	         64		.comment
-858-898	         64		.note.GNU-stack
-898-8d8	         64		.eh_frame
-8d8-918	         64		.rela.eh_frame
-918-958	         64		.llvm_addrsig
-958-998	         64		.symtab
-998-9d8	         64		.strtab
-9d8-a18	         64		.shstrtab
-
-VM MAP:
-00000000000-10000000000	 1099511627776		[-- Nothing mapped --]
-10000000000-1000000000b	         11		.text
-1000000000b-20000000000	 1099511627765		[-- Nothing mapped --]
-20000000000-2000000007b	        123		.bss
-2000000007b-30000000000	 1099511627653		[-- Nothing mapped --]
-30000000000-300000001c8	        456		.data
-300000001c8-40000000000	 1099511627320		[-- Nothing mapped --]
-40000000000-40000000315	        789		.rodata
-40000000315-70000000000	 3298534882539		[-- Nothing mapped --]
-70000000000-70000000038	         56		.eh_frame
-
+# CHECK: VM MAP:
+# CHECK: 00000000000-10000000000	 1099511627776		[-- Nothing mapped --]
+# CHECK: 10000000000-1000000000b	         11		.text
+# CHECK: 1000000000b-20000000000	 1099511627765		[-- Nothing mapped --]
+# CHECK: 20000000000-2000000007b	        123		.bss
+# CHECK: 2000000007b-30000000000	 1099511627653		[-- Nothing mapped --]
+# CHECK: 30000000000-300000001c8	        456		.data
+# CHECK: 300000001c8-40000000000	 1099511627320		[-- Nothing mapped --]
+# CHECK: 40000000000-40000000315	        789		.rodata
+# CHECK: 40000000315-70000000000	 3298534882539		[-- Nothing mapped --]
+# CHECK: 70000000000-70000000038	         56		.eh_frame

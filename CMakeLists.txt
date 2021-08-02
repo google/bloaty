@@ -334,6 +334,20 @@ else()
   if (IS_DIRECTORY "${PROJECT_SOURCE_DIR}/tests")
     enable_testing()
 
+    find_package(Python COMPONENTS Interpreter)
+    if(Python_FOUND)
+      set(BLOATY_SRC_DIR ${PROJECT_SOURCE_DIR})
+      set(BLOATY_OBJ_DIR ${PROJECT_BINARY_DIR})
+      configure_file(tests/lit.site.cfg.in tests/lit.site.cfg @ONLY)
+
+      # TODO(abdulras) polish this further and convert this to `add_test` so that
+      # the default test suite run executes the tests.
+      add_custom_target(check-bloaty
+        COMMAND ${Python_EXECUTABLE} ${LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests
+        COMMENT "Running bloaty tests..."
+        USES_TERMINAL)
+    endif()
+
     if(BUILD_TESTING)
       option(INSTALL_GTEST "" OFF)
       add_subdirectory(third_party/googletest)

@@ -1,3 +1,6 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck -check-prefix %s
+
 --- !ELF
 FileHeader:
   Class:           ELFCLASS64
@@ -47,24 +50,20 @@ Symbols:
     Section:         .comment
 ...
 
-$ bloaty --raw-map 1
-Maps for 1:
+# CHECK: FILE MAP:
+# CHECK: 000-040	         64		[ELF Headers]
+# CHECK: 040-070	         48		.comment
+# CHECK: 070-118	        168		.symtab
+# CHECK: 118-148	         48		.strtab
+# CHECK: 148-190	         72		.shstrtab
+# CHECK: 190-1d0	         64		[ELF Headers]
+# CHECK: 1d0-210	         64		.text
+# CHECK: 210-250	         64		.data
+# CHECK: 250-290	         64		.bss
+# CHECK: 290-2d0	         64		.comment
+# CHECK: 2d0-310	         64		.note.GNU-stack
+# CHECK: 310-350	         64		.symtab
+# CHECK: 350-390	         64		.strtab
+# CHECK: 390-3d0	         64		.shstrtab
 
-FILE MAP:
-000-040	         64		[ELF Headers]
-040-070	         48		.comment
-070-118	        168		.symtab
-118-148	         48		.strtab
-148-190	         72		.shstrtab
-190-1d0	         64		[ELF Headers]
-1d0-210	         64		.text
-210-250	         64		.data
-250-290	         64		.bss
-290-2d0	         64		.comment
-2d0-310	         64		.note.GNU-stack
-310-350	         64		.symtab
-350-390	         64		.strtab
-390-3d0	         64		.shstrtab
-
-VM MAP:
-
+# CHECK: VM MAP:
