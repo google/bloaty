@@ -76,6 +76,32 @@ $ cmake ..
 $ make -j6
 ```
 
+### Running the new extended test suite
+
+> NOTE: these tests are still experimental and not covered under CI yet.  Please
+> report any issues in running them.
+
+When configuring the project via CMake, a few additional parameters must be
+specified currently:
+- `-DLIT_EXECUTABLE=<PATH>`: specifies where to find the lit tool
+- `-DFILECHECK_EXECUTABLE=<PATH>`: specifies where to find the FileCheck tool
+- `-DYAML2OBJ_EXECUTABLE=<PATH>`: specifies where to find the yaml2obj tool
+
+You can install lit via pip:
+```sh
+pip install --user lit
+```
+
+The FileCheck utility and yaml2obj currently need to be provided by the user.
+These are part of the LLVM toolchain and require a very recent build
+(development release from the main branch) to run the tests.
+
+```sh
+cmake -B build -G Ninja -S . -DLIT_EXECUTABLE=${HOME}/Library/Python/3.8/bin/lit -DFILECHECK_EXECUTABLE=${HOME}/BinaryCache/llvm.org/bin/FileCheck -DYAML2OBJ_EXECUTABLE=${HOME}/BinaryCache/llvm.org/bin/yaml2obj
+cmake --build build --config Debug
+cmake --build build --target check-bloaty
+```
+
 ## Running Bloaty
 
 Run it directly on a binary target.  For example, run it on itself.

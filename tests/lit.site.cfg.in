@@ -1,0 +1,13 @@
+# -*- Python -*-
+
+import os
+
+config.bloaty_src_root = "@BLOATY_SRC_DIR@"
+config.bloaty_obj_root = "@BLOATY_OBJ_DIR@"
+
+config.filecheck_path = "@FILECHECK_EXECUTABLE@"
+config.yaml2obj_path = "@YAML2OBJ_EXECUTABLE@"
+
+if not config.test_exec_root:
+  config.test_exec_root = os.path.dirname(os.path.realpath(__file__))
+lit_config.load_config(config, "@BLOATY_SRC_DIR@/tests/lit.cfg")

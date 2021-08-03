@@ -3,6 +3,10 @@
 # a special kind of entry where the end address signifies the new base
 # address.
 
+# RUN: %yaml2obj %s --docnum=1 -o %t.obj
+# RUN: %yaml2obj %s --docnum=2 -o %t.dwo
+# RUN: %bloaty %t.obj --debug-file %t.dwo -d compileunits --raw-map --domain=vm | %FileCheck %s
+
 --- !ELF
 FileHeader:
   Class:           ELFCLASS64
@@ -86,12 +90,8 @@ DWARF:
         - AbbrCode:        0x0
 ...
 
-$ bloaty 1 --debug-file=2 -d compileunits --raw-map --domain=vm
-Maps for 1:
-
-VM MAP:
-0000-1000	       4096		[-- Nothing mapped --]
-1000-1042	         66		[section .text]
-1042-1047	          5		test.c
-1047-1151	        266		[section .text]
-
+# CHECK: VM MAP:
+# CHECK: 0000-1000	       4096		[-- Nothing mapped --]
+# CHECK: 1000-1042	         66		[section .text]
+# CHECK: 1042-1047	          5		test.c
+# CHECK: 1047-1151	        266		[section .text]
