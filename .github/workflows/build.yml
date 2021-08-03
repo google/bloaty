@@ -17,12 +17,40 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          repository: llvm/llvm-project
+          ref: llvmorg-13.0.0-rc1
+          path: llvm-project
+          fetch-depth: 1
+      - name: Get LLVM Revision
+        id: llvm-revision
+        run: |
+          echo "::set-output name=revision::$(git -C ${{ github.workspace }}/llvm-project rev-parse HEAD)"
+      - uses: actions/cache@v2
+        id: llvm-build
+        with:
+          path: ${{ github.workspace }}/build/llvm-project
+          key: ${{ runner.os }}-${{ matrix.arch }}-${{ steps.llvm-revision.outputs.revision }}
+      - name: configure LLVM
+        if: steps.llvm-build.outputs.cache-hit != 'true'
+        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release -G "Visual Studio 16 2019" -S ${{ github.workspace }}/llvm-project/llvm
+      - name: build LLVM tools
+        if: steps.llvm-build.outputs.cache-hit != 'true'
+        run: |
+          cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
+          cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
+
+      - uses: actions/checkout@v2
+        with:
+          path: bloaty
       - name: configure
-        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S .
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck.exe -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj.exe -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/utils/lit/lit.py
       - name: build
-        run: cmake --build build --config Debug
+        run: cmake --build build/bloaty --config Debug
       - name: test
-        run: cmake --build build --config Debug --target RUN_TESTS
+        run: |
+          cmake --build build/bloaty --config Debug --target RUN_TESTS
+          cmake --build build/bloaty --config Debug --target check-bloaty
 
   macOS:
     runs-on: macos-latest
@@ -35,12 +63,40 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          repository: llvm/llvm-project
+          ref: llvmorg-13.0.0-rc1
+          path: llvm-project
+          fetch-depth: 1
+      - name: Get LLVM Revision
+        id: llvm-revision
+        run: |
+          echo "::set-output name=revision::$(git -C ${{ github.workspace }}/llvm-project rev-parse HEAD)"
+      - uses: actions/cache@v2
+        id: llvm-build
+        with:
+          path: ${{ github.workspace }}/build/llvm-project
+          key: ${{ runner.os }}-${{ steps.llvm-revision.outputs.revision }}
+      - name: configure LLVM
+        if: steps.llvm-build.outputs.cache-hit != 'true'
+        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release ${{ github.workspace }}/llvm-project/llvm
+      - name: build LLVM tools
+        if: steps.llvm-build.outputs.cache-hit != 'true'
+        run: |
+          cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
+          cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
+
+      - uses: actions/checkout@v2
+        with:
+          path: ${{ github.workspace }}/bloaty
       - name: configure
-        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -D CMAKE_C_FLAGS=${{ matrix.cflags }} -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} -S .
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -D CMAKE_C_FLAGS=${{ matrix.cflags }} -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/utils/lit/lit.py
       - name: build
-        run: cmake --build build --config Debug
+        run: cmake --build build/bloaty --config Debug
       - name: test
-        run: cmake --build build --config Debug --target test
+        run: |
+          cmake --build build/bloaty --config Debug --target test
+          cmake --build build/bloaty --config Debug --target check-bloaty
 
   ubuntu:
     runs-on: ubuntu-latest
@@ -53,12 +109,40 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          repository: llvm/llvm-project
+          ref: llvmorg-13.0.0-rc1
+          path: llvm-project
+          fetch-depth: 1
+      - name: Get LLVM Revision
+        id: llvm-revision
+        run: |
+          echo "::set-output name=revision::$(git -C ${{ github.workspace }}/llvm-project rev-parse HEAD)"
+      - uses: actions/cache@v2
+        id: llvm-build
+        with:
+          path: ${{ github.workspace }}/build/llvm-project
+          key: ${{ runner.os }}-${{ steps.llvm-revision.outputs.revision }}
+      - name: configure LLVM
+        if: steps.llvm-build.outputs.cache-hit != 'true'
+        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release ${{ github.workspace }}/llvm-project/llvm
+      - name: build LLVM tools
+        if: steps.llvm-build.outputs.cache-hit != 'true'
+        run: |
+          cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
+          cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
+
+      - uses: actions/checkout@v2
+        with:
+          path: ${{ github.workspace }}/bloaty
       - name: configure
-        run: cmake -B build -D CMAKE_BUILD_TYPE=Debug -S .
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/utils/lit/lit.py
         env:
           CC: ${{ matrix.CC }}
           CXX: ${{ matrix.CXX }}
       - name: build
-        run: cmake --build build --config Debug
+        run: cmake --build build/bloaty --config Debug
       - name: test
-        run: cmake --build build --config Debug --target test
+        run: |
+          cmake --build build/bloaty --config Debug --target test
+          cmake --build build/bloaty --config Debug --target check-bloaty

@@ -335,13 +335,14 @@ else()
     enable_testing()
 
     find_package(Python COMPONENTS Interpreter)
-    if(Python_FOUND)
+    find_program(LIT_EXECUTABLE NAMES lit lit.py)
+    find_program(FILECHECK_EXECUTABLE FileCheck)
+    find_program(YAML2OBJ_EXECUTABLE yaml2obj)
+    if(Python_FOUND AND LIT AND FILECHECK AND YAML2OBJ)
       set(BLOATY_SRC_DIR ${PROJECT_SOURCE_DIR})
       set(BLOATY_OBJ_DIR ${PROJECT_BINARY_DIR})
       configure_file(tests/lit.site.cfg.in tests/lit.site.cfg @ONLY)
 
-      # TODO(abdulras) polish this further and convert this to `add_test` so that
-      # the default test suite run executes the tests.
       add_custom_target(check-bloaty
         COMMAND ${Python_EXECUTABLE} ${LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests
         COMMENT "Running bloaty tests..."
