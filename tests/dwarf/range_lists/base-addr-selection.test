@@ -3,8 +3,9 @@
 # a special kind of entry where the end address signifies the new base
 # address.
 
-# RUN: %yaml2obj %s -o %t.obj
-# RUN: %bloaty %t.obj --debug-file %t.dwo --raw-map --domain=vm | %FileCheck %s
+# RUN: %yaml2obj %s --docnum=1 -o %t.obj
+# RUN: %yaml2obj %s --docnum=2 -o %t.dwo
+# RUN: %bloaty %t.obj --debug-file %t.dwo -d compileunits --raw-map --domain=vm | %FileCheck %s
 
 --- !ELF
 FileHeader:

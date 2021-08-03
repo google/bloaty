@@ -35,20 +35,20 @@ ProgramHeaders:
     Align:           0x0000000000001000
   - Type:            PT_LOAD
     Flags:           [ PF_X, PF_R ]
-#    FirstSec:        .init
-#    LastSec:         .fini
+    FirstSec:        .init
+    LastSec:         .fini
     VAddr:           0x0000000000401000
     Align:           0x0000000000001000
   - Type:            PT_LOAD
     Flags:           [ PF_R ]
-#    FirstSec:        .rodata
-#    LastSec:         .eh_frame
+    FirstSec:        .rodata
+    LastSec:         .eh_frame
     VAddr:           0x0000000000402000
     Align:           0x0000000000001000
   - Type:            PT_LOAD
     Flags:           [ PF_W, PF_R ]
-#    FirstSec:        .init_array
-#    LastSec:         .bss
+    FirstSec:        .init_array
+    LastSec:         .bss
     VAddr:           0x0000000000403FE8
     FileSize:        0x228
     MemSize:         0x510
@@ -58,8 +58,8 @@ ProgramHeaders:
     Align:           0x0000000000000010
   - Type:            PT_GNU_RELRO
     Flags:           [ PF_R ]
-#    FirstSec:        .init_array
-#    LastSec:         .got
+    FirstSec:        .init_array
+    LastSec:         .got
     VAddr:           0x0000000000403FE8
 Sections:
   - Name:            .init
