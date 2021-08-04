@@ -65,8 +65,9 @@ please see [How Bloaty Works](doc/how-bloaty-works.md).
 To build, use `cmake`. For example:
 
 ```
-$ cmake -G Ninja .
-$ ninja
+$ cmake -B build -G Ninja -S .
+$ cmake --build build
+$ cmake --build build --target install
 ```
 
 Bloaty bundles ``libprotobuf``, ``re2``, ``capstone``, and
