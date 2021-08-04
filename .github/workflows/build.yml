@@ -65,6 +65,8 @@ jobs:
           - { cflags: "-fmodules", cxxflags: "-fmodules" }
 
     steps:
+      - uses: seanmiddleditch/gha-setup-ninja@master
+
       - uses: actions/checkout@v2
         with:
           repository: llvm/llvm-project
@@ -111,6 +113,8 @@ jobs:
           - { CC: clang, CXX: clang++ }
 
     steps:
+      - uses: seanmiddleditch/gha-setup-ninja@master
+
       - uses: actions/checkout@v2
         with:
           repository: llvm/llvm-project
