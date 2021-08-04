@@ -82,7 +82,7 @@ jobs:
           key: ${{ runner.os }}-${{ steps.llvm-revision.outputs.revision }}
       - name: configure LLVM
         if: steps.llvm-build.outputs.cache-hit != 'true'
-        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release ${{ github.workspace }}/llvm-project/llvm
+        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release -G Ninja -S ${{ github.workspace }}/llvm-project/llvm
       - name: build LLVM tools
         if: steps.llvm-build.outputs.cache-hit != 'true'
         run: |
@@ -93,7 +93,7 @@ jobs:
         with:
           path: ${{ github.workspace }}/bloaty
       - name: configure
-        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -D CMAKE_C_FLAGS=${{ matrix.cflags }} -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -D CMAKE_C_FLAGS=${{ matrix.cflags }} -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} -G Ninja -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
       - name: build
         run: cmake --build build/bloaty --config Debug
       - name: test
@@ -128,7 +128,7 @@ jobs:
           key: ${{ runner.os }}-${{ steps.llvm-revision.outputs.revision }}
       - name: configure LLVM
         if: steps.llvm-build.outputs.cache-hit != 'true'
-        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release ${{ github.workspace }}/llvm-project/llvm
+        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release -G Ninja -S ${{ github.workspace }}/llvm-project/llvm
       - name: build LLVM tools
         if: steps.llvm-build.outputs.cache-hit != 'true'
         run: |
@@ -139,7 +139,7 @@ jobs:
         with:
           path: ${{ github.workspace }}/bloaty
       - name: configure
-        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -G Ninja -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
         env:
           CC: ${{ matrix.CC }}
           CXX: ${{ matrix.CXX }}
