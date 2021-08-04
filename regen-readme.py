@@ -5,7 +5,7 @@ import os
 import sys
 
 basedir = os.path.dirname(sys.argv[0])
-readme = os.path.join(basedir, "README.md")
+readme = os.path.join(basedir, "doc/using.md")
 
 with open(readme) as f:
   inp = f.read()
