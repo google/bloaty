@@ -335,17 +335,23 @@ else()
     enable_testing()
 
     find_package(Python COMPONENTS Interpreter)
-    if(Python_FOUND)
+    find_program(LIT_EXECUTABLE NAMES lit-script.py lit.py lit)
+    find_program(FILECHECK_EXECUTABLE FileCheck)
+    find_program(YAML2OBJ_EXECUTABLE yaml2obj)
+    if(Python_FOUND AND LIT_EXECUTABLE AND FILECHECK_EXECUTABLE AND YAML2OBJ_EXECUTABLE)
       set(BLOATY_SRC_DIR ${PROJECT_SOURCE_DIR})
       set(BLOATY_OBJ_DIR ${PROJECT_BINARY_DIR})
       configure_file(tests/lit.site.cfg.in tests/lit.site.cfg @ONLY)
 
-      # TODO(abdulras) polish this further and convert this to `add_test` so that
-      # the default test suite run executes the tests.
       add_custom_target(check-bloaty
-        COMMAND ${Python_EXECUTABLE} ${LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests
+        COMMAND ${Python_EXECUTABLE} ${LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests --param bloaty=$<TARGET_FILE:bloaty>
+        DEPENDS
+          bloaty
+          ${CMAKE_CURRENT_SOURCE_DIR}/tests/lit.cfg
+          ${CMAKE_CURRENT_BINARY_DIR}/tests/lit.site.cfg
         COMMENT "Running bloaty tests..."
         USES_TERMINAL)
+      set_property(TARGET check-bloaty PROPERTY FOLDER "tests")
     endif()
 
     if(BUILD_TESTING)
