@@ -335,7 +335,7 @@ else()
     enable_testing()
 
     find_package(Python COMPONENTS Interpreter)
-    find_program(LIT_EXECUTABLE NAMES lit lit.py)
+    find_program(LIT_EXECUTABLE NAMES lit-script.py lit.py lit)
     find_program(FILECHECK_EXECUTABLE FileCheck)
     find_program(YAML2OBJ_EXECUTABLE yaml2obj)
     if(Python_FOUND AND LIT_EXECUTABLE AND FILECHECK_EXECUTABLE AND YAML2OBJ_EXECUTABLE)
