@@ -351,6 +351,7 @@ else()
           ${CMAKE_CURRENT_BINARY_DIR}/tests/lit.site.cfg
         COMMENT "Running bloaty tests..."
         USES_TERMINAL)
+      set_property(TARGET check-bloaty PROPERTY FOLDER "tests")
     endif()
 
     if(BUILD_TESTING)
