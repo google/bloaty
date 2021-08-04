@@ -2,7 +2,7 @@ name: "LIEF: Library to Instrument Executable Formats (PE header)"
 description:
     "This contains structures as defined by the LIEF project to parse PE headers."
     "They only contain struct and constant definitions (no code) and their"
-    "contents are almost entirely derivable from the ELF standard."
+    "contents are almost entirely derivable from the PE standard."
 
 third_party {
   url {
@@ -21,5 +21,6 @@ third_party {
   }
   local_modifications:
       "Renamed include/LIEF/PE/structures.inc to third_party/lief_pe/pe_structures.h"
+      "Manually extracted some enums from include/LIEF/PE/enums.hpp.in to third_party/lief_pe/pe_enums.h"
       "Added license header to the file."
 }

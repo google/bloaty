@@ -12,56 +12,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bloaty.h"
 #include "absl/strings/substitute.h"
+#include "bloaty.h"
 #include "util.h"
 
 using absl::string_view;
+using std::string;
 
 namespace bloaty {
 namespace pe {
-const uint16_t dos_magic = 0x5A4D;  // MZ
+constexpr uint16_t dos_magic = 0x5A4D;  // MZ
 
+// From LIEF/include/LIEF/PE/Structures.hpp.in
 //! Sizes in bytes of various things in the COFF format.
-enum class StructSizes {
-  kHeader16Size = 20,
-  kHeader32Size = 56,
-  kNameSize = 8,
-  kSymbol16Size = 18,
-  kSymbol32Size = 20,
-  kSectionSize = 40,
-  kRelocationSize = 10,
-  kBaseRelocationBlockSize = 8,
-  kImportDirectoryTableEntrySize = 20,
-  kResourceDirectoryTableSize = 16,
-  kResourceDirectoryEntriesSize = 8,
-  kResourceDataEntrySize = 16,
-};
+constexpr size_t kHeader16Size = 20;
+constexpr size_t kHeader32Size = 56;
+constexpr size_t kNameSize = 8;
+constexpr size_t kSymbol16Size = 18;
+constexpr size_t kSymbol32Size = 20;
+constexpr size_t kSectionSize = 40;
+constexpr size_t kRelocationSize = 10;
+constexpr size_t kBaseRelocationBlockSize = 8;
+constexpr size_t kImportDirectoryTableEntrySize = 20;
+constexpr size_t kResourceDirectoryTableSize = 16;
+constexpr size_t kResourceDirectoryEntriesSize = 8;
+constexpr size_t kResourceDataEntrySize = 16;
 
+#include "third_party/lief_pe/pe_enums.h"
 #include "third_party/lief_pe/pe_structures.h"
 
-static_assert(static_cast<size_t>(StructSizes::kSectionSize) ==
-                  sizeof(pe_section),
+static_assert(kSectionSize == sizeof(pe_section),
               "Compiler options broke LIEF struct layout");
-static_assert(static_cast<size_t>(StructSizes::kRelocationSize) ==
-                  sizeof(pe_relocation),
+static_assert(kRelocationSize == sizeof(pe_relocation),
               "Compiler options broke LIEF struct layout");
-static_assert(static_cast<size_t>(StructSizes::kBaseRelocationBlockSize) ==
-                  sizeof(pe_base_relocation_block),
+static_assert(kBaseRelocationBlockSize == sizeof(pe_base_relocation_block),
               "Compiler options broke LIEF struct layout");
-static_assert(
-    static_cast<size_t>(StructSizes::kImportDirectoryTableEntrySize) ==
-        sizeof(pe_import),
-    "Compiler options broke LIEF struct layout");
-static_assert(static_cast<size_t>(StructSizes::kResourceDirectoryTableSize) ==
+static_assert(kImportDirectoryTableEntrySize == sizeof(pe_import),
+              "Compiler options broke LIEF struct layout");
+static_assert(kResourceDirectoryTableSize ==
                   sizeof(pe_resource_directory_table),
               "Compiler options broke LIEF struct layout");
-static_assert(static_cast<size_t>(StructSizes::kResourceDirectoryEntriesSize) ==
+static_assert(kResourceDirectoryEntriesSize ==
                   sizeof(pe_resource_directory_entries),
               "Compiler options broke LIEF struct layout");
-static_assert(static_cast<size_t>(StructSizes::kResourceDataEntrySize) ==
-                  sizeof(pe_resource_data_entry),
+static_assert(kResourceDataEntrySize == sizeof(pe_resource_data_entry),
               "Compiler options broke LIEF struct layout");
+static_assert(kSymbol16Size == sizeof(pe_symbol),
+              "Compiler options broke LIEF struct layout");
+
+static_assert(sizeof(PE_TYPE) == sizeof(uint16_t),
+              "Compiler options broke PE_TYPE size");
 
 class PeFile {
  public:
@@ -70,10 +70,10 @@ class PeFile {
   bool IsOpen() const { return ok_; }
 
   string_view entire_file() const { return data_; }
-  string_view header_region() const { return header_region_; }
+  string_view pe_headers() const { return pe_headers_; }
+  string_view section_headers() const { return section_headers_; }
 
   uint32_t section_count() const { return section_count_; }
-  string_view section_headers() const { return section_headers_; }
   string_view section_header(size_t n) const {
     return StrictSubstr(section_headers_, n * sizeof(pe_section),
                         sizeof(pe_section));
@@ -92,9 +92,10 @@ class PeFile {
 
   pe_dos_header dos_header_;
   pe_header pe_header_;
-  string_view header_region_;
-  uint32_t section_count_;
+
+  string_view pe_headers_;
   string_view section_headers_;
+  uint32_t section_count_;
 };
 
 bool PeFile::Initialize() {
@@ -109,9 +110,16 @@ bool PeFile::Initialize() {
     return false;
   }
 
-  string_view exe_header =
-      GetRegion(dos_header_.AddressOfNewExeHeader, sizeof(pe_header));
-  memcpy(&pe_header_, exe_header.data(), exe_header.size());
+  PE_TYPE Magic;
+  auto pe_end =
+      CheckedAdd(dos_header_.AddressOfNewExeHeader, sizeof(pe_header_));
+  if (CheckedAdd(pe_end, sizeof(Magic)) > data_.size()) {
+    // Cannot fit the headers / magic from optional header
+    return false;
+  }
+
+  memcpy(&pe_header_, data_.data() + dos_header_.AddressOfNewExeHeader,
+         sizeof(pe_header_));
 
   if (!std::equal(pe_header_.signature, pe_header_.signature + sizeof(PE_Magic),
                   std::begin(PE_Magic))) {
@@ -119,13 +127,20 @@ bool PeFile::Initialize() {
     return false;
   }
 
-  // TODO(mj): Parse PE header further to determine this
-  is_64bit_ = false;
+  memcpy(&Magic, data_.data() + pe_end, sizeof(Magic));
+
+  if (Magic != PE_TYPE::PE32 && Magic != PE_TYPE::PE32_PLUS) {
+    // Unknown PE magic
+    return false;
+  }
+
+  is_64bit_ = Magic == PE_TYPE::PE32_PLUS;
 
   section_count_ = pe_header_.NumberOfSections;
 
+  // TODO(mj): Figure out if we should trust SizeOfOptionalHeader here
   const uint32_t sections_offset = dos_header_.AddressOfNewExeHeader +
-                                   sizeof(pe_header) +
+                                   sizeof(pe_header_) +
                                    pe_header_.SizeOfOptionalHeader;
 
   auto sections_size = CheckedMul(section_count_, sizeof(pe_section));
@@ -134,7 +149,7 @@ bool PeFile::Initialize() {
     return false;
   }
 
-  header_region_ = GetRegion(0, sections_offset);
+  pe_headers_ = GetRegion(0, sections_offset);
   section_headers_ = GetRegion(sections_offset, sections_size);
 
   return true;
@@ -142,8 +157,7 @@ bool PeFile::Initialize() {
 
 class Section {
  public:
-  std::string name;
-  string_view data;
+  string name;
 
   uint32_t raw_offset() const { return header_.PointerToRawData; }
   uint32_t raw_size() const { return header_.SizeOfRawData; }
@@ -154,15 +168,12 @@ class Section {
   Section(string_view header_data) {
     assert(header_data.size() == sizeof(header_));
     memcpy(&header_, header_data.data(), sizeof(header_));
-    data = header_data;
 
     // TODO(mj): Handle long section names:
     // For longer names, this member contains a forward slash (/) followed by an
     // ASCII representation of a decimal number that is an offset into the
     // string table.
-    name = std::string(
-        header_.Name,
-        strnlen(header_.Name, static_cast<size_t>(StructSizes::kNameSize)));
+    name = string(header_.Name, strnlen(header_.Name, kNameSize));
   }
 
  private:
@@ -190,14 +201,14 @@ void ParseSections(const PeFile& pe, RangeSink* sink) {
 }
 
 void AddCatchAll(const PeFile& pe, RangeSink* sink) {
-  // The last-line fallback to make sure we cover the entire VM space.
   assert(pe.IsOpen());
 
-  auto begin = pe.header_region().data() - sink->input_file().data().data();
-  sink->AddRange("pe_catchall", "[PE Headers]", begin,
-                 pe.header_region().size(), pe.header_region());
+  auto begin = pe.pe_headers().data() - sink->input_file().data().data();
+  sink->AddRange("pe_catchall", "[PE Headers]", begin, pe.pe_headers().size(),
+                 pe.pe_headers());
+
   begin = pe.section_headers().data() - sink->input_file().data().data();
-  sink->AddRange("pe_catchall", "[PE Headers]", begin,
+  sink->AddRange("pe_catchall", "[PE Section Headers]", begin,
                  pe.section_headers().size(), pe.section_headers());
 
   // The last-line fallback to make sure we cover the entire file.
@@ -227,8 +238,8 @@ class PEObjectFile : public ObjectFile {
         case DataSource::kRawSymbols:
         case DataSource::kShortSymbols:
         case DataSource::kFullSymbols:
-          // TODO(mj): Generate symbols from debug info, exports and other known
-          // structures
+          // TODO(mj): Generate symbols from debug info, exports, imports, tls
+          // data, relocations, resources ...
         case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
         case DataSource::kInlines:
@@ -239,8 +250,7 @@ class PEObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(absl::string_view /*symbol*/,
-                          DataSource /*symbol_source*/,
+  bool GetDisassemblyInfo(string_view /*symbol*/, DataSource /*symbol_source*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("PE files do not support disassembly yet");
     return false;

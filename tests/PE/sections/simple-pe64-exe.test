@@ -1,0 +1,105 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s --dump-input fail
+
+--- !COFF
+OptionalHeader:
+  AddressOfEntryPoint: 4160
+  ImageBase:       4194304
+  SectionAlignment: 4096
+  FileAlignment:   512
+  MajorOperatingSystemVersion: 4
+  MinorOperatingSystemVersion: 0
+  MajorImageVersion: 0
+  MinorImageVersion: 0
+  MajorSubsystemVersion: 4
+  MinorSubsystemVersion: 0
+  Subsystem:       IMAGE_SUBSYSTEM_WINDOWS_CUI
+  DLLCharacteristics: [  ]
+  SizeOfStackReserve: 1048576
+  SizeOfStackCommit: 4096
+  SizeOfHeapReserve: 1048576
+  SizeOfHeapCommit: 4096
+  ExportTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ImportTable:
+    RelativeVirtualAddress: 8224
+    Size:            40
+  ResourceTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ExceptionTable:
+    RelativeVirtualAddress: 12288
+    Size:            24
+  CertificateTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  BaseRelocationTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  Debug:
+    RelativeVirtualAddress: 0
+    Size:            0
+  Architecture:
+    RelativeVirtualAddress: 0
+    Size:            0
+  GlobalPtr:
+    RelativeVirtualAddress: 0
+    Size:            0
+  TlsTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  LoadConfigTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  BoundImport:
+    RelativeVirtualAddress: 0
+    Size:            0
+  IAT:
+    RelativeVirtualAddress: 8264
+    Size:            48
+  DelayImportDescriptor:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ClrRuntimeHeader:
+    RelativeVirtualAddress: 0
+    Size:            0
+header:
+  Machine:         IMAGE_FILE_MACHINE_AMD64
+  Characteristics: [ IMAGE_FILE_RELOCS_STRIPPED, IMAGE_FILE_EXECUTABLE_IMAGE, IMAGE_FILE_LINE_NUMS_STRIPPED, IMAGE_FILE_LOCAL_SYMS_STRIPPED, IMAGE_FILE_LARGE_ADDRESS_AWARE, IMAGE_FILE_DEBUG_STRIPPED ]
+sections:
+  - Name:            .text
+    Characteristics: [ IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ ]
+    VirtualAddress:  4096
+    VirtualSize:     232
+    SectionData:     554889E54881EC20000000488D0DEE0F0000E8A9000000B800000000E900000000C9C30001040205040301500000000000000000000000000000000000000000554889E54881EC50000000B8000000008945E0BA00000300B900000100E866000000B901000000E864000000488D45E04889442420B8000000004989C1488D45E84989C0488D55F0488D4DFCE847000000488B45E84989C0488B55F08B4DFCE85CFFFFFF8945E48B4DE4E831000000C9C3000000010402050403015000000000FF25820F00000000FF25820F00000000FF25820F00000000FF25820F00000000FF25820F00000000
+  - Name:            .data
+    Characteristics: [ IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE ]
+    VirtualAddress:  8192
+    VirtualSize:     256
+    SectionData:     4D61726B204A616E73656E000000000000000000000000000000000000000000782000000000000000000000A8200000482000000000000000000000000000000000000000000000B320000000000000BA20000000000000C720000000000000D820000000000000E8200000000000000000000000000000B320000000000000BA20000000000000C720000000000000D820000000000000E82000000000000000000000000000006D73766372742E646C6C000000707574730000005F636F6E74726F6C66700000005F5F7365745F6170705F747970650000005F5F6765746D61696E6172677300000065786974000000000000000000000000000000000000
+  - Name:            .pdata
+    Characteristics: [ IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ ]
+    VirtualAddress:  12288
+    VirtualSize:     24
+    SectionData:     0B10000023100000241000004B100000B1100000B4100000
+symbols:         []
+...
+
+# CHECK: FILE MAP:
+# CHECK: 000-188	        392		[PE Headers]
+# CHECK: 188-200	        120		[PE Section Headers]
+# CHECK: 200-400	        512		.text
+# CHECK: 400-600	        512		.data
+# CHECK: 600-800	        512		.pdata
+
+# CHECK: VM MAP:
+# CHECK: 0000-0188	        392		[PE Headers]
+# CHECK: 0188-0200	        120		[PE Section Headers]
+# CHECK: 0200-1000	       3584		[-- Nothing mapped --]
+# CHECK: 1000-10e8	        232		.text
+# CHECK: 10e8-2000	       3864		[-- Nothing mapped --]
+# CHECK: 2000-2100	        256		.data
+# CHECK: 2100-3000	       3840		[-- Nothing mapped --]
+# CHECK: 3000-3018	         24		.pdata
+

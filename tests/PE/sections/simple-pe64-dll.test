@@ -1,0 +1,105 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s --dump-input fail
+
+--- !COFF
+OptionalHeader:
+  AddressOfEntryPoint: 4192
+  ImageBase:       268435456
+  SectionAlignment: 4096
+  FileAlignment:   512
+  MajorOperatingSystemVersion: 4
+  MinorOperatingSystemVersion: 0
+  MajorImageVersion: 0
+  MinorImageVersion: 0
+  MajorSubsystemVersion: 4
+  MinorSubsystemVersion: 0
+  Subsystem:       IMAGE_SUBSYSTEM_WINDOWS_GUI
+  DLLCharacteristics: [  ]
+  SizeOfStackReserve: 1048576
+  SizeOfStackCommit: 4096
+  SizeOfHeapReserve: 1048576
+  SizeOfHeapCommit: 4096
+  ExportTable:
+    RelativeVirtualAddress: 8320
+    Size:            336
+  ImportTable:
+    RelativeVirtualAddress: 8224
+    Size:            40
+  ResourceTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ExceptionTable:
+    RelativeVirtualAddress: 12288
+    Size:            36
+  CertificateTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  BaseRelocationTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  Debug:
+    RelativeVirtualAddress: 0
+    Size:            0
+  Architecture:
+    RelativeVirtualAddress: 0
+    Size:            0
+  GlobalPtr:
+    RelativeVirtualAddress: 0
+    Size:            0
+  TlsTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  LoadConfigTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  BoundImport:
+    RelativeVirtualAddress: 0
+    Size:            0
+  IAT:
+    RelativeVirtualAddress: 8264
+    Size:            16
+  DelayImportDescriptor:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ClrRuntimeHeader:
+    RelativeVirtualAddress: 0
+    Size:            0
+header:
+  Machine:         IMAGE_FILE_MACHINE_AMD64
+  Characteristics: [ IMAGE_FILE_EXECUTABLE_IMAGE, IMAGE_FILE_LINE_NUMS_STRIPPED, IMAGE_FILE_LOCAL_SYMS_STRIPPED, IMAGE_FILE_LARGE_ADDRESS_AWARE, IMAGE_FILE_DEBUG_STRIPPED, IMAGE_FILE_DLL ]
+sections:
+  - Name:            .text
+    Characteristics: [ IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ ]
+    VirtualAddress:  4096
+    VirtualSize:     168
+    SectionData:     554889E54881EC20000000488D0DEE0F0000E889000000C9C30000000104020504030150554889E54881EC2000000048894D10488955184C8945204C894D28488D0DC30F0000E855000000B800000000E900000000C9C3000000000000000000554889E54881EC3000000048894D10488955184C894520488B45204989C08B5518488B4D10E89AFFFFFF8945FC8B45FCE900000000C9C3000104020504030150FF25A20F00000000
+  - Name:            .data
+    Characteristics: [ IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE ]
+    VirtualAddress:  8192
+    VirtualSize:     480
+    SectionData:     637572696F757321004D61726B204A616E73656E0000000000000000000000005820000000000000000000006820000048200000000000000000000000000000000000000000000073200000000000000000000000000000732000000000000000000000000000006D73766372742E646C6C000000707574730000000000000000000000000000000000000020210000010000000C0000000C000000A8200000D820000008210000241000000040000000400000004000000040000000400000004000006010000020200000E0210000A0100000001000002D2100003521000046210000592100006A2100007D21000091210000A7210000B1210000B8210000BD210000C421000000000100020003000400050006000700080009000A000B00706536345F7374642E646C6C00446C6C4D61696E005F5F66696E695F61727261795F656E64005F5F66696E695F61727261795F7374617274005F5F696E69745F61727261795F656E64005F5F696E69745F61727261795F7374617274005F5F707265696E69745F61727261795F656E64005F5F707265696E69745F61727261795F7374617274005F646C6C7374617274005F6564617461005F656E64005F65746578740068656C6C6F5F74686572650000000000000000000000000000000000
+  - Name:            .pdata
+    Characteristics: [ IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ ]
+    VirtualAddress:  12288
+    VirtualSize:     36
+    SectionData:     0B100000191000001C1000002F100000571000001C1000006B1000009710000098100000
+symbols:         []
+...
+
+# CHECK: FILE MAP:
+# CHECK: 000-188	        392		[PE Headers]
+# CHECK: 188-200	        120		[PE Section Headers]
+# CHECK: 200-400	        512		.text
+# CHECK: 400-600	        512		.data
+# CHECK: 600-800	        512		.pdata
+
+# CHECK: VM MAP:
+# CHECK: 0000-0188	        392		[PE Headers]
+# CHECK: 0188-0200	        120		[PE Section Headers]
+# CHECK: 0200-1000	       3584		[-- Nothing mapped --]
+# CHECK: 1000-10a8	        168		.text
+# CHECK: 10a8-2000	       3928		[-- Nothing mapped --]
+# CHECK: 2000-21e0	        480		.data
+# CHECK: 21e0-3000	       3616		[-- Nothing mapped --]
+# CHECK: 3000-3024	         36		.pdata
+
