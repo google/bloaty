@@ -338,14 +338,24 @@ else()
     if(Python_FOUND)
       set(BLOATY_SRC_DIR ${PROJECT_SOURCE_DIR})
       set(BLOATY_OBJ_DIR ${PROJECT_BINARY_DIR})
+
+      find_program(BLOATY_LIT_EXECUTABLE lit lit.exe DOC "Specifies where to find the lit tool" REQUIRED)
+      find_program(BLOATY_FILECHECK_EXECUTABLE filecheck FileCheck.exe DOC "Specifies where to find the lit tool" REQUIRED)
+      find_program(BLOATY_YAML2OBJ_EXECUTABLE yaml2obj yaml2obj.exe DOC "Specifies where to find the yaml2obj tool" REQUIRED)
+
       configure_file(tests/lit.site.cfg.in tests/lit.site.cfg @ONLY)
 
       # TODO(abdulras) polish this further and convert this to `add_test` so that
       # the default test suite run executes the tests.
       add_custom_target(check-bloaty
-        COMMAND ${Python_EXECUTABLE} ${LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests
+        COMMAND ${BLOATY_LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests -D "bloaty_binary=$<TARGET_FILE:bloaty>"
         COMMENT "Running bloaty tests..."
-        USES_TERMINAL)
+        USES_TERMINAL
+        SOURCES
+          tests/lit.cfg
+          tests/lit.site.cfg)
+      add_dependencies(check-bloaty bloaty)
+      set_property(TARGET check-bloaty PROPERTY FOLDER "tests")
     endif()
 
     if(BUILD_TESTING)

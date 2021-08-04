@@ -81,11 +81,11 @@ $ make -j6
 > NOTE: these tests are still experimental and not covered under CI yet.  Please
 > report any issues in running them.
 
-When configuring the project via CMake, a few additional parameters must be
-specified currently:
-- `-DLIT_EXECUTABLE=<PATH>`: specifies where to find the lit tool
-- `-DFILECHECK_EXECUTABLE=<PATH>`: specifies where to find the FileCheck tool
-- `-DYAML2OBJ_EXECUTABLE=<PATH>`: specifies where to find the yaml2obj tool
+CMake will try to find these on your PATH, if they are not available there,
+or you want to specify other defaults, they can be overrided on the command line:
+- `-DBLOATY_LIT_EXECUTABLE=<PATH>`: specifies where to find the lit tool
+- `-DBLOATY_FILECHECK_EXECUTABLE=<PATH>`: specifies where to find the FileCheck tool
+- `-DBLOATY_YAML2OBJ_EXECUTABLE=<PATH>`: specifies where to find the yaml2obj tool
 
 You can install lit via pip:
 ```sh
