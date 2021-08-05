@@ -2162,10 +2162,13 @@ static void ReadDWARFDebugInfo(
         ReadGeneralDIEAttr(tag, value, &die);
       });
 
-      // low_pc == 0 is a signal that this routine was stripped out of the
-      // final binary.
-      bool is_stripped = die.low_pc && die.low_pc->IsUint() &&
-          die.low_pc->GetUint(die_reader) == 0;
+      // If low_pc is present but not a valid address, it indicates this this
+      // entity was stripped from the binary, so we want to skip ti.
+      bool is_stripped =
+          die.low_pc && die.low_pc->IsUint() &&
+          !dwarf::IsValidDwarfAddress(die.low_pc->GetUint(die_reader),
+                                      die_reader.unit_sizes().address_size());
+
       // A declaration is not a definition and should not be attributed to this
       // compileunit.
       bool is_decl = die.declaration && die.declaration->IsUint() &&
