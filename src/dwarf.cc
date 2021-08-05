@@ -1552,6 +1552,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 struct GeneralDIE {
   absl::optional<dwarf::AttrValue> name;
   absl::optional<dwarf::AttrValue> linkage_name;
+  absl::optional<dwarf::AttrValue> declaration;
   absl::optional<dwarf::AttrValue> location;
   absl::optional<dwarf::AttrValue> low_pc;
   absl::optional<dwarf::AttrValue> high_pc;
@@ -1567,6 +1568,9 @@ void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, GeneralDIE *die) {
       break;
     case DW_AT_linkage_name:
       die->linkage_name = val;
+      break;
+    case DW_AT_declaration:
+      die->declaration = val;
       break;
     case DW_AT_location:
       die->location = val;
@@ -1605,34 +1609,57 @@ class InlinesDIE {
   uint64_t stmt_list_ = 0;
 };
 
+uint64_t TryReadPcPair(const std::string& name, const GeneralDIE& die,
+                       const dwarf::DIEReader& die_reader, RangeSink* sink) {
+  if (!die.low_pc || !die.high_pc || !die.low_pc->IsUint()) return 0;
+
+  uint64_t low_pc = die.low_pc->GetUint(die_reader);
+  uint8_t address_size = die_reader.unit_sizes().address_size();
+  if (!dwarf::IsValidDwarfAddress(low_pc, address_size)) return 0;
+
+  uint64_t size;
+
+  switch (die.high_pc->form()) {
+    case DW_FORM_addr:
+    case DW_FORM_addrx:
+    case DW_FORM_addrx1:
+    case DW_FORM_addrx2:
+    case DW_FORM_addrx3:
+    case DW_FORM_addrx4:
+      // high_pc is absolute.
+      size = die.high_pc->GetUint(die_reader) - low_pc;
+      break;
+    case DW_FORM_data1:
+    case DW_FORM_data2:
+    case DW_FORM_data4:
+    case DW_FORM_data8:
+      // high_pc is a size.
+      size = *die.high_pc->ToUint(die_reader);
+      break;
+    default:
+      if (verbose_level > 0) {
+        fprintf(stderr, "Unexpected form for high_pc: %d\n", die.high_pc->form());
+      }
+      return 0;
+  }
+
+  sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, size, name);
+  return low_pc;
+}
+
 // To view DIEs for a given file, try:
 //   readelf --debug-dump=info foo.bin
 void AddDIE(const dwarf::File& file, const std::string& name,
             const GeneralDIE& die, const SymbolTable& symtab,
             const DualMap& symbol_map, const dwarf::DIEReader& die_reader,
             RangeSink* sink) {
-  uint64_t low_pc = 0;
-  // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
-  // functions).
-  if (die.low_pc && die.low_pc->IsUint() && die.high_pc &&
-      die.high_pc->IsUint() &&
-      dwarf::IsValidDwarfAddress(die.low_pc->GetUint(die_reader),
-                                 die_reader.unit_sizes().address_size())) {
-    low_pc = die.low_pc->GetUint(die_reader);
-    uint64_t high_pc = die.high_pc->GetUint(die_reader);
-
-    // It appears that some compilers make high_pc a size, and others make it an
-    // address.
-    if (high_pc >= low_pc) {
-      high_pc -= low_pc;
-    }
-    sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, name);
-  }
+  uint64_t low_pc = TryReadPcPair(name, die, die_reader, sink);
 
   // Sometimes a DIE has a linkage_name, which we can look up in the symbol
   // table.
   if (die.linkage_name && die.linkage_name->IsString()) {
-    auto it = symtab.find(die.linkage_name->GetString(die_reader));
+    auto linkage_name = die.linkage_name->GetString(die_reader);
+    auto it = symtab.find(linkage_name);
     if (it != symtab.end()) {
       sink->AddVMRangeIgnoreDuplicate("dwarf_linkagename", it->second.first,
                                       it->second.second, name);
@@ -2136,9 +2163,15 @@ static void ReadDWARFDebugInfo(
       });
 
       // low_pc == 0 is a signal that this routine was stripped out of the
-      // final binary.  Skip this DIE and all of its children.
-      if (die.low_pc && die.low_pc->IsUint() &&
-          die.low_pc->GetUint(die_reader) == 0) {
+      // final binary.
+      bool is_stripped = die.low_pc && die.low_pc->IsUint() &&
+          die.low_pc->GetUint(die_reader) == 0;
+      // A declaration is not a definition and should not be attributed to this
+      // compileunit.
+      bool is_decl = die.declaration && die.declaration->IsUint() &&
+          die.declaration->GetUint(die_reader);
+
+      if (is_stripped || is_decl) {
         die_reader.SkipChildren();
       } else {
         AddDIE(file, compileunit_name, die, symtab, symbol_map, die_reader,
