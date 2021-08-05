@@ -223,7 +223,8 @@ extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
                                 int* status);
 
 std::string ItaniumDemangle(string_view symbol, DataSource source) {
-  if (source == DataSource::kRawSymbols) {
+  if (source != DataSource::kShortSymbols &&
+      source != DataSource::kFullSymbols) {
     // No demangling.
     return std::string(symbol);
   }
