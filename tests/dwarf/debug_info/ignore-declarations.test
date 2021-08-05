@@ -32,7 +32,7 @@ Sections:
     Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
     Address:         0x1000
     AddressAlign:    0x10
-    Content:         31ED4989D15E4889E24883E4F050544C8D053A010000488D0DD300000040
+    Size:            0x20
 ...
 
 --- !ELF
@@ -49,10 +49,31 @@ Sections:
       - Name:            GNU
         Desc:            6CF422D909772A0FB5400518A689D9F15F14BF57
         Type:            0x3  # NT_GNU_BUILD_ID
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x1000
+    AddressAlign:    0x10
+    Size:            0x20
+Symbols:
+  - Name:            foo_func
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x1000
+    Size:            0x10
+  - Name:            bar_func
+    Type:            STT_FUNC
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Value:           0x1010
+    Size:            0x10
 DWARF:
   debug_str:
     - foo.c
     - bar.c
+    - foo_func
+    - bar_func
   debug_abbrev:
     - ID:              0
       Table:
@@ -66,33 +87,26 @@ DWARF:
           Tag:             DW_TAG_subprogram
           Children:        DW_CHILDREN_no
           Attributes:
-            - Attribute:       DW_AT_low_pc
-              Form:            DW_FORM_addr
-            - Attribute:       DW_AT_high_pc
-              Form:            DW_FORM_data4
+            - Attribute:       DW_AT_linkage_name
+              Form:            DW_FORM_strp
             - Attribute:       DW_AT_declaration
               Form:            DW_FORM_flag_present
         - Code:            0x3
           Tag:             DW_TAG_subprogram
           Children:        DW_CHILDREN_no
           Attributes:
-            - Attribute:       DW_AT_low_pc
-              Form:            DW_FORM_addr
-            - Attribute:       DW_AT_high_pc
-              Form:            DW_FORM_data4
+            - Attribute:       DW_AT_linkage_name
+              Form:            DW_FORM_strp
   debug_info:
     # 0x0000000b: DW_TAG_compile_unit
-    #               DW_AT_name	("foo.c")
+    #               DW_AT_name        ("foo.c")
     #
     # 0x00000010:   DW_TAG_subprogram
-    #                 DW_AT_low_pc	(0x0000000000001000)
-    #                 DW_AT_high_pc	(0x0000000000001010)
-    #                 # This entry should be ignored because declaration=true.
-    #                 DW_AT_declaration	(true)
+    #                 DW_AT_linkage_name      ("bar_func")
+    #                 DW_AT_declaration       (true)
     #
-    # 0x0000001d:   DW_TAG_subprogram
-    #                 DW_AT_low_pc	(0x0000000000001010)
-    #                 DW_AT_high_pc	(0x0000000000001020)
+    # 0x00000015:   DW_TAG_subprogram
+    #                 DW_AT_linkage_name      ("foo_func")
     - Version:         4
       AbbrevTableID:   0
       AbbrOffset:      0x0
@@ -103,19 +117,16 @@ DWARF:
             - Value:           0x0
         - AbbrCode:        0x2
           Values:
-            - Value:           0x1000
-            - Value:           0x10
+            - Value:           0x15
         - AbbrCode:        0x3
           Values:
-            - Value:           0x1010
-            - Value:           0x10
+            - Value:           0xc
         - AbbrCode:        0x0
-    # 0x00000036: DW_TAG_compile_unit
-    #               DW_AT_name	("bar.c")
-    # 
-    # 0x0000003b:   DW_TAG_subprogram
-    #                 DW_AT_low_pc	(0x0000000000001000)
-    #                 DW_AT_high_pc	(0x0000000000001010)
+    # 0x00000026: DW_TAG_compile_unit
+    #               DW_AT_name        ("bar.c")
+    #
+    # 0x0000002b:   DW_TAG_subprogram
+    #                 DW_AT_linkage_name      ("bar_func")
     - Version:         4
       AbbrevTableID:   0
       AbbrOffset:      0x0
@@ -126,12 +137,11 @@ DWARF:
             - Value:           0x6
         - AbbrCode:        0x3
           Values:
-            - Value:           0x1000
-            - Value:           0x10
+            - Value:           0x15
         - AbbrCode:        0x0
 ...
 
 # CHECK: VM MAP:
 # CHECK: 0000-1000              4096             [-- Nothing mapped --]
-# CHECK: 1000-1010                16             bar.c
-# CHECK: 1010-101e                14             foo.c
+# CHECK: 1000-1010                16             foo.c
+# CHECK: 1010-1020                16             bar.c
