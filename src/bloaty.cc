@@ -1350,6 +1350,13 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
   }
+  if (uncompressed_size > static_cast<uint64_t>(data.size()) * 12) {
+    fprintf(stderr,
+            "warning: ignoring compressed debug data, implausible uncompressed "
+            "size (compressed: %zu, uncompressed: %" PRIu64 ")\n",
+            data.size(), uncompressed_size);
+    return absl::string_view();
+  }
   unsigned char *dbuf =
       arena_->google::protobuf::Arena::CreateArray<unsigned char>(
           arena_, uncompressed_size);
