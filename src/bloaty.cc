@@ -1617,7 +1617,7 @@ struct DualMaps {
   void PrintMaps(const std::vector<const RangeMap*> maps) {
     uint64_t last = 0;
     uint64_t max = maps[0]->GetMaxAddress();
-    int hex_digits = std::ceil(std::log2(max) / 4);
+    int hex_digits = max > 0 ? std::ceil(std::log2(max) / 4) : 0;
     RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
                                       uint64_t addr, uint64_t end) {
       if (addr > last) {
