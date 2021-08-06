@@ -1510,7 +1510,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
           attr = data;
         }
       });
-      
+
       if (attr && attr->IsString()) {
         *name = attr->GetString(die_reader_);
         return true;
@@ -2076,13 +2076,22 @@ static void ReadDWARFDebugInfo(
         [&die_reader, &compileunit_die](uint16_t tag, dwarf::AttrValue value) {
           switch (tag) {
             case DW_AT_addr_base:
-              die_reader.mutable_unit_sizes()->SetAddrBase(value.GetUint(die_reader));
+              if (value.IsUint()) {
+                die_reader.mutable_unit_sizes()->SetAddrBase(
+                    value.GetUint(die_reader));
+              }
               break;
             case DW_AT_str_offsets_base:
-              die_reader.mutable_unit_sizes()->SetStrOffsetsBase(value.GetUint(die_reader));
+              if (value.IsUint()) {
+                die_reader.mutable_unit_sizes()->SetStrOffsetsBase(
+                    value.GetUint(die_reader));
+              }
               break;
             case DW_AT_rnglists_base:
-              die_reader.mutable_unit_sizes()->SetRangeListsBase(value.GetUint(die_reader));
+              if (value.IsUint()) {
+                die_reader.mutable_unit_sizes()->SetRangeListsBase(
+                    value.GetUint(die_reader));
+              }
               break;
             default:
               ReadGeneralDIEAttr(tag, value, &compileunit_die);
