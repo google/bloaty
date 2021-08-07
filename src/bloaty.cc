@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stddef.h>
+
+// For some reason this isn't getting defined by zconf.h in 32-bit builds.
+// It's very hard to figure out why. For the moment this seems to fix it,
+// but ideally we'd have a better solution here.
+typedef size_t z_size_t;
+#include <zlib.h>
+
 #include <atomic>
 #include <cmath>
 #include <fstream>
@@ -41,7 +49,6 @@
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <zlib.h>
 
 #include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
