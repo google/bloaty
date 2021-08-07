@@ -744,7 +744,7 @@ void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
 //
 // - 24 bits for index (up to 16M symbols with -ffunction-sections)
 // - 40 bits for address (up to 1TB section)
-static uint64_t ToVMAddr(size_t addr, uint64_t ndx, bool is_object) {
+static uint64_t ToVMAddr(uint64_t addr, uint64_t ndx, bool is_object) {
   if (is_object) {
     if (ndx >= 1 << 24) {
       THROW("ndx overflow: too many sections");
