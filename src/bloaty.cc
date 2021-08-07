@@ -1357,7 +1357,9 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
   }
-  if (uncompressed_size > static_cast<uint64_t>(data.size()) * 12) {
+  uint64_t mb = 1 << 20;
+  // Limit for uncompressed size is 30x the compressed size + 128MB.
+  if (uncompressed_size > static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
     fprintf(stderr,
             "warning: ignoring compressed debug data, implausible uncompressed "
             "size (compressed: %zu, uncompressed: %" PRIu64 ")\n",
