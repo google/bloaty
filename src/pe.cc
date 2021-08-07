@@ -69,6 +69,7 @@ class PeFile {
 
   bool IsOpen() const { return ok_; }
 
+  string_view entire_file() const { return data_; }
   string_view header_region() const { return header_region_; }
 
   uint32_t section_count() const { return section_count_; }
@@ -87,7 +88,7 @@ class PeFile {
 
   bool ok_;
   bool is_64bit_;
-  string_view data_;
+  const string_view data_;
 
   pe_dos_header dos_header_;
   pe_header pe_header_;
@@ -182,15 +183,13 @@ void ForEachSection(const PeFile& pe, Func&& section_func) {
 
 void ParseSections(const PeFile& pe, RangeSink* sink) {
   assert(pe.IsOpen());
-  ForEachSection(pe, [sink](const Section& section) {
+  ForEachSection(pe, [sink, &pe](const Section& section) {
     uint64_t vmaddr = section.virtual_addr();
     uint64_t vmsize = section.virtual_size();
+    absl::string_view section_data = StrictSubstr(
+        pe.entire_file(), section.raw_offset(), section.raw_size());
 
-    uint64_t fileoff = section.raw_offset();
-    uint64_t filesize = section.raw_size();
-
-    sink->AddRange("pe_sections", section.name, vmaddr, vmsize, fileoff,
-                   filesize);
+    sink->AddRange("pe_sections", section.name, vmaddr, vmsize, section_data);
   });
 }
 
