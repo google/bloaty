@@ -253,8 +253,9 @@ TEST_F(BloatyTest, InputFiles) {
   ASSERT_TRUE(GetFileSize(file1, &size1));
   ASSERT_TRUE(GetFileSize(file2, &size2));
   RunBloaty({"bloaty", file1, file2, "-d", "inputfiles"});
-  AssertChildren(*top_row_, {std::make_tuple(file1, kUnknown, size1),
-                             std::make_tuple(file2, kUnknown, size2)});
+  AssertChildren(*top_row_,
+                 {std::make_tuple(file1, kUnknown, static_cast<int>(size1)),
+                  std::make_tuple(file2, kUnknown, static_cast<int>(size2))});
 
   // Should work with custom data sources.
   bloaty::Options options;
@@ -273,8 +274,8 @@ TEST_F(BloatyTest, InputFiles) {
   )", &options);
 
   RunBloatyWithOptions(options, bloaty::OutputOptions());
-  AssertChildren(*top_row_,
-                 {std::make_tuple("binary", kUnknown, size1 + size2)});
+  AssertChildren(*top_row_, {std::make_tuple("binary", kUnknown,
+                                             static_cast<int>(size1 + size2))});
 }
 
 TEST_F(BloatyTest, DiffMode) {

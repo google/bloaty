@@ -40,6 +40,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  output.Print(output_options, &std::cout);
+  if (!options.dump_raw_map()) {
+    output.Print(output_options, &std::cout);
+  }
   return 0;
 }

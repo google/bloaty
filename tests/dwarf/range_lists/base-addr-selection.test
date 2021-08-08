@@ -1,0 +1,97 @@
+# Test for range list that contains a "base address selection" entry.
+# When the start address is the max address (eg. UINT64_MAX), it signals
+# a special kind of entry where the end address signifies the new base
+# address.
+
+# RUN: %yaml2obj %s --docnum=1 -o %t.obj
+# RUN: %yaml2obj %s --docnum=2 -o %t.dwo
+# RUN: %bloaty %t.obj --debug-file %t.dwo -d compileunits --raw-map --domain=vm | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+  Entry:           0x1040
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    FirstSec:        .text
+    LastSec:         .text
+    VAddr:           0x1000
+    Align:           0x1000
+Sections:
+  - Name:            .note.gnu.build-id
+    Type:            SHT_NOTE
+    Notes:
+      - Name:            GNU
+        Desc:            6CF422D909772A0FB5400518A689D9F15F14BF57
+        Type:            0x3  # NT_GNU_BUILD_ID
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x1000
+    AddressAlign:    0x10
+    Content:         31ED4989D15E4889E24883E4F050544C8D053A010000488D0DD3000000488D3DC1000000FF15762F0000F40F1F440000488D3DB12F0000488D05AA2F00004839F87415488B054E2F00004885C07409FFE00F1F8000000000C30F1F8000000000488D3D812F0000488D357A2F00004829FE4889F048C1EE3F48C1F8034801C648D1FE7414488B05252F00004885C07408FFE0660F1F440000C30F1F8000000000803D412F000000752F5548833D062F0000004889E5740C488B3D222F0000E82DFFFFFFE868FFFFFFC605192F0000015DC30F1F8000000000C30F1F8000000000E97BFFFFFF554889E5B8010000005DC341574C8D3DDF2C000041564989D641554989F541544189FC55488D2DD02C0000534C29FD4883EC08E8A3FEFFFF48C1FD03741B31DB0F1F004C89F24C89EE4489E741FF14DF4883C3014839DD75EA4883C4085B5D415C415D415E415FC30F1F00C3
+...
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+  Entry:           0x1040
+Sections:
+  - Name:            .note.gnu.build-id
+    Type:            SHT_NOTE
+    Notes:
+      - Name:            GNU
+        Desc:            6CF422D909772A0FB5400518A689D9F15F14BF57
+        Type:            0x3  # NT_GNU_BUILD_ID
+DWARF:
+  debug_str:
+    - test.c
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_yes
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_ranges
+              Form:            DW_FORM_sec_offset
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_addr
+  debug_ranges:
+    - Offset:          0x0
+      AddrSize:        0x8
+      Entries:
+        # This is the "base address selection" entry!
+        - LowOffset:       0xffffffffffffffff   # UINT64_MAX
+          HighOffset:      0x1020
+        # Now these addresses are relative to 0x1020
+        - LowOffset:       0x22
+          HighOffset:      0x27
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0
+            - Value:           0x0
+            - Value:           0x0
+        - AbbrCode:        0x0
+...
+
+# CHECK: VM MAP:
+# CHECK: 0000-1000	       4096		[-- Nothing mapped --]
+# CHECK: 1000-1042	         66		[section .text]
+# CHECK: 1042-1047	          5		test.c
+# CHECK: 1047-1151	        266		[section .text]

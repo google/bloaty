@@ -172,7 +172,7 @@ void RangeMap::MaybeSetLabel(T iter, const std::string& label, uint64_t addr,
       iter->second.size = new_size;
       CheckConsistency(iter);
     }
-  } else if (verbose_level > 1) {
+  } else if (verbose_level > 2) {
     printf("  skipping existing mapping (%s)\n",
            EntryDebugString(iter).c_str());
   }

@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stddef.h>
+
+// For some reason this isn't getting defined by zconf.h in 32-bit builds.
+// It's very hard to figure out why. For the moment this seems to fix it,
+// but ideally we'd have a better solution here.
+typedef size_t z_size_t;
+#include <zlib.h>
+
 #include <atomic>
 #include <cmath>
 #include <fstream>
@@ -41,7 +49,6 @@
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <zlib.h>
 
 #include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
@@ -65,6 +72,7 @@ namespace bloaty {
 // otherwise.  We would make this thread_local but that's not supported on OS X
 // right now.
 int verbose_level = 0;
+ShowDomain show = ShowDomain::kShowBoth;
 
 struct DataSourceDefinition {
   DataSource number;
@@ -161,7 +169,8 @@ extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
                                 int* status);
 
 std::string ItaniumDemangle(string_view symbol, DataSource source) {
-  if (source == DataSource::kRawSymbols) {
+  if (source != DataSource::kShortSymbols &&
+      source != DataSource::kFullSymbols) {
     // No demangling.
     return std::string(symbol);
   }
@@ -1001,13 +1010,13 @@ uint64_t debug_vmaddr = -1;
 uint64_t debug_fileoff = -1;
 
 bool RangeSink::ContainsVerboseVMAddr(uint64_t vmaddr, uint64_t vmsize) {
-  return options_.verbose_level() > 2 ||
+  return options_.verbose_level() > 1 ||
          (options_.has_debug_vmaddr() && options_.debug_vmaddr() >= vmaddr &&
           options_.debug_vmaddr() < (vmaddr + vmsize));
 }
 
 bool RangeSink::ContainsVerboseFileOffset(uint64_t fileoff, uint64_t filesize) {
-  return options_.verbose_level() > 2 ||
+  return options_.verbose_level() > 1 ||
          (options_.has_debug_fileoff() && options_.debug_fileoff() >= fileoff &&
           options_.debug_fileoff() < (fileoff + filesize));
 }
@@ -1123,7 +1132,7 @@ void RangeSink::AddFileRangeForVMAddr(const char* analyzer,
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              file_offset, file_range.size(), label);
       }
-    } else if (verbose_level > 2) {
+    } else if (verbose_level > 1) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
   }
@@ -1153,7 +1162,7 @@ void RangeSink::AddFileRangeForFileRange(const char* analyzer,
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              file_offset, file_range.size(), label);
       }
-    } else if (verbose_level > 2) {
+    } else if (verbose_level > 1) {
       printf("No label found for file range [%" PRIx64 ", %zx]\n",
              from_file_offset, from_file_range.size());
     }
@@ -1177,11 +1186,11 @@ void RangeSink::AddVMRangeForVMAddr(const char* analyzer,
       bool ok = pair.first->vm_map.AddRangeWithTranslation(
           addr, size, label, translator_->vm_map, verbose,
           &pair.first->file_map);
-      if (!ok && verbose_level > 0) {
+      if (!ok && verbose_level > 1) {
         WARN("VM range ($0, $1) for label $2 extends beyond base map", addr,
              size, label);
       }
-    } else if (verbose_level > 2) {
+    } else if (verbose_level > 1) {
       printf("No label found for vmaddr %" PRIx64 "\n", label_from_vmaddr);
     }
   }
@@ -1286,6 +1295,15 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
                                             uint64_t uncompressed_size) {
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
+  }
+  uint64_t mb = 1 << 20;
+  // Limit for uncompressed size is 30x the compressed size + 128MB.
+  if (uncompressed_size > static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
+    fprintf(stderr,
+            "warning: ignoring compressed debug data, implausible uncompressed "
+            "size (compressed: %zu, uncompressed: %" PRIu64 ")\n",
+            data.size(), uncompressed_size);
+    return absl::string_view();
   }
   unsigned char *dbuf =
       arena_->google::protobuf::Arena::CreateArray<unsigned char>(
@@ -1554,7 +1572,7 @@ struct DualMaps {
   void PrintMaps(const std::vector<const RangeMap*> maps) {
     uint64_t last = 0;
     uint64_t max = maps[0]->GetMaxAddress();
-    int hex_digits = std::ceil(std::log2(max) / 4);
+    int hex_digits = max > 0 ? std::ceil(std::log2(max) / 4) : 0;
     RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
                                       uint64_t addr, uint64_t end) {
       if (addr > last) {
@@ -1704,11 +1722,16 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   (void)filesize;
   assert(filesize == file->file_data().data().size());
 
-  if (verbose_level > 0) {
-    printf("FILE MAP:\n");
-    maps.PrintFileMaps();
-    printf("VM MAP:\n");
-    maps.PrintVMMaps();
+  if (verbose_level > 0 || options_.dump_raw_map()) {
+    printf("Maps for %s:\n\n", filename.c_str());
+    if (show != ShowDomain::kShowVM) {
+      printf("FILE MAP:\n");
+      maps.PrintFileMaps();
+    }
+    if (show != ShowDomain::kShowFile) {
+      printf("VM MAP:\n");
+      maps.PrintVMMaps();
+    }
   }
 }
 
@@ -2010,6 +2033,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       output_options->output_format = OutputFormat::kCSV;
     } else if (args.TryParseFlag("--tsv")) {
       output_options->output_format = OutputFormat::kTSV;
+    } else if (args.TryParseFlag("--raw-map")) {
+      options->set_dump_raw_map(true);
     } else if (args.TryParseOption("-c", &option)) {
       std::ifstream input_file(std::string(option), std::ios::in);
       if (!input_file.is_open()) {
@@ -2058,11 +2083,11 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
     } else if (args.TryParseOption("--domain", &option)) {
       has_domain = true;
       if (option == "vm") {
-        output_options->show = ShowDomain::kShowVM;
+        show = output_options->show = ShowDomain::kShowVM;
       } else if (option == "file") {
-        output_options->show = ShowDomain::kShowFile;
+        show = output_options->show = ShowDomain::kShowFile;
       } else if (option == "both") {
-        output_options->show = ShowDomain::kShowBoth;
+        show = output_options->show = ShowDomain::kShowBoth;
       } else {
         THROWF("unknown value for --domain: $0", option);
       }

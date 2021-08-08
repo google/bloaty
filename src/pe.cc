@@ -23,39 +23,43 @@ namespace pe {
 const uint16_t dos_magic = 0x5A4D;  // MZ
 
 //! Sizes in bytes of various things in the COFF format.
-namespace STRUCT_SIZES {
-enum {
-  Header16Size = 20,
-  Header32Size = 56,
-  NameSize = 8,
-  Symbol16Size = 18,
-  Symbol32Size = 20,
-  SectionSize = 40,
-  RelocationSize = 10,
-  BaseRelocationBlockSize = 8,
-  ImportDirectoryTableEntrySize = 20,
-  ResourceDirectoryTableSize = 16,
-  ResourceDirectoryEntriesSize = 8,
-  ResourceDataEntrySize = 16
+enum class StructSizes {
+  kHeader16Size = 20,
+  kHeader32Size = 56,
+  kNameSize = 8,
+  kSymbol16Size = 18,
+  kSymbol32Size = 20,
+  kSectionSize = 40,
+  kRelocationSize = 10,
+  kBaseRelocationBlockSize = 8,
+  kImportDirectoryTableEntrySize = 20,
+  kResourceDirectoryTableSize = 16,
+  kResourceDirectoryEntriesSize = 8,
+  kResourceDataEntrySize = 16,
 };
-}
 
 #include "third_party/lief_pe/pe_structures.h"
 
-static_assert(STRUCT_SIZES::SectionSize == sizeof(pe_section), "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::RelocationSize == sizeof(pe_relocation), "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::BaseRelocationBlockSize ==
+static_assert(static_cast<size_t>(StructSizes::kSectionSize) ==
+                  sizeof(pe_section),
+              "Compiler options broke LIEF struct layout");
+static_assert(static_cast<size_t>(StructSizes::kRelocationSize) ==
+                  sizeof(pe_relocation),
+              "Compiler options broke LIEF struct layout");
+static_assert(static_cast<size_t>(StructSizes::kBaseRelocationBlockSize) ==
                   sizeof(pe_base_relocation_block),
               "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ImportDirectoryTableEntrySize == sizeof(pe_import),
-              "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ResourceDirectoryTableSize ==
+static_assert(
+    static_cast<size_t>(StructSizes::kImportDirectoryTableEntrySize) ==
+        sizeof(pe_import),
+    "Compiler options broke LIEF struct layout");
+static_assert(static_cast<size_t>(StructSizes::kResourceDirectoryTableSize) ==
                   sizeof(pe_resource_directory_table),
               "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ResourceDirectoryEntriesSize ==
+static_assert(static_cast<size_t>(StructSizes::kResourceDirectoryEntriesSize) ==
                   sizeof(pe_resource_directory_entries),
               "Compiler options broke LIEF struct layout");
-static_assert(STRUCT_SIZES::ResourceDataEntrySize ==
+static_assert(static_cast<size_t>(StructSizes::kResourceDataEntrySize) ==
                   sizeof(pe_resource_data_entry),
               "Compiler options broke LIEF struct layout");
 
@@ -65,6 +69,7 @@ class PeFile {
 
   bool IsOpen() const { return ok_; }
 
+  string_view entire_file() const { return data_; }
   string_view header_region() const { return header_region_; }
 
   uint32_t section_count() const { return section_count_; }
@@ -83,7 +88,7 @@ class PeFile {
 
   bool ok_;
   bool is_64bit_;
-  string_view data_;
+  const string_view data_;
 
   pe_dos_header dos_header_;
   pe_header pe_header_;
@@ -159,8 +164,9 @@ class Section {
     // For longer names, this member contains a forward slash (/) followed by an
     // ASCII representation of a decimal number that is an offset into the
     // string table.
-    name = std::string(header_.Name,
-                       strnlen(header_.Name, STRUCT_SIZES::NameSize));
+    name = std::string(
+        header_.Name,
+        strnlen(header_.Name, static_cast<size_t>(StructSizes::kNameSize)));
   }
 
  private:
@@ -177,15 +183,13 @@ void ForEachSection(const PeFile& pe, Func&& section_func) {
 
 void ParseSections(const PeFile& pe, RangeSink* sink) {
   assert(pe.IsOpen());
-  ForEachSection(pe, [sink](const Section& section) {
+  ForEachSection(pe, [sink, &pe](const Section& section) {
     uint64_t vmaddr = section.virtual_addr();
     uint64_t vmsize = section.virtual_size();
+    absl::string_view section_data = StrictSubstr(
+        pe.entire_file(), section.raw_offset(), section.raw_size());
 
-    uint64_t fileoff = section.raw_offset();
-    uint64_t filesize = section.raw_size();
-
-    sink->AddRange("pe_sections", section.name, vmaddr, vmsize, fileoff,
-                   filesize);
+    sink->AddRange("pe_sections", section.name, vmaddr, vmsize, section_data);
   });
 }
 

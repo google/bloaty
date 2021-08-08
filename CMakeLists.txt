@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.5)
 cmake_policy(SET CMP0048 NEW)
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
 project (Bloaty VERSION 1.1)
 include(CTest)
 set(CMAKE_CXX_STANDARD 17)
@@ -67,17 +70,21 @@ endif()
 
 # Set MSVC runtime before including thirdparty libraries
 if(MSVC)
-  # Link also the runtime library statically so that MSVCR*.DLL is not required at runtime.
-  # https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
-  # This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
-  # http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    if (flag_var MATCHES "/MD")
-      string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-    endif()
-  endforeach()
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.15)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>)
+  else()
+    # Link also the runtime library statically so that MSVCR*.DLL is not required at runtime.
+    # https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
+    # This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
+    # http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if (flag_var MATCHES "/MD")
+        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+      endif()
+    endforeach()
+  endif()
 endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -111,7 +118,7 @@ if(UNIX)
   endif()
   if(NOT ZLIB_FOUND)
     add_subdirectory(third_party/zlib)
-    include_directories(third_party/zlib)
+    include_directories(SYSTEM third_party/zlib)
   endif()
 else()
   if(BLOATY_ENABLE_RE2)
@@ -281,7 +288,7 @@ if(UNIX)
   if(ZLIB_FOUND)
     list(APPEND LIBBLOATY_LIBS ZLIB::ZLIB)
   else()
-    list(APPEND LIBBLOATY_LIBS zlib)
+    list(APPEND LIBBLOATY_LIBS zlibstatic)
   endif()
 else()
   set(LIBBLOATY_LIBS libbloaty libprotoc capstone-static)
@@ -332,6 +339,26 @@ else()
 
   if (IS_DIRECTORY "${PROJECT_SOURCE_DIR}/tests")
     enable_testing()
+
+    find_package(Python COMPONENTS Interpreter)
+    find_program(LIT_EXECUTABLE NAMES lit-script.py lit.py lit)
+    find_program(FILECHECK_EXECUTABLE FileCheck)
+    find_program(YAML2OBJ_EXECUTABLE yaml2obj)
+    if(Python_FOUND AND LIT_EXECUTABLE AND FILECHECK_EXECUTABLE AND YAML2OBJ_EXECUTABLE)
+      set(BLOATY_SRC_DIR ${PROJECT_SOURCE_DIR})
+      set(BLOATY_OBJ_DIR ${PROJECT_BINARY_DIR})
+      configure_file(tests/lit.site.cfg.in tests/lit.site.cfg @ONLY)
+
+      add_custom_target(check-bloaty
+        COMMAND ${Python_EXECUTABLE} ${LIT_EXECUTABLE} -sv ${PROJECT_BINARY_DIR}/tests --param bloaty=$<TARGET_FILE:bloaty>
+        DEPENDS
+          bloaty
+          ${CMAKE_CURRENT_SOURCE_DIR}/tests/lit.cfg
+          ${CMAKE_CURRENT_BINARY_DIR}/tests/lit.site.cfg
+        COMMENT "Running bloaty tests..."
+        USES_TERMINAL)
+      set_property(TARGET check-bloaty PROPERTY FOLDER "tests")
+    endif()
 
     if(BUILD_TESTING)
       option(INSTALL_GTEST "" OFF)

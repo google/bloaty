@@ -22,7 +22,6 @@
 #endif
 
 #include "absl/base/attributes.h"
-#include "bloaty.h"
 
 namespace bloaty {
 

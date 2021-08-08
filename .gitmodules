@@ -9,7 +9,7 @@
 	url = https://github.com/abseil/abseil-cpp.git
 [submodule "third_party/protobuf"]
 	path = third_party/protobuf
-	url = https://github.com/google/protobuf.git
+	url = https://github.com/protocolbuffers/protobuf.git
 [submodule "third_party/capstone"]
 	path = third_party/capstone
 	url = https://github.com/aquynh/capstone.git

@@ -53,6 +53,7 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
   }
 
   if (info.text.size() == 0) {
+    cs_close(&handle);
     THROW("Tried to disassemble empty function.");
   }
 
