@@ -442,9 +442,10 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
   // format.
   if (die.rnglistx) {
     uint64_t range_list = *die.rnglistx;
+    size_t offset_size = cu.unit_sizes().dwarf64() ? 8 : 4;
     string_view offset_data =
         StrictSubstr(cu.dwarf().debug_rnglists,
-                     cu.range_lists_base() + range_list);
+                     cu.range_lists_base() + (range_list * offset_size));
     uint64_t offset = cu.unit_sizes().ReadDWARFOffset(&offset_data);
     string_view data = StrictSubstr(
         cu.dwarf().debug_rnglists, cu.range_lists_base() + offset);
