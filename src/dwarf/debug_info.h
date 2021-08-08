@@ -11,6 +11,39 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Classes for reading .debug_info and .debug_types.
+//
+// Usage overview:
+//
+//   // Stores/caches abbreviation info and CU names.
+//   dwarf::InfoReader reader;
+//
+//   // Iterator type for enumerating CUs. Initially positioned at the beginning
+//   // of the given section unless you pass an explicit offset.
+//   dwarf::CUIter iter = reader.GetCUIter(
+//       dwarf::InfoReader::Section::kDebugInfo);
+//
+//   // Represents a single CU and vends a lot of useful data about it, like its
+//   // name. Starts out empty/undefined until you call NextCU().
+//   dwarf::CU cu;
+//
+//   while (iter.NextCU(reader, &cu)) {
+//     std::cout << "Parsing CU with name=" << cu.unit_name() << "\n";
+//
+//     // Iterator for enumerating DIEs in a given CU.
+//     dwarf::DIEReader die_reader = cu.GetDIEReader();
+//     while (auto abbrev = die_reader.ReadCode(cu)) {
+//       if (IsInteresting(abbrev->tag)) {
+//         die_reader.ReadAttributes(
+//             cu, abbrev, [](uint16_t tag, dwarf::AttrValue val) {
+//            // Process attribute.
+//         });
+//       } else {
+//         die_reader.SkipChildren(cu, abbrev);
+//       }
+//     }
+//   }
 
 #ifndef BLOATY_DWARF_DEBUG_INFO_H_
 #define BLOATY_DWARF_DEBUG_INFO_H_
@@ -155,43 +188,11 @@ class AbbrevTable {
   absl::string_view abbrev_data_;
 };
 
-// Classes for reading .debug_info and .debug_types.
-//
-// Usage overview:
-//
-//   // Stores/caches abbreviation info and CU names.
-//   dwarf::InfoReader reader;
-//
-//   // Iterator type for enumerating CUs. Initially positioned at the beginning
-//   // of the given section unless you pass an explicit offset.
-//   dwarf::CUIter iter = reader.GetCUIter(
-//       dwarf::InfoReader::Section::kDebugInfo);
-//
-//   // Represents a single CU and vends a lot of useful data about it, like its
-//   // name. Starts out empty/undefined until you call NextCU().
-//   dwarf::CU cu;
-//
-//   while (iter.NextCU(reader, &cu)) {
-//     std::cout << "Parsing CU with name=" << cu.unit_name() << "\n";
-//
-//     // Iterator for enumerating DIEs in a given CU.
-//     dwarf::DIEReader die_reader = cu.GetDIEReader();
-//     while (auto abbrev = die_reader.ReadCode(cu)) {
-//       if (IsInteresting(abbrev->tag)) {
-//         die_reader.ReadAttributes(
-//             cu, abbrev, [](uint16_t tag, dwarf::AttrValue val) {
-//            // Process attribute.
-//         });
-//       } else {
-//         die_reader.SkipChildren(cu, abbrev);
-//       }
-//     }
-//   }
-
 class CUIter;
 class CU;
 class DIEReader;
 
+// Stores/caches abbreviation info and CU names.
 class InfoReader {
  public:
   InfoReader(const File& file) : dwarf_(file) {}
@@ -233,6 +234,8 @@ class CUIter {
   absl::string_view next_unit_;
 };
 
+// CompilationUnit: stores info about a single compilation unit in .debug_info
+// or .debug_types.
 class CU {
  public:
   DIEReader GetDIEReader();
@@ -290,6 +293,8 @@ class CU {
   std::function<void(absl::string_view)> strp_callback_;
 };
 
+// DIEReader: for reading a sequence of Debugging Information Entries in a
+// compilation unit.
 class DIEReader {
  public:
   // Abbreviation for the current entry.
@@ -326,7 +331,7 @@ inline uint64_t ReadIndirectAddress(const CU& cu, uint64_t val) {
   }
 }
 
-// Reads all attributes for this DIE, storing the ones we were expecting.
+// Reads all attributes for this DIE, calling the given function for each one.
 template <class T>
 void DIEReader::ReadAttributes(const CU& cu, const AbbrevTable::Abbrev* abbrev,
                                T&& func) {
