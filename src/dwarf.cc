@@ -321,7 +321,7 @@ void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
     case DW_AT_location:
       if (val.IsString()) {
         die->location_string = val.GetString(cu);
-      } else {
+      } else if (value.form() == DW_FORM_sec_offset) {
         die->location_uint64 = val.GetUint(cu);
       }
       break;

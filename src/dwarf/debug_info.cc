@@ -153,16 +153,24 @@ bool CUIter::NextCU(InfoReader& reader, CU* cu) {
             cu->unit_name_ = std::string(value.GetString(*cu));
             break;
           case DW_AT_stmt_list:
-            stmt_list = value.ToUint(*cu);
+            if (value.form() == DW_FORM_sec_offset) {
+              stmt_list = value.GetUint(*cu);
+            }
             break;
           case DW_AT_addr_base:
-            cu->addr_base_ = value.GetUint(*cu);
+            if (value.form() == DW_FORM_sec_offset) {
+              cu->addr_base_ = value.GetUint(*cu);
+            }
             break;
           case DW_AT_str_offsets_base:
-            cu->str_offsets_base_ = value.GetUint(*cu);
+            if (value.form() == DW_FORM_sec_offset) {
+              cu->str_offsets_base_ = value.GetUint(*cu);
+            }
             break;
           case DW_AT_rnglists_base:
-            cu->range_lists_base_ = value.GetUint(*cu);
+            if (value.form() == DW_FORM_sec_offset) {
+              cu->range_lists_base_ = value.GetUint(*cu);
+            }
             break;
         }
       });

@@ -168,7 +168,7 @@ class AbbrevTable {
 //   // Represents a single CU and vends a lot of useful data about it, like its
 //   // name. Starts out empty/undefined until you call NextCU().
 //   dwarf::CU cu;
-//    
+//
 //   while (iter.NextCU(reader, &cu)) {
 //     std::cout << "Parsing CU with name=" << cu.unit_name() << "\n";
 //

@@ -187,6 +187,7 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint8_t form, string_view* data) {
       return AttrValue(form, ReadBytes(4, data));
     case DW_FORM_data8:
       return AttrValue(form, ReadBytes(8, data));
+    case DW_FORM_loclistx:
     case DW_FORM_rnglistx:
       return AttrValue(form, ReadLEB128<uint64_t>(data));
 
