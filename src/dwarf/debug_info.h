@@ -49,6 +49,7 @@
 #define BLOATY_DWARF_DEBUG_INFO_H_
 
 #include <functional>
+#include <unordered_map>
 
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
