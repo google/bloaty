@@ -176,13 +176,14 @@ string_view GetLocationListRange(CompilationUnitSizes sizes,
 void ReadRangeList(const CU& cu, uint64_t low_pc, string_view name,
                    RangeSink* sink, string_view* data) {
   std::string name_str(name);
+  uint64_t max_address = cu.unit_sizes().MaxAddress();
   while (true) {
     uint64_t start, end;
     start = cu.unit_sizes().ReadAddress(data);
     end = cu.unit_sizes().ReadAddress(data);
     if (start == 0 && end == 0) {
       return;
-    } else if (start == cu.unit_sizes().MaxAddress()) {
+    } else if (start == max_address) {
       low_pc = end;
     } else {
       uint64_t size = end - start;

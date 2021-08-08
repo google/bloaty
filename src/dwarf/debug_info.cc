@@ -95,12 +95,12 @@ CUIter InfoReader::GetCUIter(Section section, uint64_t offset) {
 bool CUIter::NextCU(InfoReader& reader, CU* cu) {
   if (next_unit_.empty()) return false;
 
-  string_view unit_range = next_unit_;
-  string_view data_range = cu->unit_sizes_.ReadInitialLength(&next_unit_);
-  cu->unit_range_ = unit_range.substr(
-      0, data_range.size() + (data_range.data() - unit_range.data()));
-
   CompilationUnitSizes unit_sizes;
+  string_view unit_range = next_unit_;
+  string_view data_range = unit_sizes.ReadInitialLength(&next_unit_);
+  size_t initial_length_len = data_range.data() - unit_range.data();
+  unit_range = unit_range.substr(0, data_range.size() + initial_length_len);
+
   unit_sizes.ReadDWARFVersion(&data_range);
 
   if (unit_sizes.dwarf_version() > 5) {
@@ -138,6 +138,7 @@ bool CUIter::NextCU(InfoReader& reader, CU* cu) {
   cu->dwarf_ = &reader.dwarf_;
   cu->unit_sizes_ = unit_sizes;
   cu->data_range_ = data_range;
+  cu->unit_range_ = unit_range;
 
   // We now read the root-level DIE in order to populate these base addresses
   // on which other attributes depend.
