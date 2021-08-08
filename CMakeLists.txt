@@ -118,7 +118,7 @@ if(UNIX)
   endif()
   if(NOT ZLIB_FOUND)
     add_subdirectory(third_party/zlib)
-    include_directories(third_party/zlib)
+    include_directories(SYSTEM third_party/zlib)
   endif()
 else()
   if(BLOATY_ENABLE_RE2)
@@ -223,8 +223,14 @@ add_library(libbloaty STATIC
     src/bloaty.h
     src/disassemble.cc
     ${CMAKE_CURRENT_BINARY_DIR}/src/bloaty.pb.cc
+    src/dwarf/attr.h
+    src/dwarf/attr.cc
+    src/dwarf/dwarf_util.cc
+    src/dwarf/debug_info.cc
+    src/dwarf/line_info.cc
     src/dwarf.cc
     src/dwarf_constants.h
+    src/eh_frame.cc
     src/elf.cc
     src/macho.cc
     src/pe.cc
@@ -282,7 +288,7 @@ if(UNIX)
   if(ZLIB_FOUND)
     list(APPEND LIBBLOATY_LIBS ZLIB::ZLIB)
   else()
-    list(APPEND LIBBLOATY_LIBS zlib)
+    list(APPEND LIBBLOATY_LIBS zlibstatic)
   endif()
 else()
   set(LIBBLOATY_LIBS libbloaty libprotoc capstone-static)

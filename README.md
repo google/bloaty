@@ -54,7 +54,7 @@ Bloaty supports many features:
 - **easy to deploy:** statically-linked C++ binary, easy to copy around
 
 For detailed info on all of Bloaty's features, see the [User
-Documentation](docs/using.md).
+Documentation](doc/using.md).
 
 For more information about the analysis performed by Bloaty,
 please see [How Bloaty Works](doc/how-bloaty-works.md).

@@ -101,7 +101,7 @@ class Section {
     uint32_t size = ReadVarUInt32(&data);
     ret.contents = ReadPiece(size, &data);
     size_t header_size = ret.contents.data() - section_data.data();
-    ret.data = section_data.substr(0, size + header_size);
+    ret.data = ReadPiece(size + header_size, &section_data);
 
     if (ret.id == 0) {
       uint32_t name_len = ReadVarUInt32(&ret.contents);
@@ -193,8 +193,7 @@ void ReadFunctionNames(const Section& section, FuncNames* names,
   while (!data.empty()) {
     char type = ReadVarUInt7(&data);
     uint32_t size = ReadVarUInt32(&data);
-    string_view section = data.substr(0, size);
-    data = data.substr(size);
+    string_view section = ReadPiece(size, &data);
 
     if (static_cast<NameType>(type) == NameType::kFunction) {
       uint32_t count = ReadVarUInt32(&section);
@@ -203,7 +202,7 @@ void ReadFunctionNames(const Section& section, FuncNames* names,
         uint32_t index = ReadVarUInt32(&section);
         uint32_t name_len = ReadVarUInt32(&section);
         string_view name = ReadPiece(name_len, &section);
-        entry = entry.substr(0, name.data() - entry.data() + name.size());
+        entry = StrictSubstr(entry, 0, name.data() - entry.data() + name.size());
         sink->AddFileRange("wasm_funcname", name, entry);
         (*names)[index] = std::string(name);
       }
@@ -288,8 +287,8 @@ void ReadCodeSection(const Section& section, const FuncNames& names,
     uint32_t size = ReadVarUInt32(&data);
     uint32_t total_size = size + (data.data() - func.data());
 
-    func = func.substr(0, total_size);
-    data = data.substr(size);
+    func = StrictSubstr(func, 0, total_size);
+    data = StrictSubstr(data, size);
 
     auto iter = names.find(num_imports + i);
 
@@ -332,7 +331,7 @@ void AddWebAssemblyFallback(RangeSink* sink) {
     sink->AddFileRange("wasm_overhead", name2, section.data);
   });
   sink->AddFileRange("wasm_overhead", "[WASM Header]",
-                     sink->input_file().data().substr(0, 8));
+                     StrictSubstr(sink->input_file().data(), 0, 8));
 }
 
 class WebAssemblyObjectFile : public ObjectFile {

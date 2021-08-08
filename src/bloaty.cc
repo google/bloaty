@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stddef.h>
+
+// For some reason this isn't getting defined by zconf.h in 32-bit builds.
+// It's very hard to figure out why. For the moment this seems to fix it,
+// but ideally we'd have a better solution here.
+typedef size_t z_size_t;
+#include <zlib.h>
+
 #include <atomic>
 #include <cmath>
 #include <fstream>
@@ -41,7 +49,6 @@
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <zlib.h>
 
 #include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
@@ -158,72 +165,12 @@ static std::string CSVEscape(string_view str) {
   }
 }
 
-
-// LineReader / LineIterator ///////////////////////////////////////////////////
-
-// Convenience code for iterating over lines of a pipe.
-
-#if !defined(_MSC_VER)
-LineReader::LineReader(LineReader&& other) {
-  Close();
-
-  file_ = other.file_;
-  pclose_ = other.pclose_;
-
-  other.file_ = nullptr;
-}
-
-void LineReader::Close() {
-  if (!file_) return;
-
-  if (pclose_) {
-    pclose(file_);
-  } else {
-    fclose(file_);
-  }
-}
-
-void LineReader::Next() {
-  char buf[256];
-  line_.clear();
-  do {
-    if (!fgets(buf, sizeof(buf), file_)) {
-      if (feof(file_)) {
-        eof_ = true;
-        break;
-      } else {
-        std::cerr << "Error reading from file.\n";
-        exit(1);
-      }
-    }
-    line_.append(buf);
-  } while(!eof_ && line_[line_.size() - 1] != '\n');
-
-  if (!eof_) {
-    line_.resize(line_.size() - 1);
-  }
-}
-
-LineIterator LineReader::begin() { return LineIterator(this); }
-LineIterator LineReader::end() { return LineIterator(nullptr); }
-
-LineReader ReadLinesFromPipe(const std::string& cmd) {
-  FILE* pipe = popen(cmd.c_str(), "r");
-
-  if (!pipe) {
-    std::cerr << "Failed to run command: " << cmd << "\n";
-    exit(1);
-  }
-
-  return LineReader(pipe, true);
-}
-#endif
-
 extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
                                 int* status);
 
 std::string ItaniumDemangle(string_view symbol, DataSource source) {
-  if (source == DataSource::kRawSymbols) {
+  if (source != DataSource::kShortSymbols &&
+      source != DataSource::kFullSymbols) {
     // No demangling.
     return std::string(symbol);
   }
@@ -1349,6 +1296,15 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
   }
+  uint64_t mb = 1 << 20;
+  // Limit for uncompressed size is 30x the compressed size + 128MB.
+  if (uncompressed_size > static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
+    fprintf(stderr,
+            "warning: ignoring compressed debug data, implausible uncompressed "
+            "size (compressed: %zu, uncompressed: %" PRIu64 ")\n",
+            data.size(), uncompressed_size);
+    return absl::string_view();
+  }
   unsigned char *dbuf =
       arena_->google::protobuf::Arena::CreateArray<unsigned char>(
           arena_, uncompressed_size);
@@ -1616,7 +1572,7 @@ struct DualMaps {
   void PrintMaps(const std::vector<const RangeMap*> maps) {
     uint64_t last = 0;
     uint64_t max = maps[0]->GetMaxAddress();
-    int hex_digits = std::ceil(std::log2(max) / 4);
+    int hex_digits = max > 0 ? std::ceil(std::log2(max) / 4) : 0;
     RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
                                       uint64_t addr, uint64_t end) {
       if (addr > last) {

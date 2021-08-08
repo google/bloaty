@@ -744,12 +744,12 @@ void ForEachElf(const InputFile& file, RangeSink* sink, Func func) {
 //
 // - 24 bits for index (up to 16M symbols with -ffunction-sections)
 // - 40 bits for address (up to 1TB section)
-static uint64_t ToVMAddr(size_t addr, uint64_t ndx, bool is_object) {
+static uint64_t ToVMAddr(uint64_t addr, uint64_t ndx, bool is_object) {
   if (is_object) {
     if (ndx >= 1 << 24) {
       THROW("ndx overflow: too many sections");
     }
-    if (addr >= 1ULL << 40) {
+    if (addr >= ((uint64_t)1) << 40) {
       THROW("address overflow: section too big");
     }
     return (ndx << 40) | addr;
@@ -1332,7 +1332,7 @@ class ElfObjectFile : public ObjectFile {
                          false);
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf, sink);
-          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ReadDWARFCompileUnits(dwarf, symbol_map, sink);
           break;
         }
         case DataSource::kInlines: {
