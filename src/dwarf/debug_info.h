@@ -16,10 +16,12 @@
 #define BLOATY_DWARF_DEBUG_INFO_H_
 
 #include <functional>
+
 #include "absl/strings/string_view.h"
-#include "util.h"
 #include "absl/strings/substitute.h"
 #include "dwarf/attr.h"
+#include "dwarf_constants.h"
+#include "util.h"
 
 namespace bloaty {
 namespace dwarf {
@@ -185,9 +187,9 @@ class AbbrevTable {
 //       }
 //     }
 //   }
+
 class CUIter;
 class CU;
-class CUIter;
 class DIEReader;
 
 class InfoReader {
@@ -207,7 +209,7 @@ class InfoReader {
   CUIter GetCUIter(Section section, uint64_t offset = 0);
 
  private:
-  friend class CUIter;
+  friend class CU;
   const File& dwarf_;
 
   std::unordered_map<uint64_t, std::string> stmt_list_map_;
@@ -238,7 +240,7 @@ class CU {
   const File& dwarf() const { return *dwarf_; }
   const CompilationUnitSizes& unit_sizes() const { return unit_sizes_; }
   const std::string& unit_name() const { return unit_name_; }
-  absl::string_view unit_range() const { return unit_range_; }
+  absl::string_view entire_unit() const { return entire_unit_; }
   uint64_t addr_base() const { return addr_base_; }
   uint64_t str_offsets_base() const { return str_offsets_base_; }
   uint64_t range_lists_base() const { return range_lists_base_; }
@@ -259,13 +261,21 @@ class CU {
   friend class CUIter;
   friend class DIEReader;
 
+  void ReadHeader(absl::string_view entire_unit, absl::string_view data,
+                  InfoReader::Section section, InfoReader& reader);
+  void ReadTopLevelDIE(InfoReader& reader);
+
   const File* dwarf_;
 
   // Info that comes from the CU header.
-  absl::string_view unit_range_;  // Range of the entire CU.
-  absl::string_view data_range_;  // Range of data (excludes CU header).
+  absl::string_view entire_unit_;  // Entire CU's range.
+  absl::string_view data_;         // Entire unit excluding CU header.
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
+
+  // Only for skeleton and split CUs.
+  uint8_t unit_type_;
+  uint64_t dwo_id_;
 
   // Only for .debug_types
   uint64_t unit_type_signature_;
@@ -326,7 +336,7 @@ void DIEReader::ReadAttributes(const CU& cu, const AbbrevTable::Abbrev* abbrev,
   }
 }
 
-inline DIEReader CU::GetDIEReader() { return DIEReader(data_range_); }
+inline DIEReader CU::GetDIEReader() { return DIEReader(data_); }
 
 }  // namespace dwarf
 }  // namespace bloaty

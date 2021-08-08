@@ -1,3 +1,16 @@
+// Copyright 2016 Google Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "dwarf/debug_info.h"
 #include "dwarf_constants.h"
@@ -95,98 +108,126 @@ CUIter InfoReader::GetCUIter(Section section, uint64_t offset) {
 bool CUIter::NextCU(InfoReader& reader, CU* cu) {
   if (next_unit_.empty()) return false;
 
-  CompilationUnitSizes unit_sizes;
-  string_view unit_range = next_unit_;
-  string_view data_range = unit_sizes.ReadInitialLength(&next_unit_);
-  size_t initial_length_len = data_range.data() - unit_range.data();
-  unit_range = unit_range.substr(0, data_range.size() + initial_length_len);
+  // Read initial length and calculate entire_unit/data.
+  string_view entire_unit = next_unit_;
+  string_view data = cu->unit_sizes_.ReadInitialLength(&next_unit_);
+  size_t initial_length_len = data.data() - entire_unit.data();
+  entire_unit = entire_unit.substr(0, data.size() + initial_length_len);
 
-  unit_sizes.ReadDWARFVersion(&data_range);
+  // Delegate to CU to read the unit header.
+  cu->ReadHeader(entire_unit, data, section_, reader);
+  return true;
+}
 
-  if (unit_sizes.dwarf_version() > 5) {
+// Reads the header of this CU from |data|, updating our member variables
+// according to what was parsed.
+void CU::ReadHeader(string_view entire_unit, string_view data,
+                    InfoReader::Section section, InfoReader& reader) {
+  entire_unit_ = entire_unit;
+  dwarf_ = &reader.dwarf_;
+  unit_sizes_.ReadDWARFVersion(&data);
+
+  if (unit_sizes_.dwarf_version() > 5) {
     THROWF("Data is in DWARF $0 format which we don't understand",
-           unit_sizes.dwarf_version());
+           unit_sizes_.dwarf_version());
   }
 
   uint64_t debug_abbrev_offset;
 
-  if (unit_sizes.dwarf_version() == 5) {
-    uint8_t unit_type = ReadFixed<uint8_t>(&data_range);
-    (void)unit_type;  // We don't use this currently.
-    unit_sizes.SetAddressSize(ReadFixed<uint8_t>(&data_range));
-    debug_abbrev_offset = unit_sizes.ReadDWARFOffset(&data_range);
-  } else {
-    debug_abbrev_offset = unit_sizes.ReadDWARFOffset(&data_range);
-    unit_sizes.SetAddressSize(ReadFixed<uint8_t>(&data_range));
+  if (unit_sizes_.dwarf_version() == 5) {
+    unit_type_ = ReadFixed<uint8_t>(&data);
+    unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&data));
+    debug_abbrev_offset = unit_sizes_.ReadDWARFOffset(&data);
 
-    if (section_ == InfoReader::Section::kDebugTypes) {
-      cu->unit_type_signature_ = ReadFixed<uint64_t>(&data_range);
-      cu->unit_type_offset_ = unit_sizes.ReadDWARFOffset(&data_range);
+    switch (unit_type_) {
+      case DW_UT_skeleton:
+      case DW_UT_split_compile:
+      case DW_UT_split_type:
+        dwo_id_ = ReadFixed<uint64_t>(&data);
+        break;
+      case DW_UT_type:
+        unit_type_signature_ = ReadFixed<uint64_t>(&data);
+        unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&data);
+        break;
+      case DW_UT_compile:
+      case DW_UT_partial:
+        break;
+      default:
+        fprintf(stderr, "warning: Unknown DWARF Unit Type in user defined range\n");
+        break;
+    }
+
+  } else {
+    debug_abbrev_offset = unit_sizes_.ReadDWARFOffset(&data);
+    unit_sizes_.SetAddressSize(ReadFixed<uint8_t>(&data));
+
+    if (section == InfoReader::Section::kDebugTypes) {
+      unit_type_signature_ = ReadFixed<uint64_t>(&data);
+      unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&data);
     }
   }
 
-  cu->unit_abbrev_ = &reader.abbrev_tables_[debug_abbrev_offset];
+  unit_abbrev_ = &reader.abbrev_tables_[debug_abbrev_offset];
 
   // If we haven't already read abbreviations for this debug_abbrev_offset_, we
   // need to do so now.
-  if (cu->unit_abbrev_->IsEmpty()) {
-    string_view abbrev_data = reader.dwarf_.debug_abbrev;
+  if (unit_abbrev_->IsEmpty()) {
+    string_view abbrev_data = dwarf_->debug_abbrev;
     SkipBytes(debug_abbrev_offset, &abbrev_data);
-    cu->unit_abbrev_->ReadAbbrevs(abbrev_data);
+    unit_abbrev_->ReadAbbrevs(abbrev_data);
   }
 
-  cu->dwarf_ = &reader.dwarf_;
-  cu->unit_sizes_ = unit_sizes;
-  cu->data_range_ = data_range;
-  cu->unit_range_ = unit_range;
+  data_ = data;
+  ReadTopLevelDIE(reader);
+}
 
-  // We now read the root-level DIE in order to populate these base addresses
-  // on which other attributes depend.
-  DIEReader die_reader = cu->GetDIEReader();
-  const auto* abbrev = die_reader.ReadCode(*cu);
+// Read the root-level DIE in order to populate some member variables on which
+// other attributes depend. In particular, we may re-parse this DIE later and
+// read attributes that are relative to these base addresses.
+void CU::ReadTopLevelDIE(InfoReader& reader) {
+  DIEReader die_reader = GetDIEReader();
+  const auto* abbrev = die_reader.ReadCode(*this);
   absl::optional<uint64_t> stmt_list;
-  cu->unit_name_.clear();
+  unit_name_.clear();
   die_reader.ReadAttributes(
-      *cu, abbrev, [cu, &stmt_list](uint16_t tag, dwarf::AttrValue value) {
+      *this, abbrev, [this, &stmt_list](uint16_t tag, dwarf::AttrValue value) {
         switch (tag) {
           case DW_AT_name:
-            cu->unit_name_ = std::string(value.GetString(*cu));
+            unit_name_ = std::string(value.GetString(*this));
             break;
           case DW_AT_stmt_list:
             if (value.form() == DW_FORM_sec_offset) {
-              stmt_list = value.GetUint(*cu);
+              stmt_list = value.GetUint(*this);
             }
             break;
           case DW_AT_addr_base:
             if (value.form() == DW_FORM_sec_offset) {
-              cu->addr_base_ = value.GetUint(*cu);
+              addr_base_ = value.GetUint(*this);
             }
             break;
           case DW_AT_str_offsets_base:
             if (value.form() == DW_FORM_sec_offset) {
-              cu->str_offsets_base_ = value.GetUint(*cu);
+              str_offsets_base_ = value.GetUint(*this);
             }
             break;
           case DW_AT_rnglists_base:
             if (value.form() == DW_FORM_sec_offset) {
-              cu->range_lists_base_ = value.GetUint(*cu);
+              range_lists_base_ = value.GetUint(*this);
             }
             break;
         }
       });
 
   if (stmt_list) {
-    if (cu->unit_name_.empty()) {
+    if (unit_name_.empty()) {
       auto iter = reader.stmt_list_map_.find(*stmt_list);
       if (iter != reader.stmt_list_map_.end()) {
-        cu->unit_name_ = iter->second;
+        unit_name_ = iter->second;
       }
     } else {
-      (reader.stmt_list_map_)[*stmt_list] = cu->unit_name_;
+      (reader.stmt_list_map_)[*stmt_list] = unit_name_;
     }
   }
-
-  return true;
 }
 
 void DIEReader::SkipNullEntries() {

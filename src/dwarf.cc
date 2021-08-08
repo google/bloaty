@@ -321,7 +321,7 @@ void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
     case DW_AT_location:
       if (val.IsString()) {
         die->location_string = val.GetString(cu);
-      } else if (value.form() == DW_FORM_sec_offset) {
+      } else if (val.form() == DW_FORM_sec_offset) {
         die->location_uint64 = val.GetUint(cu);
       }
       break;
@@ -582,7 +582,7 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
       continue;
     }
 
-    sink->AddFileRange("dwarf_debuginfo", cu.unit_name(), cu.unit_range());
+    sink->AddFileRange("dwarf_debuginfo", cu.unit_name(), cu.entire_unit());
     AddDIE(cu, compileunit_die, symtab, symbol_map, sink);
 
     if (compileunit_die.stmt_list) {
