@@ -165,67 +165,6 @@ static std::string CSVEscape(string_view str) {
   }
 }
 
-
-// LineReader / LineIterator ///////////////////////////////////////////////////
-
-// Convenience code for iterating over lines of a pipe.
-
-#if !defined(_MSC_VER)
-LineReader::LineReader(LineReader&& other) {
-  Close();
-
-  file_ = other.file_;
-  pclose_ = other.pclose_;
-
-  other.file_ = nullptr;
-}
-
-void LineReader::Close() {
-  if (!file_) return;
-
-  if (pclose_) {
-    pclose(file_);
-  } else {
-    fclose(file_);
-  }
-}
-
-void LineReader::Next() {
-  char buf[256];
-  line_.clear();
-  do {
-    if (!fgets(buf, sizeof(buf), file_)) {
-      if (feof(file_)) {
-        eof_ = true;
-        break;
-      } else {
-        std::cerr << "Error reading from file.\n";
-        exit(1);
-      }
-    }
-    line_.append(buf);
-  } while(!eof_ && line_[line_.size() - 1] != '\n');
-
-  if (!eof_) {
-    line_.resize(line_.size() - 1);
-  }
-}
-
-LineIterator LineReader::begin() { return LineIterator(this); }
-LineIterator LineReader::end() { return LineIterator(nullptr); }
-
-LineReader ReadLinesFromPipe(const std::string& cmd) {
-  FILE* pipe = popen(cmd.c_str(), "r");
-
-  if (!pipe) {
-    std::cerr << "Failed to run command: " << cmd << "\n";
-    exit(1);
-  }
-
-  return LineReader(pipe, true);
-}
-#endif
-
 extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
                                 int* status);
 

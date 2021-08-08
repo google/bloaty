@@ -35,6 +35,7 @@
 #include "absl/strings/strip.h"
 #include "capstone/capstone.h"
 
+#include "dwarf/debug_info.h"
 #include "bloaty.pb.h"
 #include "range_map.h"
 #include "re.h"
@@ -290,32 +291,6 @@ std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
 
-namespace dwarf {
-
-struct File {
-  absl::string_view debug_abbrev;
-  absl::string_view debug_addr;
-  absl::string_view debug_aranges;
-  absl::string_view debug_info;
-  absl::string_view debug_line;
-  absl::string_view debug_loc;
-  absl::string_view debug_pubnames;
-  absl::string_view debug_pubtypes;
-  absl::string_view debug_ranges;
-  absl::string_view debug_rnglists;
-  absl::string_view debug_str;
-  absl::string_view debug_str_offsets;
-  absl::string_view debug_types;
-
-  absl::string_view* GetFieldByName(absl::string_view name);
-  void SetFieldByName(absl::string_view name, absl::string_view contents) {
-    absl::string_view *member = GetFieldByName(name);
-    if (member) *member = contents;
-  }
-};
-
-}  // namespace dwarf
-
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
 void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
@@ -324,64 +299,6 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 void ReadEhFrame(absl::string_view contents, RangeSink* sink);
 void ReadEhFrameHdr(absl::string_view contents, RangeSink* sink);
-
-
-// LineReader //////////////////////////////////////////////////////////////////
-
-// Provides range-based for to iterate over lines in a pipe.
-//
-// for ( auto& line : ReadLinesFromPipe("ls -l") ) {
-// }
-
-class LineIterator;
-
-class LineReader {
- public:
-  LineReader(FILE* file, bool pclose) : file_(file), pclose_(pclose) {}
-  LineReader(LineReader&& other);
-  LineReader(const LineReader&) = delete;
-  LineReader& operator=(const LineReader&);
-
-
-  ~LineReader() { Close(); }
-
-  LineIterator begin();
-  LineIterator end();
-
-  void Next();
-
-  const std::string& line() const { return line_; }
-  bool eof() { return eof_; }
-
- private:
-  void Close();
-
-  FILE* file_;
-  std::string line_;
-  bool eof_ = false;
-  bool pclose_;
-};
-
-class LineIterator {
- public:
-  LineIterator(LineReader* reader) : reader_(reader) {}
-
-  bool operator!=(const LineIterator& /*other*/) const {
-    // Hack for range-based for.
-    return !reader_->eof();
-  }
-
-  void operator++() { reader_->Next(); }
-
-  const std::string& operator*() const {
-    return reader_->line();
-  }
-
- private:
-  LineReader* reader_;
-};
-
-LineReader ReadLinesFromPipe(const std::string& cmd);
 
 // Demangle C++ symbols according to the Itanium ABI.  The |source| argument
 // controls what demangling mode we are using.
