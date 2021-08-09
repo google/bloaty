@@ -1,0 +1,144 @@
+# Test that we properly ignore DIEs that have DW_AT_declaration=true.
+# This indicates a function that was declared, but not defined.
+# We don't want to register declarations, only definitions.
+#
+# This test is somewhat unrealistic, as it contains DIEs we would
+# probably never see in the real world (specifically, DIEs that have
+# both DW_AT_declaration and DW_AT_low_pc). However this may be the
+# only way of testing that we are truly skipping declarations, since
+# the skipping of declarations may not have any actual observable
+# effect on real-world data.
+
+# RUN: %yaml2obj %s --docnum=1 -o %t.obj
+# RUN: %yaml2obj %s --docnum=2 -o %t.dwo
+# RUN: %bloaty %t.obj --debug-file %t.dwo -d compileunits --raw-map --domain=vm | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+  Entry:           0x1040
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    FirstSec:        .text
+    LastSec:         .text
+    VAddr:           0x1000
+    Align:           0x1000
+Sections:
+  - Name:            .note.gnu.build-id
+    Type:            SHT_NOTE
+    Notes:
+      - Name:            GNU
+        Desc:            6CF422D909772A0FB5400518A689D9F15F14BF57
+        Type:            0x3  # NT_GNU_BUILD_ID
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x1000
+    AddressAlign:    0x10
+    Size:            0x20
+...
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+  Entry:           0x1040
+Sections:
+  - Name:            .note.gnu.build-id
+    Type:            SHT_NOTE
+    Notes:
+      - Name:            GNU
+        Desc:            6CF422D909772A0FB5400518A689D9F15F14BF57
+        Type:            0x3  # NT_GNU_BUILD_ID
+DWARF:
+  debug_str:
+    - foo.c
+    - bar.c
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_yes
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+        - Code:            0x2
+          Tag:             DW_TAG_subprogram
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_addr
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+            - Attribute:       DW_AT_declaration
+              Form:            DW_FORM_flag_present
+        - Code:            0x3
+          Tag:             DW_TAG_subprogram
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_addr
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+  debug_info:
+    # 0x0000000b: DW_TAG_compile_unit
+    #               DW_AT_name	("foo.c")
+    #
+    # 0x00000010:   DW_TAG_subprogram
+    #                 DW_AT_low_pc	(0x0000000000001000)
+    #                 DW_AT_high_pc	(0x0000000000001010)
+    #                 # This entry should be ignored because declaration=true.
+    #                 DW_AT_declaration	(true)
+    #
+    # 0x0000001d:   DW_TAG_subprogram
+    #                 DW_AT_low_pc	(0x0000000000001010)
+    #                 DW_AT_high_pc	(0x0000000000001020)
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0
+        - AbbrCode:        0x2
+          Values:
+            - Value:           0x1000
+            - Value:           0x10
+        - AbbrCode:        0x3
+          Values:
+            - Value:           0x1010
+            - Value:           0x10
+        - AbbrCode:        0x0
+    # 0x00000036: DW_TAG_compile_unit
+    #               DW_AT_name	("bar.c")
+    # 
+    # 0x0000003b:   DW_TAG_subprogram
+    #                 DW_AT_low_pc	(0x0000000000001000)
+    #                 DW_AT_high_pc	(0x0000000000001010)
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x6
+        - AbbrCode:        0x3
+          Values:
+            - Value:           0x1000
+            - Value:           0x10
+        - AbbrCode:        0x0
+...
+
+# CHECK: VM MAP:
+# CHECK: 0000-1000              4096             [-- Nothing mapped --]
+# CHECK: 1000-1010                16             bar.c
+# CHECK: 1010-1020                16             foo.c

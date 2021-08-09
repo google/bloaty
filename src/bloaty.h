@@ -293,8 +293,8 @@ std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
-void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
-                           const DualMap& map, RangeSink* sink);
+void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& map,
+                           RangeSink* sink);
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 void ReadEhFrame(absl::string_view contents, RangeSink* sink);

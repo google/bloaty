@@ -1332,7 +1332,7 @@ class ElfObjectFile : public ObjectFile {
                          false);
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf, sink);
-          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ReadDWARFCompileUnits(dwarf, symbol_map, sink);
           break;
         }
         case DataSource::kInlines: {

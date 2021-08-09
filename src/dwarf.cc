@@ -296,15 +296,16 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 
 struct GeneralDIE {
   absl::optional<string_view> name;
-  absl::optional<string_view> linkage_name;
   absl::optional<string_view> location_string;
   absl::optional<uint64_t> location_uint64;
   absl::optional<uint64_t> low_pc;
-  absl::optional<uint64_t> high_pc;
+  absl::optional<uint64_t> high_pc_addr;
+  absl::optional<uint64_t> high_pc_size;
   absl::optional<uint64_t> stmt_list;
   absl::optional<uint64_t> rnglistx;
   absl::optional<uint64_t> ranges;
   absl::optional<uint64_t> start_scope;
+  bool declaration = false;
 };
 
 void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
@@ -315,8 +316,10 @@ void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
         die->name = val.GetString(cu);
       }
       break;
-    case DW_AT_linkage_name:
-      if (val.IsString()) die->linkage_name = val.GetString(cu);
+    case DW_AT_declaration:
+      if (auto uint = val.ToUint(cu)) {
+        die->declaration = *uint;
+      }
       break;
     case DW_AT_location:
       if (val.IsString()) {
@@ -331,8 +334,28 @@ void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
       }
       break;
     case DW_AT_high_pc:
-      if (auto uint = val.ToUint(cu)) {
-        die->high_pc = *uint;
+      switch (val.form()) {
+        case DW_FORM_addr:
+        case DW_FORM_addrx:
+        case DW_FORM_addrx1:
+        case DW_FORM_addrx2:
+        case DW_FORM_addrx3:
+        case DW_FORM_addrx4:
+          // high_pc is absolute.
+          die->high_pc_addr = val.GetUint(cu);
+          break;
+        case DW_FORM_data1:
+        case DW_FORM_data2:
+        case DW_FORM_data4:
+        case DW_FORM_data8:
+          // high_pc is a size.
+          die->high_pc_size = val.ToUint(cu);
+          break;
+        default:
+          if (verbose_level > 0) {
+            fprintf(stderr, "Unexpected form for high_pc: %d\n", val.form());
+          }
+          break;
       }
       break;
     case DW_AT_stmt_list:
@@ -357,37 +380,31 @@ void ReadGeneralDIEAttr(uint16_t tag, dwarf::AttrValue val, const dwarf::CU& cu,
   }
 }
 
+uint64_t TryReadPcPair(const dwarf::CU& cu, const GeneralDIE& die,
+                       RangeSink* sink) {
+  uint64_t addr;
+  uint64_t size;
+
+  if (!die.low_pc) return 0;
+  addr = *die.low_pc;
+
+  if (die.high_pc_addr) {
+    size = *die.high_pc_addr - addr;
+  } else if (die.high_pc_size) {
+    size = *die.high_pc_size;
+  } else{
+    return 0;
+  }
+
+  sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", addr, size, cu.unit_name());
+  return addr;
+}
+
 // To view DIEs for a given file, try:
 //   readelf --debug-dump=info foo.bin
 void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
-            const SymbolTable& symtab, const DualMap& symbol_map,
-            RangeSink* sink) {
-  uint64_t low_pc = 0;
-  // Some DIEs mark address ranges with high_pc/low_pc pairs (especially
-  // functions).
-  if (die.low_pc && die.high_pc &&
-      dwarf::IsValidDwarfAddress(*die.low_pc, cu.unit_sizes().address_size())) {
-    uint64_t high_pc = *die.high_pc;
-    low_pc = *die.low_pc;
-
-    // It appears that some compilers make high_pc a size, and others make it an
-    // address.
-    if (high_pc >= low_pc) {
-      high_pc -= low_pc;
-    }
-
-    sink->AddVMRangeIgnoreDuplicate("dwarf_pcpair", low_pc, high_pc, cu.unit_name());
-  }
-
-  // Sometimes a DIE has a linkage_name, which we can look up in the symbol
-  // table.
-  if (die.linkage_name) {
-    auto it = symtab.find(*die.linkage_name);
-    if (it != symtab.end()) {
-      sink->AddVMRangeIgnoreDuplicate("dwarf_linkagename", it->second.first,
-                                      it->second.second, cu.unit_name());
-    }
-  }
+            const DualMap& symbol_map, RangeSink* sink) {
+  uint64_t low_pc = TryReadPcPair(cu, die, sink);
 
   // Sometimes the DIE has a "location", which gives the location as an address.
   // This parses a very small subset of the overall DWARF expression grammar.
@@ -561,7 +578,6 @@ static void ReadDWARFStmtListRange(const dwarf::CU& cu, uint64_t offset,
 // resolve to addresses.
 static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
                                dwarf::InfoReader::Section section,
-                               const SymbolTable& symtab,
                                const DualMap& symbol_map, RangeSink* sink) {
   dwarf::CUIter iter = reader.GetCUIter(section);
   dwarf::CU cu;
@@ -584,7 +600,7 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
     }
 
     sink->AddFileRange("dwarf_debuginfo", cu.unit_name(), cu.entire_unit());
-    AddDIE(cu, compileunit_die, symtab, symbol_map, sink);
+    AddDIE(cu, compileunit_die, symbol_map, sink);
 
     if (compileunit_die.stmt_list) {
       ReadDWARFStmtListRange(cu, *compileunit_die.stmt_list, sink);
@@ -600,18 +616,19 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
           });
 
       // low_pc == 0 is a signal that this routine was stripped out of the
-      // final binary.  Skip this DIE and all of its children.
-      if (die.low_pc && *die.low_pc == 0) {
+      // final binary. Also any declaration should be skipped.
+      if ((die.low_pc && !cu.IsValidDwarfAddress(*die.low_pc)) ||
+          die.declaration) {
         die_reader.SkipChildren(cu, abbrev);
       } else {
-        AddDIE(cu, die, symtab, symbol_map, sink);
+        AddDIE(cu, die, symbol_map, sink);
       }
     }
   }
 }
 
-void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
-                           const DualMap& symbol_map, RangeSink* sink) {
+void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& symbol_map,
+                           RangeSink* sink) {
   if (!file.debug_info.size()) {
     THROW("missing debug info");
   }
@@ -623,9 +640,9 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const SymbolTable& symtab,
   // Share a reader to avoid re-parsing debug abbreviations.
   dwarf::InfoReader reader(file);
 
-  ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugInfo, symtab,
-                     symbol_map, sink);
-  ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugTypes, symtab,
+  ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugInfo, symbol_map,
+                     sink);
+  ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugTypes,
                      symbol_map, sink);
   ReadDWARFPubNames(reader, file.debug_pubnames, sink);
   ReadDWARFPubNames(reader, file.debug_pubtypes, sink);

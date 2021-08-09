@@ -54,6 +54,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "dwarf/attr.h"
+#include "dwarf/dwarf_util.h"
 #include "dwarf_constants.h"
 #include "util.h"
 
@@ -259,6 +260,10 @@ class CU {
   void SetIndirectStringCallback(
       std::function<void(absl::string_view)> strp_sink) {
     strp_callback_ = strp_sink;
+  }
+
+  bool IsValidDwarfAddress(uint64_t addr) const {
+    return dwarf::IsValidDwarfAddress(addr, unit_sizes_.address_size());
   }
 
  private:

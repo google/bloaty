@@ -584,7 +584,7 @@ class MachOObjectFile : public ObjectFile {
           ParseSymbols(debug_file().file_data().data(), &symtab, &symbol_sink);
           dwarf::File dwarf;
           ReadDebugSectionsFromMachO(debug_file().file_data(), &dwarf, sink);
-          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ReadDWARFCompileUnits(dwarf, symbol_map, sink);
           ParseSymbols(sink->input_file().data(), nullptr, sink);
           break;
         }
