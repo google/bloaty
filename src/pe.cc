@@ -109,13 +109,9 @@ bool PeFile::Initialize() {
     return false;
   }
 
-  if ((dos_header_.AddressOfNewExeHeader + sizeof(pe_header)) > data_.size()) {
-    // Cannot fit the headers
-    return false;
-  }
-
-  memcpy(&pe_header_, data_.data() + dos_header_.AddressOfNewExeHeader,
-         sizeof(pe_header_));
+  string_view exe_header =
+      GetRegion(dos_header_.AddressOfNewExeHeader, sizeof(pe_header));
+  memcpy(&pe_header_, exe_header.data(), exe_header.size());
 
   if (!std::equal(pe_header_.signature, pe_header_.signature + sizeof(PE_Magic),
                   std::begin(PE_Magic))) {
