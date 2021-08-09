@@ -193,7 +193,9 @@ void CU::ReadTopLevelDIE(InfoReader& reader) {
       *this, abbrev, [this, &stmt_list](uint16_t tag, dwarf::AttrValue value) {
         switch (tag) {
           case DW_AT_name:
-            unit_name_ = std::string(value.GetString(*this));
+            if (value.IsString()) {
+              unit_name_ = std::string(value.GetString(*this));
+            }
             break;
           case DW_AT_stmt_list:
             if (value.form() == DW_FORM_sec_offset) {
