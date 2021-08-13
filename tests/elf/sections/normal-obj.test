@@ -88,16 +88,17 @@ Symbols:
 
 # CHECK: FILE MAP:
 # CHECK: 000-040	         64		[ELF Header]
-# CHECK: 040-050	         16		.text
-# CHECK: 050-220	        464		.data
+# CHECK: 040-04b	         11		.text
+# CHECK: 04b-050	          5		[Unmapped]
+# CHECK: 050-218	        456		.data
+# CHECK: 218-220	          8		[Unmapped]
 # CHECK: 220-535	        789		.rodata
 # CHECK: 535-558	         35		.comment
 # CHECK: 558-590	         56		.eh_frame
 # CHECK: 590-5a8	         24		.rela.eh_frame
 # CHECK: 5a8-650	        168		.symtab
 # CHECK: 650-66b	         27		.strtab
-# CHECK: 66b-6d5	        106		.shstrtab
-# CHECK: 6d5-6d8	          3		.shstrtab
+# CHECK: 66b-6d8	        109		.shstrtab
 # CHECK: 6d8-a18	        832		[ELF Section Headers]
 
 # CHECK: VM MAP:

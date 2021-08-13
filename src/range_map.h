@@ -230,6 +230,8 @@ class RangeMap {
 
   template <class T>
   uint64_t TranslateWithEntry(T iter, uint64_t addr) const;
+  template <class T>
+  uint64_t TranslateLoose(T iter, uint64_t addr) const;
 
   template <class T>
   bool TranslateAndTrimRangeWithEntry(T iter, uint64_t addr, uint64_t size,

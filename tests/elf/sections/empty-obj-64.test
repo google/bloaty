@@ -55,8 +55,7 @@ Symbols:
 # CHECK: 040-070	         48		.comment
 # CHECK: 070-118	        168		.symtab
 # CHECK: 118-148	         48		.strtab
-# CHECK: 148-18d	         69		.shstrtab
-# CHECK: 18d-190	          3		.shstrtab
+# CHECK: 148-190	         72		.shstrtab
 # CHECK: 190-3d0	        576		[ELF Section Headers]
 
 # CHECK: VM MAP:

@@ -538,15 +538,17 @@ Symbols:
 # CHECK: 0040-0190	        336		[Unmapped]	[ELF Program Headers]
 # CHECK: 0190-01a0	         16		LOAD #1 [RX]	.init
 # CHECK: 01a0-09f9	       2137		LOAD #1 [RX]	.text
-# CHECK: 09f9-0a00	          7		LOAD #1 [RX]	.fini
+# CHECK: 09f9-09fc	          3		LOAD #1 [RX]	.fini
+# CHECK: 09fc-0a00	          4		[Unmapped]	[Unmapped]
 # CHECK: 0a00-0d20	        800		LOAD #2 [R]	.rodata
 # CHECK: 0d20-0d50	         48		LOAD #2 [R]	.eh_frame
 # CHECK: 0d50-0d58	          8		LOAD #3 [RW]	.init_array
 # CHECK: 0d58-0d60	          8		LOAD #3 [RW]	.fini_array
 # CHECK: 0d60-0d68	          8		LOAD #3 [RW]	.got
 # CHECK: 0d68-0d80	         24		LOAD #3 [RW]	.got.plt
-# CHECK: 0d80-0f78	        504		LOAD #3 [RW]	.data
-# CHECK: 0f78-0f80	          8		[Unmapped]	.data
+# CHECK: 0d80-0f70	        496		LOAD #3 [RW]	.data
+# CHECK: 0f70-0f78	          8		LOAD #3 [RW]	[LOAD #3 [RW]]
+# CHECK: 0f78-0f80	          8		[Unmapped]	[Unmapped]
 # CHECK: 0f80-0fd8	         88		[Unmapped]	.comment
 # CHECK: 0fd8-1710	       1848		[Unmapped]	.symtab
 # CHECK: 1710-1a43	        819		[Unmapped]	.strtab
@@ -566,5 +568,6 @@ Symbols:
 # CHECK: 403ff0-403ff8	          8		LOAD #3 [RW]	.fini_array
 # CHECK: 403ff8-404000	          8		LOAD #3 [RW]	.got
 # CHECK: 404000-404020	         32		LOAD #3 [RW]	.got.plt
-# CHECK: 404020-404220	        512		LOAD #3 [RW]	.data
+# CHECK: 404020-404210	        496		LOAD #3 [RW]	.data
+# CHECK: 404210-404220	         16		LOAD #3 [RW]	[LOAD #3 [RW]]
 # CHECK: 404220-4044f8	        728		LOAD #3 [RW]	.bss
