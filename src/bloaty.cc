@@ -88,8 +88,6 @@ constexpr DataSourceDefinition data_sources[] = {
      "the filename specified on the Bloaty command-line"},
     {DataSource::kInlines, "inlines",
      "source line/file where inlined code came from.  requires debug info."},
-    {DataSource::kRawRanges, "rawranges",
-     "raw ranges of previous data source."},
     {DataSource::kSections, "sections", "object file section"},
     {DataSource::kSegments, "segments", "load commands in the binary"},
     // We require that all symbols sources are >= kSymbols.
@@ -1653,9 +1651,7 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
     // We handle the kInputFiles data source internally, without handing it off
     // to the file format implementation.  This seems slightly simpler, since
     // the file format has to deal with armembers too.
-    if (source->effective_source == DataSource::kRawRanges) {
-      // Do nothing, we'll fill this in later.
-    } else if (source->effective_source == DataSource::kInputFiles) {
+    if (source->effective_source == DataSource::kInputFiles) {
       filename_sink_ptrs.push_back(sinks.back().get());
     } else {
       sink_ptrs.push_back(sinks.back().get());
@@ -1689,29 +1685,6 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
           sink->AddFileRange("inputfile_filecopier",
                              sink->input_file().filename(), start, length);
         });
-  }
-
-  // kRawRange source: add the directly preceding map's ranges, with labels
-  // indicating the range.
-  for (size_t i = 1; i < sinks.size(); i++) {
-    if (sinks[i]->data_source() == DataSource::kRawRanges) {
-      RangeSink* ranges_sink = sinks[i].get();
-      RangeSink* from = sinks[i - 1].get();
-      from->MapAtIndex(0).vm_map.ForEachRange([ranges_sink](uint64_t start,
-                                                            uint64_t length) {
-        ranges_sink->AddVMRange("rawrange_vmcopier", start, length,
-                                absl::StrCat("vm: [", absl::Hex(start), ", ",
-                                             absl::Hex(start + length), "]"));
-      });
-      from->MapAtIndex(0).file_map.ForEachRange(
-          [ranges_sink](uint64_t start, uint64_t length) {
-            ranges_sink->AddFileRange(
-                "rawrange_filecopier",
-                absl::StrCat("file: [", absl::Hex(start), ", ",
-                             absl::Hex(start + length), "]"),
-                start, length);
-          });
-    }
   }
 
   maps.ComputeRollup(rollup);
