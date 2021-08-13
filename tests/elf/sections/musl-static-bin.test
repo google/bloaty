@@ -19,7 +19,7 @@
 # (or possibly yaml2obj). The binary did not fully round-trip successfully.
 
 # RUN: %yaml2obj %s -o %t.obj
-# RUN: %bloaty --raw-map %t.obj | %FileCheck %s
+# RUN: %bloaty --raw-map -d segments,sections %t.obj | %FileCheck %s
 
 --- !ELF
 FileHeader:
@@ -534,57 +534,37 @@ Symbols:
 ...
 
 # CHECK: FILE MAP:
-# CHECK: 0000-0040	         64		[ELF Headers]
-# CHECK: 0040-0078	         56		[LOAD #0 [R]]
-# CHECK: 0078-00b0	         56		[LOAD #1 [RX]]
-# CHECK: 00b0-00e8	         56		[LOAD #2 [R]]
-# CHECK: 00e8-0120	         56		[LOAD #3 [RW]]
-# CHECK: 0120-0158	         56		[LOAD #4 [RW]]
-# CHECK: 0158-0190	         56		[LOAD #5 [R]]
-# CHECK: 0190-01a0	         16		.init
-# CHECK: 01a0-09f9	       2137		.text
-# CHECK: 09f9-0a00	          7		.fini
-# CHECK: 0a00-0d20	        800		.rodata
-# CHECK: 0d20-0d50	         48		.eh_frame
-# CHECK: 0d50-0d58	          8		.init_array
-# CHECK: 0d58-0d60	          8		.fini_array
-# CHECK: 0d60-0d68	          8		.got
-# CHECK: 0d68-0d80	         24		.got.plt
-# CHECK: 0d80-0f78	        504		.data
-# CHECK: 0f78-0f80	          8		.data
-# CHECK: 0f80-0fd8	         88		.comment
-# CHECK: 0fd8-1710	       1848		.symtab
-# CHECK: 1710-1a43	        819		.strtab
-# CHECK: 1a43-1ac0	        125		.shstrtab
-# CHECK: 1ac0-1b00	         64		[ELF Headers]
-# CHECK: 1b00-1b40	         64		.init
-# CHECK: 1b40-1b80	         64		.text
-# CHECK: 1b80-1bc0	         64		.fini
-# CHECK: 1bc0-1c00	         64		.rodata
-# CHECK: 1c00-1c40	         64		.eh_frame
-# CHECK: 1c40-1c80	         64		.init_array
-# CHECK: 1c80-1cc0	         64		.fini_array
-# CHECK: 1cc0-1d00	         64		.got
-# CHECK: 1d00-1d40	         64		.got.plt
-# CHECK: 1d40-1d80	         64		.data
-# CHECK: 1d80-1dc0	         64		.bss
-# CHECK: 1dc0-1e00	         64		.comment
-# CHECK: 1e00-1e40	         64		.symtab
-# CHECK: 1e40-1e80	         64		.strtab
-# CHECK: 1e80-1ec0	         64		.shstrtab
+# CHECK: 0000-0040	         64		[Unmapped]	[ELF Header]
+# CHECK: 0040-0190	        336		[Unmapped]	[ELF Program Headers]
+# CHECK: 0190-01a0	         16		LOAD #1 [RX]	.init
+# CHECK: 01a0-09f9	       2137		LOAD #1 [RX]	.text
+# CHECK: 09f9-0a00	          7		LOAD #1 [RX]	.fini
+# CHECK: 0a00-0d20	        800		LOAD #2 [R]	.rodata
+# CHECK: 0d20-0d50	         48		LOAD #2 [R]	.eh_frame
+# CHECK: 0d50-0d58	          8		LOAD #3 [RW]	.init_array
+# CHECK: 0d58-0d60	          8		LOAD #3 [RW]	.fini_array
+# CHECK: 0d60-0d68	          8		LOAD #3 [RW]	.got
+# CHECK: 0d68-0d80	         24		LOAD #3 [RW]	.got.plt
+# CHECK: 0d80-0f78	        504		LOAD #3 [RW]	.data
+# CHECK: 0f78-0f80	          8		[Unmapped]	.data
+# CHECK: 0f80-0fd8	         88		[Unmapped]	.comment
+# CHECK: 0fd8-1710	       1848		[Unmapped]	.symtab
+# CHECK: 1710-1a43	        819		[Unmapped]	.strtab
+# CHECK: 1a43-1ac0	        125		[Unmapped]	.shstrtab
+# CHECK: 1ac0-1ec0	       1024		[Unmapped]	[ELF Section Headers]
 
 # CHECK: VM MAP:
 # CHECK: 000000-401000	    4198400		[-- Nothing mapped --]
-# CHECK: 401000-401010	         16		.init
-# CHECK: 401010-401869	       2137		.text
-# CHECK: 401869-40186c	          3		.fini
+# CHECK: 401000-401010	         16		LOAD #1 [RX]	.init
+# CHECK: 401010-401869	       2137		LOAD #1 [RX]	.text
+# CHECK: 401869-40186c	          3		LOAD #1 [RX]	.fini
 # CHECK: 40186c-402000	       1940		[-- Nothing mapped --]
-# CHECK: 402000-402320	        800		.rodata
-# CHECK: 402320-402350	         48		.eh_frame
+# CHECK: 402000-402320	        800		LOAD #2 [R]	.rodata
+# CHECK: 402320-402350	         48		LOAD #2 [R]	.eh_frame
 # CHECK: 402350-403fe8	       7320		[-- Nothing mapped --]
-# CHECK: 403fe8-403ff0	          8		.init_array
-# CHECK: 403ff0-403ff8	          8		.fini_array
-# CHECK: 403ff8-404000	          8		.got
-# CHECK: 404000-404020	         32		.got.plt
-# CHECK: 404020-404220	        512		.data
-# CHECK: 404220-4044f8	        728		.bss
+# CHECK: 403fe8-403ff0	          8		LOAD #3 [RW]	.init_array
+# CHECK: 403ff0-403ff8	          8		LOAD #3 [RW]	.fini_array
+# CHECK: 403ff8-404000	          8		LOAD #3 [RW]	.got
+# CHECK: 404000-404020	         32		LOAD #3 [RW]	.got.plt
+# CHECK: 404020-404220	        512		LOAD #3 [RW]	.data
+# CHECK: 404220-4044f8	        728		LOAD #3 [RW]	.bss

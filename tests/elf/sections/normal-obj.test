@@ -87,7 +87,7 @@ Symbols:
 ...
 
 # CHECK: FILE MAP:
-# CHECK: 000-040	         64		[ELF Headers]
+# CHECK: 000-040	         64		[ELF Header]
 # CHECK: 040-050	         16		.text
 # CHECK: 050-220	        464		.data
 # CHECK: 220-535	        789		.rodata
@@ -96,20 +96,9 @@ Symbols:
 # CHECK: 590-5a8	         24		.rela.eh_frame
 # CHECK: 5a8-650	        168		.symtab
 # CHECK: 650-66b	         27		.strtab
-# CHECK: 66b-6d8	        109		.shstrtab
-# CHECK: 6d8-718	         64		[ELF Headers]
-# CHECK: 718-758	         64		.text
-# CHECK: 758-798	         64		.bss
-# CHECK: 798-7d8	         64		.data
-# CHECK: 7d8-818	         64		.rodata
-# CHECK: 818-858	         64		.comment
-# CHECK: 858-898	         64		.note.GNU-stack
-# CHECK: 898-8d8	         64		.eh_frame
-# CHECK: 8d8-918	         64		.rela.eh_frame
-# CHECK: 918-958	         64		.llvm_addrsig
-# CHECK: 958-998	         64		.symtab
-# CHECK: 998-9d8	         64		.strtab
-# CHECK: 9d8-a18	         64		.shstrtab
+# CHECK: 66b-6d5	        106		.shstrtab
+# CHECK: 6d5-6d8	          3		.shstrtab
+# CHECK: 6d8-a18	        832		[ELF Section Headers]
 
 # CHECK: VM MAP:
 # CHECK: 00000000000-10000000000	 1099511627776		[-- Nothing mapped --]

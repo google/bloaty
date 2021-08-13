@@ -1065,12 +1065,7 @@ static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) 
                            contents);
           } else if (report_by == kReportBySectionName) {
             sink->AddRange("elf_section", name, full_addr, vmsize, contents);
-            sink->AddFileRange("elf_section_header", name, section.range());
           } else if (report_by == kReportByEscapedSectionName) {
-            if (!sink->IsBaseMap()) {
-              sink->AddFileRangeForFileRange("elf_section", contents,
-                                             section.range());
-            }
             sink->AddRange("elf_section",
                            std::string("[section ") + std::string(name) + "]",
                            full_addr, vmsize, contents);
@@ -1133,21 +1128,6 @@ std::string GetSegmentName(const ElfFile::Segment& segment, Elf64_Xword i,
 }
 
 static void DoReadELFSegments(RangeSink* sink, ReportSegmentsBy report_by) {
-  if (!sink->IsBaseMap()) {
-    ForEachElf(sink->input_file(), sink,
-               [=](const ElfFile& elf, string_view /*filename*/,
-                   uint32_t /*index_base*/) {
-                 for (Elf64_Xword i = 0; i < elf.header().e_phnum; i++) {
-                   ElfFile::Segment segment;
-                   elf.ReadSegment(i, &segment);
-                   std::string name = GetSegmentName(segment, i, report_by);
-
-                   sink->AddFileRange("elf_segment_header", name,
-                                      segment.range());
-                 }
-               });
-  }
-
   ForEachElf(sink->input_file(), sink,
              [=](const ElfFile& elf, string_view /*filename*/,
                  uint32_t /*index_base*/) {
@@ -1249,19 +1229,19 @@ void AddCatchAll(RangeSink* sink) {
   // The last-line fallback to make sure we cover the entire VM space.
   if (sink->data_source() != DataSource::kSegments) {
     DoReadELFSections(sink, kReportByEscapedSectionName);
+    ForEachElf(sink->input_file(), sink,
+               [sink](const ElfFile& elf, string_view /*filename*/,
+                      uint32_t /*index_base*/) {
+                 sink->AddFileRange("elf_catchall", "[ELF Header]",
+                                    elf.header_region());
+                 sink->AddFileRange("elf_catchall", "[ELF Section Headers]",
+                                    elf.section_headers());
+                 sink->AddFileRange("elf_catchall", "[ELF Program Headers]",
+                                    elf.segment_headers());
+               });
   }
   DoReadELFSegments(sink, kReportByEscapedSegmentName);
 
-  ForEachElf(sink->input_file(), sink,
-             [sink](const ElfFile& elf, string_view /*filename*/,
-                    uint32_t /*index_base*/) {
-               sink->AddFileRange("elf_catchall", "[ELF Headers]",
-                                  elf.header_region());
-               sink->AddFileRange("elf_catchall", "[ELF Headers]",
-                                  elf.section_headers());
-               sink->AddFileRange("elf_catchall", "[ELF Headers]",
-                                  elf.segment_headers());
-             });
 
   // The last-line fallback to make sure we cover the entire file.
   sink->AddFileRange("elf_catchall", "[Unmapped]", sink->input_file().data());
