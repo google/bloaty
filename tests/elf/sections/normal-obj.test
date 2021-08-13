@@ -88,10 +88,8 @@ Symbols:
 
 # CHECK: FILE MAP:
 # CHECK: 000-040	         64		[ELF Header]
-# CHECK: 040-04b	         11		.text
-# CHECK: 04b-050	          5		[Unmapped]
-# CHECK: 050-218	        456		.data
-# CHECK: 218-220	          8		[Unmapped]
+# CHECK: 040-050	         16		.text
+# CHECK: 050-220	        464		.data
 # CHECK: 220-535	        789		.rodata
 # CHECK: 535-558	         35		.comment
 # CHECK: 558-590	         56		.eh_frame

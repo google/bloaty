@@ -28,13 +28,6 @@ uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) const {
 }
 
 template <class T>
-uint64_t RangeMap::TranslateLoose(T iter, uint64_t addr) const {
-  return iter->second.HasTranslation()
-             ? addr - iter->first + iter->second.other_start
-             : kNoTranslation;
-}
-
-template <class T>
 bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
                                               uint64_t size, uint64_t* trimmed_addr,
                                               uint64_t* translated_addr,
@@ -300,7 +293,6 @@ void RangeMap::Compress() {
   auto it = prev;
   while (it != mappings_.end()) {
     if (prev->first + prev->second.size == it->first &&
-        TranslateLoose(prev, it->first) == TranslateLoose(it, it->first) &&
         (prev->second.label == it->second.label ||
          (!prev->second.HasFallbackLabel() && it->second.IsShortFallback()))) {
       prev->second.size += it->second.size;
