@@ -25,11 +25,9 @@ Sections:
 ...
 
 # CHECK: FILE MAP:
-# CHECK: 000-040	         64		[ELF Headers]
+# CHECK: 000-040	         64		[ELF Header]
 # CHECK: 040-041	          1		.strtab
 # CHECK: 041-058	         23		.shstrtab
-# CHECK: 058-098	         64		[ELF Headers]
-# CHECK: 098-0d8	         64		.strtab
-# CHECK: 0d8-118	         64		.shstrtab
+# CHECK: 058-118	        192		[ELF Section Headers]
 
 # CHECK: VM MAP:

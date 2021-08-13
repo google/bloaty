@@ -51,19 +51,11 @@ Symbols:
 ...
 
 # CHECK: FILE MAP:
-# CHECK: 000-040	         64		[ELF Headers]
+# CHECK: 000-040	         64		[ELF Header]
 # CHECK: 040-070	         48		.comment
 # CHECK: 070-118	        168		.symtab
 # CHECK: 118-148	         48		.strtab
 # CHECK: 148-190	         72		.shstrtab
-# CHECK: 190-1d0	         64		[ELF Headers]
-# CHECK: 1d0-210	         64		.text
-# CHECK: 210-250	         64		.data
-# CHECK: 250-290	         64		.bss
-# CHECK: 290-2d0	         64		.comment
-# CHECK: 2d0-310	         64		.note.GNU-stack
-# CHECK: 310-350	         64		.symtab
-# CHECK: 350-390	         64		.strtab
-# CHECK: 390-3d0	         64		.shstrtab
+# CHECK: 190-3d0	        576		[ELF Section Headers]
 
 # CHECK: VM MAP:
