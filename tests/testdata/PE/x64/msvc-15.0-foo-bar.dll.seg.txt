@@ -2,7 +2,8 @@ segments	vmsize	filesize
 .text	3587	4096
 .rdata	2520	2560
 .data	1592	512
-[PE Headers]	696	696
 .pdata	408	512
 .reloc	24	512
+[PE Headers]	496	496
 [Unmapped]	0	328
+[PE Section Headers]	200	200

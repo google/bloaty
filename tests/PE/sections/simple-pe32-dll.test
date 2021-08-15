@@ -1,0 +1,106 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s --dump-input fail
+
+--- !COFF
+OptionalHeader:
+  AddressOfEntryPoint: 4160
+  ImageBase:       268435456
+  SectionAlignment: 4096
+  FileAlignment:   512
+  MajorOperatingSystemVersion: 4
+  MinorOperatingSystemVersion: 0
+  MajorImageVersion: 0
+  MinorImageVersion: 0
+  MajorSubsystemVersion: 4
+  MinorSubsystemVersion: 0
+  Subsystem:       IMAGE_SUBSYSTEM_WINDOWS_GUI
+  DLLCharacteristics: [  ]
+  SizeOfStackReserve: 1048576
+  SizeOfStackCommit: 4096
+  SizeOfHeapReserve: 1048576
+  SizeOfHeapCommit: 4096
+  ExportTable:
+    RelativeVirtualAddress: 8304
+    Size:            366
+  ImportTable:
+    RelativeVirtualAddress: 8224
+    Size:            40
+  ResourceTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ExceptionTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  CertificateTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  BaseRelocationTable:
+    RelativeVirtualAddress: 12288
+    Size:            16
+  Debug:
+    RelativeVirtualAddress: 0
+    Size:            0
+  Architecture:
+    RelativeVirtualAddress: 0
+    Size:            0
+  GlobalPtr:
+    RelativeVirtualAddress: 0
+    Size:            0
+  TlsTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  LoadConfigTable:
+    RelativeVirtualAddress: 0
+    Size:            0
+  BoundImport:
+    RelativeVirtualAddress: 0
+    Size:            0
+  IAT:
+    RelativeVirtualAddress: 8264
+    Size:            8
+  DelayImportDescriptor:
+    RelativeVirtualAddress: 0
+    Size:            0
+  ClrRuntimeHeader:
+    RelativeVirtualAddress: 0
+    Size:            0
+header:
+  Machine:         IMAGE_FILE_MACHINE_I386
+  Characteristics: [ IMAGE_FILE_EXECUTABLE_IMAGE, IMAGE_FILE_LINE_NUMS_STRIPPED, IMAGE_FILE_LOCAL_SYMS_STRIPPED, IMAGE_FILE_32BIT_MACHINE, IMAGE_FILE_DEBUG_STRIPPED, IMAGE_FILE_DLL ]
+sections:
+  - Name:            .text
+    Characteristics: [ IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ ]
+    VirtualAddress:  4096
+    VirtualSize:     160
+    SectionData:     5589E581EC0000000090B80020001050E88300000083C404C9C35589E581EC0000000090B80920001050E86900000083C404B800000000E900000000C9C210005589E581EC04000000908B4510508B450C508B450850E8250000008945FC8B45FCE900000000C9C20C00000000000000000000000000000000000000000000005589E581EC0000000090B801000000E900000000C9C20C00FF25482000100000
+  - Name:            .data
+    Characteristics: [ IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE ]
+    VirtualAddress:  8192
+    VirtualSize:     480
+    SectionData:     637572696F757321004D61726B204A616E73656E00000000000000000000000050200000000000000000000058200000482000000000000000000000000000000000000000000000632000000000000063200000000000006D73766372742E646C6C00000070757473000000000000000000000000000000000000001A210000010000000D0000000D00000098200000CC20000000210000801000001A1000004010000000300000003000000030000000300000003000000030000020200000E0210000981000000010000027210000332100003F2100004D2100005E210000712100008221000095210000A9210000BF210000C6210000CB210000D221000000000100020003000400050006000700080009000A000B000C00706533325F7374642E646C6C005F446C6C4D61696E403132005F446C6C4D61696E403136005F5F646C6C7374617274403132005F5F66696E695F61727261795F656E64005F5F66696E695F61727261795F7374617274005F5F696E69745F61727261795F656E64005F5F696E69745F61727261795F7374617274005F5F707265696E69745F61727261795F656E64005F5F707265696E69745F61727261795F7374617274005F6564617461005F656E64005F65746578740068656C6C6F5F7468657265000000
+  - Name:            .reloc
+    Characteristics: [ IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_DISCARDABLE, IMAGE_SCN_MEM_READ ]
+    VirtualAddress:  12288
+    VirtualSize:     16
+    SectionData:     00100000100000000B3025309A300000
+symbols:         []
+...
+
+# CHECK: FILE MAP:
+# CHECK: 000-178	        376		[PE Headers]
+# CHECK: 178-1f0	        120		[PE Section Headers]
+# CHECK: 1f0-200	         16		[Unmapped]
+# CHECK: 200-400	        512		.text
+# CHECK: 400-600	        512		.data
+# CHECK: 600-800	        512		.reloc
+
+# CHECK: VM MAP:
+# CHECK: 0000-0178	        376		[PE Headers]
+# CHECK: 0178-01f0	        120		[PE Section Headers]
+# CHECK: 01f0-1000	       3600		[-- Nothing mapped --]
+# CHECK: 1000-10a0	        160		.text
+# CHECK: 10a0-2000	       3936		[-- Nothing mapped --]
+# CHECK: 2000-21e0	        480		.data
+# CHECK: 21e0-3000	       3616		[-- Nothing mapped --]
+# CHECK: 3000-3010	         16		.reloc
+
