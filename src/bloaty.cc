@@ -40,12 +40,12 @@ typedef size_t z_size_t;
 #include <math.h>
 #include <signal.h>
 #include <stdlib.h>
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #else
-#include <Windows.h>
+#include <windows.h>
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -859,7 +859,7 @@ constexpr uint64_t RangeSink::kUnknownSize;
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 class MmapInputFile : public InputFile {
  public:
   MmapInputFile(const std::string& filename);
@@ -921,7 +921,7 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
   return absl::make_unique<MmapInputFile>(filename);
 }
 
-#else // !_MSC_VER
+#else // !_WIN32
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
