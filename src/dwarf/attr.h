@@ -27,7 +27,7 @@ class CU;
 
 class AttrValue {
  public:
-  static AttrValue ParseAttr(const CU& cu, uint8_t form, absl::string_view* data);
+  static AttrValue ParseAttr(const CU& cu, uint16_t form, absl::string_view* data);
 
   AttrValue(const AttrValue &) = default;
   AttrValue &operator=(const AttrValue &) = default;
