@@ -1182,6 +1182,7 @@ void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
                        RangeSink *sink) {
   ElfFile elf(file.data());
   assert(elf.IsOpen());
+  dwarf->file = &file;
   dwarf->open = &ReadDWARFSections;
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
     ElfFile::Section section;

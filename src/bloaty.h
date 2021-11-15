@@ -69,9 +69,11 @@ enum class DataSource {
 
 class InputFile {
  public:
-  InputFile(const std::string& filename) : filename_(filename) {}
+  InputFile(absl::string_view filename) : filename_(filename) {}
   InputFile(const InputFile&) = delete;
   InputFile& operator=(const InputFile&) = delete;
+  virtual bool TryOpen(absl::string_view filename,
+                       std::unique_ptr<InputFile>& file) = 0;
   virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }

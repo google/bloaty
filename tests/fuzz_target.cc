@@ -28,6 +28,12 @@ class StringPieceInputFile : public InputFile {
       : InputFile("fake_StringPieceInputFile_file") {
     data_ = data;
   }
+
+  bool TryOpen(absl::string_view /* filename */,
+               std::unique_ptr<InputFile>& file) override {
+    file.reset(new StringPieceInputFile(data_));
+    return true;
+  }
 };
 
 class StringPieceInputFileFactory : public InputFileFactory {

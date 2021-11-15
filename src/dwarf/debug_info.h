@@ -83,6 +83,7 @@ struct File {
   absl::string_view debug_str;
   absl::string_view debug_str_offsets;
   absl::string_view debug_types;
+  const InputFile* file;
   OpenDwarf* open;
 
   absl::string_view* GetFieldByName(absl::string_view name);
