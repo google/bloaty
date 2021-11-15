@@ -340,9 +340,6 @@ class DIEReader {
 inline uint64_t ReadIndirectAddress(const CU& cu, uint64_t val) {
   absl::string_view addrs = cu.skeleton().dwarf().debug_addr;
   uint64_t base = cu.skeleton().addr_base();
-  fprintf(stderr,
-          "ReadIndirectAddress(debug_addr_size=%zu, addr_base=%zu, val=%zu)\n",
-          addrs.size(), (size_t)base, (size_t)val);
   switch (cu.unit_sizes().address_size()) {
     case 4:
       SkipBytes((val * 4) + base, &addrs);
