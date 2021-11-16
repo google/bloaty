@@ -983,10 +983,10 @@ class Win32Handle {
 
 Win32MMapInputFile::Win32MMapInputFile(string_view filename, string_view data)
     : InputFile(filename) {
-  data_ = data
+  data_ = data;
 }
 
-bool Win32MmapInputFile::DoTryOpen(absl::string_view filename,
+bool Win32MMapInputFile::DoTryOpen(absl::string_view filename,
                                    std::unique_ptr<InputFile>& file) {
   std::string str(filename);
   Win32Handle fd(::CreateFileA(str.c_str(), FILE_GENERIC_READ,
@@ -1022,7 +1022,7 @@ bool Win32MmapInputFile::DoTryOpen(absl::string_view filename,
     return false;
   }
 
-  file.reset(new Win32MmapInputFile(filename, string_view(map, li.QuadPart)));
+  file.reset(new Win32MMapInputFile(filename, string_view(map, li.QuadPart)));
   return true;
 }
 
