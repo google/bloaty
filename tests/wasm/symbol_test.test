@@ -1,0 +1,209 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty -d symbols --raw-map %t.obj | %FileCheck %s
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            TYPE
+    Signatures:
+      - Index:           0
+        ParamTypes:      []
+        ReturnTypes:     []
+      - Index:           1
+        ParamTypes:
+          - I32
+        ReturnTypes:     []
+      - Index:           2
+        ParamTypes:      []
+        ReturnTypes:
+          - I32
+      - Index:           3
+        ParamTypes:
+          - I32
+          - I32
+        ReturnTypes:
+          - I32
+  - Type:            FUNCTION
+    FunctionTypes:   [ 0, 1, 0, 2, 2, 2, 3 ]
+  - Type:            TABLE
+    Tables:
+      - Index:           0
+        ElemType:        FUNCREF
+        Limits:
+          Flags:           [ HAS_MAX ]
+          Minimum:         0x2
+          Maximum:         0x2
+  - Type:            MEMORY
+    Memories:
+      - Flags:           [ HAS_MAX, IS_SHARED ]
+        Minimum:         0x2
+        Maximum:         0x2
+  - Type:            GLOBAL
+    Globals:
+      - Index:           0
+        Type:            I32
+        Mutable:         true
+        InitExpr:
+          Opcode:          I32_CONST
+          Value:           66592
+      - Index:           1
+        Type:            I32
+        Mutable:         true
+        InitExpr:
+          Opcode:          I32_CONST
+          Value:           0
+      - Index:           2
+        Type:            I32
+        Mutable:         false
+        InitExpr:
+          Opcode:          I32_CONST
+          Value:           0
+      - Index:           3
+        Type:            I32
+        Mutable:         false
+        InitExpr:
+          Opcode:          I32_CONST
+          Value:           0
+  - Type:            EXPORT
+    Exports:
+      - Name:            memory
+        Kind:            MEMORY
+        Index:           0
+  - Type:            START
+    StartFunction:   2
+  - Type:            ELEM
+    Segments:
+      - Offset:
+          Opcode:          I32_CONST
+          Value:           1
+        Functions:       [ 3 ]
+  - Type:            DATACOUNT
+    Count:           3
+  - Type:            CODE
+    Functions:
+      - Index:           0
+        Locals:          []
+        Body:            0B
+      - Index:           1
+        Locals:          []
+        Body:            0B
+      - Index:           2
+        Locals:          []
+        Body:            02400240024041900841004101FE4802000E020001020B41800841004104FC08000041840841004104FC08010041880841004104FC080200418C0841004104FC0B004190084102FE170200419008417FFE0002001A0C010B4190084101427FFE0102001A0BFC0900FC0901FC09020B
+      - Index:           3
+        Locals:
+          - Type:            I32
+            Count:           13
+        Body:            41002100200028028488808000210141052102200120026A2103410021042004280288888080002105200320056A210641002107200728028C888080002108200820066A21094100210A200A200936028C88808000418088808000210B200B210C200C0F0B
+      - Index:           4
+        Locals:
+          - Type:            I32
+            Count:           2
+        Body:            41818080800021002000210120010F0B
+      - Index:           5
+        Locals:
+          - Type:            I32
+            Count:           8
+        Body:            238080808000210041102101200020016B21022002248080808000410021032002200336020C41022104200220043602081083808080001A4103210541102106200220066A2107200724808080800020050F0B
+      - Index:           6
+        Locals:
+          - Type:            I32
+            Count:           1
+        Body:            108580808000210220020F0B
+  - Type:            DATA
+    Segments:
+      - SectionOffset:   3
+        InitFlags:       1
+        Content:         '03000000'
+      - SectionOffset:   9
+        InitFlags:       1
+        Content:         EFBEADDE
+      - SectionOffset:   15
+        InitFlags:       1
+        Content:         '05000000'
+  - Type:            CUSTOM
+    Name:            name
+    FunctionNames:
+      - Index:           0
+        Name:            __wasm_call_ctors
+      - Index:           1
+        Name:            __wasm_init_tls
+      - Index:           2
+        Name:            __wasm_init_memory
+      - Index:           3
+        Name:            func1
+      - Index:           4
+        Name:            func2
+      - Index:           5
+        Name:            __original_main
+      - Index:           6
+        Name:            main
+    GlobalNames:
+      - Index:           0
+        Name:            __stack_pointer
+      - Index:           1
+        Name:            __tls_base
+      - Index:           2
+        Name:            __tls_size
+      - Index:           3
+        Name:            __tls_align
+    DataSegmentNames:
+      - Index:           0
+        Name:            .data.global2
+      - Index:           1
+        Name:            .data.global3
+      - Index:           2
+        Name:            .data.global4
+  - Type:            CUSTOM
+    Name:            producers
+    Languages:
+      - Name:            C99
+        Version:         ''
+    Tools:
+      - Name:            clang
+        Version:         '14.0.0 (https://github.com/llvm/llvm-project f71c553a30cc52c0b4a6abbaa82ce97c30c13979)'
+  - Type:            CUSTOM
+    Name:            target_features
+    Features:
+      - Prefix:          USED
+        Name:            atomics
+      - Prefix:          USED
+        Name:            bulk-memory
+...
+
+# Check output for function and passive data segments
+
+# Code section
+# CHECK: 06b-06e           3             __wasm_call_ctors
+# CHECK: 06e-071           3             __wasm_init_tls
+# CHECK: 071-0e2         113             __wasm_init_memory
+# CHECK: 0e2-14b         105             func1
+# CHECK: 14b-15f          20             func2
+# CHECK: 15f-1b6          87             __original_main
+# CHECK: 1b6-1c6          16             main
+
+# Data section
+# FIXME: This is wrong, should be the data section header
+# BUG: 1c6-1c9           3             main
+# CHECK: 1c9-1cf           6             .data.global2
+# CHECK: 1cf-1d5           6             .data.global3
+# CHECK: 1d5-1db           6             .data.global4
+
+# Name section
+# FIXME: Name section header and subsection header is 1db-1e6
+# BUG: 1db-1e6          11             .data.global4
+# Function names
+# CHECK: 1e6-1f9          19             __wasm_call_ctors
+# CHECK: 1f9-20a          17             __wasm_init_tls
+# CHECK: 20a-21e          20             __wasm_init_memory
+# CHECK: 21e-225           7             func1
+# CHECK: 225-22c           7             func2
+# CHECK: 22c-23d          17             __original_main
+# FIXME: Subsection headers and global names
+# BUG: 23d-243           6             main
+# BUG: 243-27f          60             [section name]
+# Data names
+# CHECK: 27f-28e          15             .data.global2
+# CHECK: 28e-29d          15             .data.global3
+# CHECK: 29d-2ac          15             .data.global4
