@@ -338,8 +338,6 @@ void ReadDataSection(const Section& section, const IndexedNames& names,
       std::string name = "data[" + std::to_string(i) + "]";
       sink->AddFileRange("wasm_data", name, segment);
     } else {
-      if(iter->second ==".data.global3")
-        printf("Adding range %s, %ld\n", iter->second.c_str(), segment.data() - section.contents.data());
       sink->AddFileRange("wasm_data", iter->second, segment);
     }
   }
