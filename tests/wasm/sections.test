@@ -1,0 +1,221 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            TYPE
+    Signatures:
+      - Index:           0
+        ParamTypes:      []
+        ReturnTypes:
+          - I32
+      - Index:           1
+        ParamTypes:
+          - I32
+          - I32
+        ReturnTypes:
+          - I32
+  - Type:            IMPORT
+    Imports:
+      - Module:          env
+        Field:           __linear_memory
+        Kind:            MEMORY
+        Memory:
+          Minimum:         0x1
+      - Module:          env
+        Field:           __stack_pointer
+        Kind:            GLOBAL
+        GlobalType:      I32
+        GlobalMutable:   true
+      - Module:          env
+        Field:           __indirect_function_table
+        Kind:            TABLE
+        Table:
+          Index:           0
+          ElemType:        FUNCREF
+          Limits:
+            Minimum:         0x1
+  - Type:            FUNCTION
+    FunctionTypes:   [ 0, 0, 0, 1 ]
+  - Type:            ELEM
+    Segments:
+      - Offset:
+          Opcode:          I32_CONST
+          Value:           1
+        Functions:       [ 0 ]
+  - Type:            DATACOUNT
+    Count:           4
+  - Type:            CODE
+    Relocations:
+      - Type:            R_WASM_MEMORY_ADDR_LEB
+        Index:           1
+        Offset:          0xD
+      - Type:            R_WASM_MEMORY_ADDR_LEB
+        Index:           2
+        Offset:          0x27
+      - Type:            R_WASM_MEMORY_ADDR_LEB
+        Index:           3
+        Offset:          0x3D
+      - Type:            R_WASM_MEMORY_ADDR_LEB
+        Index:           3
+        Offset:          0x55
+      - Type:            R_WASM_MEMORY_ADDR_SLEB
+        Index:           4
+        Offset:          0x5B
+      - Type:            R_WASM_TABLE_INDEX_SLEB
+        Index:           0
+        Offset:          0x6F
+      - Type:            R_WASM_GLOBAL_INDEX_LEB
+        Index:           7
+        Offset:          0x83
+      - Type:            R_WASM_GLOBAL_INDEX_LEB
+        Index:           7
+        Offset:          0x98
+      - Type:            R_WASM_FUNCTION_INDEX_LEB
+        Index:           0
+        Offset:          0xB4
+      - Type:            R_WASM_GLOBAL_INDEX_LEB
+        Index:           7
+        Offset:          0xCC
+      - Type:            R_WASM_FUNCTION_INDEX_LEB
+        Index:           6
+        Offset:          0xDA
+    Functions:
+      - Index:           0
+        Locals:
+          - Type:            I32
+            Count:           13
+        Body:            41002100200028028880808000210141052102200120026A210341002104200428028C808080002105200320056A2106410021072007280280808080002108200820066A21094100210A200A200936028080808000418480808000210B200B210C200C0F0B
+      - Index:           1
+        Locals:
+          - Type:            I32
+            Count:           2
+        Body:            41818080800021002000210120010F0B
+      - Index:           2
+        Locals:
+          - Type:            I32
+            Count:           8
+        Body:            238080808000210041102101200020016B21022002248080808000410021032002200336020C41022104200220043602081080808080001A4103210541102106200220066A2107200724808080800020050F0B
+      - Index:           3
+        Locals:
+          - Type:            I32
+            Count:           1
+        Body:            108280808000210220020F0B
+  - Type:            DATA
+    Segments:
+      - SectionOffset:   6
+        InitFlags:       0
+        Offset:
+          Opcode:          I32_CONST
+          Value:           0
+        Content:         '00000000'
+      - SectionOffset:   15
+        InitFlags:       0
+        Offset:
+          Opcode:          I32_CONST
+          Value:           4
+        Content:         '03000000'
+      - SectionOffset:   24
+        InitFlags:       0
+        Offset:
+          Opcode:          I32_CONST
+          Value:           8
+        Content:         EFBEADDE
+      - SectionOffset:   33
+        InitFlags:       0
+        Offset:
+          Opcode:          I32_CONST
+          Value:           12
+        Content:         '05000000'
+  - Type:            CUSTOM
+    Name:            linking
+    Version:         2
+    SymbolTable:
+      - Index:           0
+        Kind:            FUNCTION
+        Name:            func1
+        Flags:           [  ]
+        Function:        0
+      - Index:           1
+        Kind:            DATA
+        Name:            global3
+        Flags:           [  ]
+        Segment:         2
+        Size:            4
+      - Index:           2
+        Kind:            DATA
+        Name:            global4
+        Flags:           [  ]
+        Segment:         3
+        Size:            4
+      - Index:           3
+        Kind:            DATA
+        Name:            global1
+        Flags:           [  ]
+        Segment:         0
+        Size:            4
+      - Index:           4
+        Kind:            DATA
+        Name:            global2
+        Flags:           [  ]
+        Segment:         1
+        Size:            4
+      - Index:           5
+        Kind:            FUNCTION
+        Name:            func2
+        Flags:           [  ]
+        Function:        1
+      - Index:           6
+        Kind:            FUNCTION
+        Name:            __original_main
+        Flags:           [  ]
+        Function:        2
+      - Index:           7
+        Kind:            GLOBAL
+        Name:            __stack_pointer
+        Flags:           [ UNDEFINED ]
+        Global:          0
+      - Index:           8
+        Kind:            FUNCTION
+        Name:            main
+        Flags:           [  ]
+        Function:        3
+    SegmentInfo:
+      - Index:           0
+        Name:            .bss.global1
+        Alignment:       2
+        Flags:           [  ]
+      - Index:           1
+        Name:            .data.global2
+        Alignment:       2
+        Flags:           [  ]
+      - Index:           2
+        Name:            .data.global3
+        Alignment:       2
+        Flags:           [  ]
+      - Index:           3
+        Name:            .data.global4
+        Alignment:       2
+        Flags:           [  ]
+  - Type:            CUSTOM
+    Name:            producers
+    Tools:
+      - Name:            clang
+        Version:         '14.0.0 (https://github.com/llvm/llvm-project f71c553a30cc52c0b4a6abbaa82ce97c30c13979)'
+...
+
+# CHECK: FILE MAP:
+# CHECK: 000-008           8             [WASM Header]
+# CHECK: 008-015          13             Type
+# CHECK: 015-068          83             Import
+# CHECK: 068-06f           7             Function
+# CHECK: 06f-078           9             Element
+# CHECK: 078-07b           3             DataCount
+# CHECK: 07b-163         232             Code
+# CHECK: 163-18a          39             Data
+# CHECK: 18a-23f         181             linking
+# CHECK: 23f-2b7         120             producers
+# CHECK: 2b7-2f1          58             reloc.CODE
+
