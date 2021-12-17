@@ -194,15 +194,19 @@ void ReadNames(const Section& section, IndexedNames* func_names,
     kElemSegment = 8,
     kDataSegment = 9
   };
-
+  string_view header = section.data;
   string_view data = section.contents;
 
   while (!data.empty()) {
     NameType type = static_cast<NameType>(ReadVarUInt7(&data));
     uint32_t size = ReadVarUInt32(&data);
+    sink->AddFileRange("wasm_overhead", "[Wasm Section Headers]",
+                       StrictSubstr(header, 0, data.data() - header.data()));
+
     string_view section = ReadPiece(size, &data);
 
-    if (type == NameType::kFunction || type == NameType::kDataSegment) {
+    if (type == NameType::kFunction || type == NameType::kDataSegment
+        || type == NameType::kGlobal) {
       uint32_t count = ReadVarUInt32(&section);
       for (uint32_t i = 0; i < count; i++) {
         string_view entry = section;
@@ -210,11 +214,16 @@ void ReadNames(const Section& section, IndexedNames* func_names,
         uint32_t name_len = ReadVarUInt32(&section);
         string_view name = ReadPiece(name_len, &section);
         entry = StrictSubstr(entry, 0, name.data() - entry.data() + name.size());
-        sink->AddFileRange("wasm_funcname", name, entry);
+        sink->AddFileRange("wasm_name", name, entry);
+
+        // Global names aren't really functions or data, we don't track them yet.
+        if (type == NameType::kGlobal)
+          continue;
         IndexedNames *names = (type == NameType::kFunction ? func_names : dataseg_names);
         (*names)[index] = std::string(name);
       }
     }
+    header = data;
   }
 }
 
@@ -287,8 +296,9 @@ uint32_t GetNumFunctionImports(const Section& section) {
 void ReadCodeSection(const Section& section, const IndexedNames& names,
                      uint32_t num_imports, RangeSink* sink) {
   string_view data = section.contents;
-
   uint32_t count = ReadVarUInt32(&data);
+  sink->AddFileRange("wasm_overhead", "[Wasm Section Headers]",
+                     StrictSubstr(section.data, 0, data.data() - section.data.data()));
 
   for (uint32_t i = 0; i < count; i++) {
     string_view func = data;
@@ -304,6 +314,7 @@ void ReadCodeSection(const Section& section, const IndexedNames& names,
       std::string name = "func[" + std::to_string(i) + "]";
       sink->AddFileRange("wasm_function", name, func);
     } else {
+      printf("function %d, %s\n", i, iter->second.c_str());
       sink->AddFileRange("wasm_function", ItaniumDemangle(iter->second, sink->data_source()), func);
     }
   }
@@ -313,6 +324,9 @@ void ReadDataSection(const Section& section, const IndexedNames& names,
                      RangeSink* sink) {
   string_view data = section.contents;
   uint32_t count = ReadVarUInt32(&data);
+  printf("Section.data: %p, contents: %p\n", section.data.data(), section.contents.data());
+  sink->AddFileRange("wasm_overhead", "[Wasm Section Headers]",
+                     StrictSubstr(section.data, 0, data.data() - section.data.data()));
 
   for (uint32_t i = 0; i < count; i++) {
     string_view segment = data;
@@ -338,6 +352,7 @@ void ReadDataSection(const Section& section, const IndexedNames& names,
       std::string name = "data[" + std::to_string(i) + "]";
       sink->AddFileRange("wasm_data", name, segment);
     } else {
+      printf("data %d, %s\n", i, iter->second.c_str());
       sink->AddFileRange("wasm_data", iter->second, segment);
     }
   }
