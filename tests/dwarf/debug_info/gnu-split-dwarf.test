@@ -1,9 +1,10 @@
 # Tests that we can find .dwo files based on the DW_AT_GNU_dwo_name attribute.
 # Output of this sort will be produced by using -gsplit-dwarf with gcc or clang.
 
-# RUN: %yaml2obj %s --docnum=1 -o %t.obj
-# RUN: %yaml2obj %s --docnum=2 -o /tmp/foo.dwo
-# RUN: %yaml2obj %s --docnum=3 -o /tmp/bar.dwo
+# RUN: mkdir -p %t
+# RUN: cat %s | sed "s|__PWD__|%t|" | %yaml2obj --docnum=1 -o %t.obj
+# RUN: %yaml2obj %s --docnum=2 -o %t/foo.dwo
+# RUN: %yaml2obj %s --docnum=3 -o %t/bar.dwo
 # RUN: %bloaty %t.obj -d compileunits --raw-map --domain=vm | %FileCheck %s
 
 --- !ELF
@@ -36,9 +37,9 @@ DWARF:
     # We don't expect DW_AT_comp_dir to contain '.' in real life,
     # but using it here lets our test data work from any filesystem
     # location
-    - /tmp
     - foo.dwo
     - bar.dwo
+    - __PWD__
   debug_abbrev:
     - ID:              0
       Table:
@@ -53,7 +54,7 @@ DWARF:
             - Attribute:       DW_AT_GNU_dwo_id
               Form:            DW_FORM_data8
             - Attribute:       DW_AT_GNU_addr_base
-              Form:            DW_FORM_sec_offset 
+              Form:            DW_FORM_sec_offset
   debug_info:
     - Version:         4
       AbbrevTableID:   0
@@ -62,8 +63,8 @@ DWARF:
       Entries:
         - AbbrCode:        0x1
           Values:
+            - Value:           0x10
             - Value:           0x0
-            - Value:           0x5
             - Value:           0xdeaddeaddeadbeef
             - Value:           0x0
     - Version:         4
@@ -73,8 +74,8 @@ DWARF:
       Entries:
         - AbbrCode:        0x1
           Values:
-            - Value:           0x0
-            - Value:           0xd
+            - Value:           0x10
+            - Value:           0x8
             - Value:           0xbeefbeefbeefbeef
             - Value:           0x8
 ...
