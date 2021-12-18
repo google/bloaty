@@ -102,7 +102,7 @@ uint64_t AttrValue::ResolveIndirectAddress(const CU& cu) const {
   return ReadIndirectAddress(cu, uint_);
 }
 
-AttrValue AttrValue::ParseAttr(const CU& cu, uint8_t form, string_view* data) {
+AttrValue AttrValue::ParseAttr(const CU& cu, uint16_t form, string_view* data) {
   switch (form) {
     case DW_FORM_indirect: {
       uint16_t indirect_form = ReadLEB128<uint16_t>(data);
@@ -128,6 +128,7 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint8_t form, string_view* data) {
     case DW_FORM_strx4:
       return AttrValue::UnresolvedString(form, ReadFixed<uint32_t>(data));
     case DW_FORM_strx:
+    case DW_FORM_GNU_str_index:
       return AttrValue::UnresolvedString(form, ReadLEB128<uint64_t>(data));
     case DW_FORM_addrx1:
       return AttrValue::UnresolvedUint(form, ReadFixed<uint8_t>(data));
@@ -138,6 +139,7 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint8_t form, string_view* data) {
     case DW_FORM_addrx4:
       return AttrValue::UnresolvedUint(form, ReadFixed<uint32_t>(data));
     case DW_FORM_addrx:
+    case DW_FORM_GNU_addr_index:
       return AttrValue::UnresolvedUint(form, ReadLEB128<uint64_t>(data));
     case DW_FORM_addr:
     address_size:

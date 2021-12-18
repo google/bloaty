@@ -69,9 +69,11 @@ enum class DataSource {
 
 class InputFile {
  public:
-  InputFile(const std::string& filename) : filename_(filename) {}
+  InputFile(absl::string_view filename) : filename_(filename) {}
   InputFile(const InputFile&) = delete;
   InputFile& operator=(const InputFile&) = delete;
+  virtual bool TryOpen(absl::string_view filename,
+                       std::unique_ptr<InputFile>& file) = 0;
   virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }
@@ -294,7 +296,11 @@ std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
 void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& map,
-                           RangeSink* sink);
+                           const dwarf::CU* skeleton, RangeSink* sink);
+inline void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& map,
+                                  RangeSink* sink) {
+  return ReadDWARFCompileUnits(file, map, nullptr, sink);
+}
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
 void ReadEhFrame(absl::string_view contents, RangeSink* sink);

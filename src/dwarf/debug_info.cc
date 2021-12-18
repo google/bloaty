@@ -60,7 +60,7 @@ void AbbrevTable::ReadAbbrevs(string_view data) {
     while (true) {
       Attribute attr;
       attr.name = ReadLEB128<uint16_t>(&data);
-      attr.form = ReadLEB128<uint8_t>(&data);
+      attr.form = ReadLEB128<uint16_t>(&data);
 
       if (attr.name == 0 && attr.form == 0) {
         break;  // End of this abbrev
@@ -125,6 +125,7 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
                     InfoReader::Section section, InfoReader& reader) {
   entire_unit_ = entire_unit;
   dwarf_ = &reader.dwarf_;
+  dwo_id_ = 0;
   unit_sizes_.ReadDWARFVersion(&data);
 
   if (unit_sizes_.dwarf_version() > 5) {
@@ -179,6 +180,12 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
 
   data_ = data;
   ReadTopLevelDIE(reader);
+
+  if (reader.skeleton_ && reader.skeleton_->dwo_id_ == dwo_id_) {
+    skeleton_ = reader.skeleton_;
+  } else {
+    skeleton_ = this;
+  }
 }
 
 // Read the root-level DIE in order to populate some member variables on which
@@ -203,6 +210,7 @@ void CU::ReadTopLevelDIE(InfoReader& reader) {
             }
             break;
           case DW_AT_addr_base:
+          case DW_AT_GNU_addr_base:
             if (value.form() == DW_FORM_sec_offset) {
               addr_base_ = value.GetUint(*this);
             }
@@ -217,6 +225,10 @@ void CU::ReadTopLevelDIE(InfoReader& reader) {
               range_lists_base_ = value.GetUint(*this);
             }
             break;
+          case DW_AT_GNU_dwo_id:
+            if (value.IsUint()) {
+              dwo_id_ = value.GetUint(*this);
+            }
         }
       });
 

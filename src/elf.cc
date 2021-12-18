@@ -1178,10 +1178,12 @@ static void ReadELFSegments(RangeSink* sink) {
 // reader directly on them.  At the moment we don't attempt to make these
 // work with object files.
 
-static void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
-                              RangeSink *sink) {
+void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
+                       RangeSink *sink) {
   ElfFile elf(file.data());
   assert(elf.IsOpen());
+  dwarf->file = &file;
+  dwarf->open = &ReadDWARFSections;
   for (Elf64_Xword i = 1; i < elf.section_count(); i++) {
     ElfFile::Section section;
     elf.ReadSection(i, &section);
@@ -1213,6 +1215,12 @@ static void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
         continue;  // Bad compression header.
       }
       uncompressed_size = ReadBigEndian<uint64_t>(&contents);
+    }
+
+    static constexpr string_view dwo_str(".dwo");
+    if (name.size() >= dwo_str.size() &&
+        name.rfind(".dwo") == name.size() - dwo_str.size()) {
+      name.remove_suffix(dwo_str.size());
     }
 
     if (string_view* member = dwarf->GetFieldByName(name)) {

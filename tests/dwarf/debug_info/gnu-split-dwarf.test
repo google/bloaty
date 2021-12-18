@@ -1,0 +1,166 @@
+# Tests that we can find .dwo files based on the DW_AT_GNU_dwo_name attribute.
+# Output of this sort will be produced by using -gsplit-dwarf with gcc or clang.
+
+# RUN: mkdir -p %/t
+# RUN: cat %s | sed "s|__PWD__|%/t|" | %yaml2obj --docnum=1 -o %t.obj
+# RUN: %yaml2obj %s --docnum=2 -o %/t/foo.dwo
+# RUN: %yaml2obj %s --docnum=3 -o %/t/bar.dwo
+# RUN: %bloaty %t.obj -d compileunits --raw-map --domain=vm | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+  Entry:           0x1040
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    FirstSec:        .text
+    LastSec:         .text
+    VAddr:           0x400000
+    Align:           0x1000
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x400000
+    AddressAlign:    0x10
+    Size:            0x1100
+  - Name:            .debug_addr
+    Type:            SHT_PROGBITS
+    AddressAlign:    0x1
+    Content: '00004000000000000001400000000000'
+DWARF:
+  debug_str:
+    # We don't expect DW_AT_comp_dir to contain '.' in real life,
+    # but using it here lets our test data work from any filesystem
+    # location
+    - foo.dwo
+    - bar.dwo
+    - __PWD__
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_comp_dir
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_GNU_addr_base
+              Form:            DW_FORM_sec_offset
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x10
+            - Value:           0x0
+            - Value:           0xdeaddeaddeadbeef
+            - Value:           0x0
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x10
+            - Value:           0x8
+            - Value:           0xbeefbeefbeefbeef
+            - Value:           0x8
+...
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+DWARF:
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_GNU_addr_index
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+  debug_str:
+    - foo.c
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0
+            - Value:           0xdeaddeaddeadbeef
+            - Value:           0x0
+            - Value:           0x100
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+DWARF:
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_GNU_addr_index
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+  debug_str:
+    - bar.c
+  # XXX: In a real file this section would be named debug_info.dwo.
+  # But currently obj2yaml doesn't have any way of specifying a section name
+  # other than debug_info.  This means we don't currently have testing of
+  # the code that strips .dwo from the end of section names.
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0
+            - Value:           0xbeefbeefbeefbeef
+            - Value:           0x0
+            - Value:           0x1000
+
+...
+
+# CHECK: VM MAP:
+# CHECK: 000000-400000       4194304             [-- Nothing mapped --]
+# CHECK: 400000-400100           256             foo.c
+# CHECK: 400100-401100          4096             bar.c

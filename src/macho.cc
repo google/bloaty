@@ -522,6 +522,8 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
 
 static void ReadDebugSectionsFromMachO(const InputFile &file,
                                        dwarf::File *dwarf, RangeSink *sink) {
+  dwarf->file = &file;
+  dwarf->open = &ReadDebugSectionsFromMachO;
   ForEachLoadCommand(
       file.data(), nullptr, [dwarf, sink](const LoadCommand &cmd) {
         switch (cmd.cmd) {

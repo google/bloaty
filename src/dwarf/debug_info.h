@@ -59,7 +59,15 @@
 #include "util.h"
 
 namespace bloaty {
+
+class InputFile;
+class RangeSink;
+
 namespace dwarf {
+
+struct File;
+
+typedef void OpenDwarf(const InputFile &file, File *dwarf, RangeSink *sink);
 
 struct File {
   absl::string_view debug_abbrev;
@@ -75,6 +83,8 @@ struct File {
   absl::string_view debug_str;
   absl::string_view debug_str_offsets;
   absl::string_view debug_types;
+  const InputFile* file;
+  OpenDwarf* open;
 
   absl::string_view* GetFieldByName(absl::string_view name);
   void SetFieldByName(absl::string_view name, absl::string_view contents) {
@@ -156,7 +166,7 @@ class AbbrevTable {
   // In a DWARF abbreviation, each attribute has a name and a form.
   struct Attribute {
     uint16_t name;
-    uint8_t form;
+    uint16_t form;
   };
 
   // The representation of a single abbreviation.
@@ -198,6 +208,8 @@ class DIEReader;
 class InfoReader {
  public:
   InfoReader(const File& file) : dwarf_(file) {}
+  InfoReader(const File& file, const CU* skeleton)
+      : dwarf_(file), skeleton_(skeleton) {}
   InfoReader(const InfoReader&) = delete;
   InfoReader& operator=(const InfoReader&) = delete;
 
@@ -214,6 +226,7 @@ class InfoReader {
  private:
   friend class CU;
   const File& dwarf_;
+  const CU* skeleton_ = nullptr;
 
   std::unordered_map<uint64_t, std::string> stmt_list_map_;
 
@@ -243,6 +256,7 @@ class CU {
   DIEReader GetDIEReader();
 
   const File& dwarf() const { return *dwarf_; }
+  const CU& skeleton() const { return *skeleton_; }
   const CompilationUnitSizes& unit_sizes() const { return unit_sizes_; }
   const std::string& unit_name() const { return unit_name_; }
   absl::string_view entire_unit() const { return entire_unit_; }
@@ -285,6 +299,7 @@ class CU {
   // Only for skeleton and split CUs.
   uint8_t unit_type_;
   uint64_t dwo_id_;
+  const CU* skeleton_;
 
   // Only for .debug_types
   uint64_t unit_type_signature_;
@@ -324,13 +339,14 @@ class DIEReader {
 };
 
 inline uint64_t ReadIndirectAddress(const CU& cu, uint64_t val) {
-  absl::string_view addrs = cu.dwarf().debug_addr;
+  absl::string_view addrs = cu.skeleton().dwarf().debug_addr;
+  uint64_t base = cu.skeleton().addr_base();
   switch (cu.unit_sizes().address_size()) {
     case 4:
-      SkipBytes((val * 4) + cu.addr_base(), &addrs);
+      SkipBytes((val * 4) + base, &addrs);
       return ReadFixed<uint32_t>(&addrs);
     case 8:
-      SkipBytes((val * 8) + cu.addr_base(), &addrs);
+      SkipBytes((val * 8) + base, &addrs);
       return ReadFixed<uint64_t>(&addrs);
     default:
       BLOATY_UNREACHABLE();

@@ -862,10 +862,17 @@ constexpr uint64_t RangeSink::kUnknownSize;
 #if !defined(_WIN32)
 class MmapInputFile : public InputFile {
  public:
-  MmapInputFile(const std::string& filename);
+  MmapInputFile(string_view filename, string_view data);
   MmapInputFile(const MmapInputFile&) = delete;
   MmapInputFile& operator=(const MmapInputFile&) = delete;
   ~MmapInputFile() override;
+
+  bool TryOpen(absl::string_view filename,
+               std::unique_ptr<InputFile>& file) override {
+    return DoTryOpen(filename, file);
+  }
+  static bool DoTryOpen(absl::string_view filename,
+                        std::unique_ptr<InputFile>& file);
 };
 
 
@@ -885,28 +892,41 @@ class FileDescriptor {
   int fd_;
 };
 
-MmapInputFile::MmapInputFile(const std::string& filename)
-    : InputFile(filename) {
-  FileDescriptor fd(open(filename.c_str(), O_RDONLY));
+bool MmapInputFile::DoTryOpen(absl::string_view filename,
+                              std::unique_ptr<InputFile>& file) {
+  std::string str(filename);
+  FileDescriptor fd(open(str.c_str(), O_RDONLY));
   struct stat buf;
   const char *map;
 
   if (fd.fd() < 0) {
-    THROWF("couldn't open file '$0': $1", filename, strerror(errno));
+    std::cerr << absl::Substitute("couldn't open file '$0': $1\n", filename,
+                                  strerror(errno));
+    return false;
   }
 
   if (fstat(fd.fd(), &buf) < 0) {
-    THROWF("couldn't stat file '$0': $1", filename, strerror(errno));
+    std::cerr << absl::Substitute("couldn't stat file '$0': $1\n", filename,
+                                  strerror(errno));
+    return false;
   }
 
   map = static_cast<char*>(
       mmap(nullptr, buf.st_size, PROT_READ, MAP_SHARED, fd.fd(), 0));
 
   if (map == MAP_FAILED) {
-    THROWF("couldn't mmap file '$0': $1", filename, strerror(errno));
+    std::cerr << absl::Substitute("couldn't mmap file '$0': $1", filename,
+                                  strerror(errno));
+    return false;
   }
 
-  data_ = string_view(map, buf.st_size);
+  file.reset(new MmapInputFile(filename, string_view(map, buf.st_size)));
+  return true;
+}
+
+MmapInputFile::MmapInputFile(string_view filename, string_view data)
+    : InputFile(filename) {
+  data_ = data;
 }
 
 MmapInputFile::~MmapInputFile() {
@@ -918,7 +938,11 @@ MmapInputFile::~MmapInputFile() {
 
 std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
     const std::string& filename) const {
-  return absl::make_unique<MmapInputFile>(filename);
+  std::unique_ptr<InputFile> ret;
+  if (!MmapInputFile::DoTryOpen(filename, ret)) {
+    THROW("Failed to open file.");
+  }
+  return ret;
 }
 
 #else // !_WIN32
@@ -927,10 +951,17 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 class Win32MMapInputFile : public InputFile {
  public:
-  Win32MMapInputFile(const std::string& filename);
+  Win32MMapInputFile(string_view filename, string_view data);
   Win32MMapInputFile(const Win32MMapInputFile&) = delete;
   Win32MMapInputFile& operator=(const Win32MMapInputFile&) = delete;
   ~Win32MMapInputFile() override;
+
+  bool TryOpen(absl::string_view filename,
+               std::unique_ptr<InputFile>& file) override {
+    return DoTryOpen(filename, file);
+  }
+  static bool DoTryOpen(absl::string_view filename,
+                        std::unique_ptr<InputFile>& file);
 };
 
 class Win32Handle {
@@ -950,34 +981,49 @@ class Win32Handle {
   HANDLE h_;
 };
 
-Win32MMapInputFile::Win32MMapInputFile(const std::string& filename)
+Win32MMapInputFile::Win32MMapInputFile(string_view filename, string_view data)
     : InputFile(filename) {
-  Win32Handle fd(::CreateFileA(filename.c_str(), FILE_GENERIC_READ,
+  data_ = data;
+}
+
+bool Win32MMapInputFile::DoTryOpen(absl::string_view filename,
+                                   std::unique_ptr<InputFile>& file) {
+  std::string str(filename);
+  Win32Handle fd(::CreateFileA(str.c_str(), FILE_GENERIC_READ,
                                FILE_SHARE_READ, NULL, OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL, NULL));
   LARGE_INTEGER li = {};
   const char* map;
 
   if (fd.h() == INVALID_HANDLE_VALUE) {
-    THROWF("couldn't open file '$0': $1", filename, ::GetLastError());
+    std::cerr << absl::Substitute("couldn't open file '$0': $1", filename,
+                                  ::GetLastError());
+    return false;
   }
 
   if (!::GetFileSizeEx(fd.h(), &li)) {
-    THROWF("couldn't stat file '$0': $1", filename, ::GetLastError());
+    std::cerr << absl::Substitute("couldn't stat file '$0': $1", filename,
+                                  ::GetLastError());
+    return false;
   }
 
   Win32Handle mapfd(
       ::CreateFileMappingA(fd.h(), NULL, PAGE_READONLY, 0, 0, nullptr));
   if (!mapfd.h()) {
-    THROWF("couldn't create file mapping '$0': $1", filename, ::GetLastError());
+    std::cerr << absl::Substitute("couldn't create file mapping '$0': $1",
+                                  filename, ::GetLastError());
+    return false;
   }
 
   map = static_cast<char*>(::MapViewOfFile(mapfd.h(), FILE_MAP_READ, 0, 0, 0));
   if (!map) {
-    THROWF("couldn't MapViewOfFile file '$0': $1", filename, ::GetLastError());
+    std::cerr << absl::Substitute("couldn't MapViewOfFile file '$0': $1",
+                                  filename, ::GetLastError());
+    return false;
   }
 
-  data_ = string_view(map, li.QuadPart);
+  file.reset(new Win32MMapInputFile(filename, string_view(map, li.QuadPart)));
+  return true;
 }
 
 Win32MMapInputFile::~Win32MMapInputFile() {
@@ -989,7 +1035,11 @@ Win32MMapInputFile::~Win32MMapInputFile() {
 
 std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
     const std::string& filename) const {
-  return absl::make_unique<Win32MMapInputFile>(filename);
+  std::unique_ptr<InputFile> ret;
+  if (!Win32MMapInputFile::DoTryOpen(filename, ret)) {
+    THROW("Failed to open file.");
+  }
+  return ret;
 }
 
 #endif

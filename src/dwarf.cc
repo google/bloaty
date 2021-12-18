@@ -573,6 +573,11 @@ static void ReadDWARFStmtListRange(const dwarf::CU& cu, uint64_t offset,
   sink->AddFileRange("dwarf_stmtlistrange", cu.unit_name(), data);
 }
 
+struct DwoFilePointer {
+  std::string comp_dir;
+  std::string dwo_name;
+};
+
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
@@ -588,12 +593,32 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
   while (iter.NextCU(reader, &cu)) {
     dwarf::DIEReader die_reader = cu.GetDIEReader();
     GeneralDIE compileunit_die;
+    DwoFilePointer dwo_info;
     auto* abbrev = die_reader.ReadCode(cu);
     die_reader.ReadAttributes(
         cu, abbrev,
-        [&cu, &compileunit_die](uint16_t tag, dwarf::AttrValue value) {
+        [&](uint16_t tag, dwarf::AttrValue value) {
           ReadGeneralDIEAttr(tag, value, cu, &compileunit_die);
+          switch (tag) {
+            case DW_AT_comp_dir:
+              if (value.IsString()) {
+                dwo_info.comp_dir = value.GetString(cu);
+              }
+              break;
+            case DW_AT_GNU_dwo_name:
+              if (value.IsString()) {
+                dwo_info.dwo_name = value.GetString(cu);
+              }
+              break;
+          }
         });
+
+    if (!dwo_info.comp_dir.empty() && !dwo_info.dwo_name.empty()) {
+      auto file = MmapInputFileFactory().OpenFile(dwo_info.comp_dir + "/" + dwo_info.dwo_name);
+      dwarf::File dwo_dwarf;
+      cu.dwarf().open(*file, &dwo_dwarf, sink);
+      ReadDWARFCompileUnits(dwo_dwarf, symbol_map, &cu, sink);
+    }
 
     if (cu.unit_name().empty()) {
       continue;
@@ -628,7 +653,7 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
 }
 
 void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& symbol_map,
-                           RangeSink* sink) {
+                           const dwarf::CU* skeleton, RangeSink* sink) {
   if (!file.debug_info.size()) {
     THROW("missing debug info");
   }
@@ -638,7 +663,7 @@ void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& symbol_map,
   }
 
   // Share a reader to avoid re-parsing debug abbreviations.
-  dwarf::InfoReader reader(file);
+  dwarf::InfoReader reader(file, skeleton);
 
   ReadDWARFDebugInfo(reader, dwarf::InfoReader::Section::kDebugInfo, symbol_map,
                      sink);
