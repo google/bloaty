@@ -2,7 +2,7 @@
 # Output of this sort will be produced by using -gsplit-dwarf with gcc or clang.
 
 # RUN: mkdir -p %/t
-# RUN: cat %s | sed "s|__PWD__|%t|" | %yaml2obj --docnum=1 -o %t.obj
+# RUN: cat %s | sed "s|__PWD__|%/t|" | %yaml2obj --docnum=1 -o %t.obj
 # RUN: %yaml2obj %s --docnum=2 -o %/t/foo.dwo
 # RUN: %yaml2obj %s --docnum=3 -o %/t/bar.dwo
 # RUN: %bloaty %t.obj -d compileunits --raw-map --domain=vm | %FileCheck %s
