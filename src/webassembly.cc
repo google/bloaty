@@ -178,24 +178,31 @@ void ParseSections(RangeSink* sink) {
   });
 }
 
-typedef std::unordered_map<int, std::string> FuncNames;
+typedef std::unordered_map<int, std::string> IndexedNames;
 
-void ReadFunctionNames(const Section& section, FuncNames* names,
-                       RangeSink* sink) {
+void ReadNames(const Section& section, IndexedNames* func_names,
+               IndexedNames* dataseg_names, RangeSink* sink) {
   enum class NameType {
     kModule = 0,
     kFunction = 1,
     kLocal = 2,
+    kLabel = 3,
+    kType = 4,
+    kTable = 5,
+    kMemory = 6,
+    kGlobal = 7,
+    kElemSegment = 8,
+    kDataSegment = 9
   };
 
   string_view data = section.contents;
 
   while (!data.empty()) {
-    char type = ReadVarUInt7(&data);
+    NameType type = static_cast<NameType>(ReadVarUInt7(&data));
     uint32_t size = ReadVarUInt32(&data);
     string_view section = ReadPiece(size, &data);
 
-    if (static_cast<NameType>(type) == NameType::kFunction) {
+    if (type == NameType::kFunction || type == NameType::kDataSegment) {
       uint32_t count = ReadVarUInt32(&section);
       for (uint32_t i = 0; i < count; i++) {
         string_view entry = section;
@@ -204,6 +211,7 @@ void ReadFunctionNames(const Section& section, FuncNames* names,
         string_view name = ReadPiece(name_len, &section);
         entry = StrictSubstr(entry, 0, name.data() - entry.data() + name.size());
         sink->AddFileRange("wasm_funcname", name, entry);
+        IndexedNames *names = (type == NameType::kFunction ? func_names : dataseg_names);
         (*names)[index] = std::string(name);
       }
     }
@@ -276,7 +284,7 @@ uint32_t GetNumFunctionImports(const Section& section) {
   return func_count;
 }
 
-void ReadCodeSection(const Section& section, const FuncNames& names,
+void ReadCodeSection(const Section& section, const IndexedNames& names,
                      uint32_t num_imports, RangeSink* sink) {
   string_view data = section.contents;
 
@@ -301,25 +309,63 @@ void ReadCodeSection(const Section& section, const FuncNames& names,
   }
 }
 
+void ReadDataSection(const Section& section, const IndexedNames& names,
+                     RangeSink* sink) {
+  string_view data = section.contents;
+  uint32_t count = ReadVarUInt32(&data);
+
+  for (uint32_t i = 0; i < count; i++) {
+    string_view segment = data;
+    uint8_t mode = ReadFixed<uint8_t>(&data);
+    if (mode > 1) THROW("multi-memory extension isn't supported");
+    if (mode == 0) { // Active segment
+      // We will need to read the init expr.
+      // For the extended const proposal, read instructions until end is reached
+      // Otherwise, just read a constexpr inst (t.const or global.get)
+      // For now, we just need to support passive segments.
+      continue;
+    }
+    // else, a passive segment
+
+    uint32_t segment_size = ReadVarUInt32(&data);
+    uint32_t total_size = segment_size + (data.data() - segment.data());
+
+    segment = StrictSubstr(segment, 0, total_size);
+    data = StrictSubstr(data, segment_size);
+
+    auto iter = names.find(i);
+    if (iter == names.end()) {
+      std::string name = "data[" + std::to_string(i) + "]";
+      sink->AddFileRange("wasm_data", name, segment);
+    } else {
+      sink->AddFileRange("wasm_data", iter->second, segment);
+    }
+  }
+}
+
+
 void ParseSymbols(RangeSink* sink) {
   // First pass: read the custom naming section to get function names.
   std::unordered_map<int, std::string> func_names;
+  std::unordered_map<int, std::string> dataseg_names;
   uint32_t num_imports = 0;
 
   ForEachSection(sink->input_file().data(),
-                 [&func_names, sink](const Section& section) {
+                 [&func_names, &dataseg_names, sink](const Section& section) {
                    if (section.name == "name") {
-                     ReadFunctionNames(section, &func_names, sink);
+                     ReadNames(section, &func_names, &dataseg_names, sink);
                    }
                  });
 
   // Second pass: read the function/code sections.
   ForEachSection(sink->input_file().data(),
-                 [&func_names, &num_imports, sink](const Section& section) {
+                 [&func_names, &dataseg_names, &num_imports, sink](const Section& section) {
                    if (section.id == Section::kImport) {
                      num_imports = GetNumFunctionImports(section);
                    } else if (section.id == Section::kCode) {
                      ReadCodeSection(section, func_names, num_imports, sink);
+                   } else if (section.id == Section::kData) {
+                     ReadDataSection(section, dataseg_names, sink);
                    }
                  });
 }
