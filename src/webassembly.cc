@@ -174,7 +174,14 @@ void ForEachSection(string_view file, Func&& section_func) {
 
 void ParseSections(RangeSink* sink) {
   ForEachSection(sink->input_file().data(), [sink](const Section& section) {
-    sink->AddFileRange("wasm_sections", section.name, section.data);
+      if (section.name == "Code") {
+        // Here the "VM" represents just the code section
+        sink->AddRange("wasm_sections", section.name,
+                       0, section.data.size(),
+                       section.data);
+      } else {
+        sink->AddFileRange("wasm_sections", section.name, section.data);
+      }
   });
 }
 
@@ -288,6 +295,10 @@ void ReadCodeSection(const Section& section, const IndexedNames& names,
                      uint32_t num_imports, RangeSink* sink) {
   string_view data = section.contents;
 
+  auto ToVMAddr = [data](string_view f) {
+    return f.data() - data.data();
+  };
+
   uint32_t count = ReadVarUInt32(&data);
 
   for (uint32_t i = 0; i < count; i++) {
@@ -302,9 +313,14 @@ void ReadCodeSection(const Section& section, const IndexedNames& names,
 
     if (iter == names.end()) {
       std::string name = "func[" + std::to_string(i) + "]";
-      sink->AddFileRange("wasm_function", name, func);
+      sink->AddRange("wasm_function", name,
+                     ToVMAddr(func), func.size(),
+                     func);
     } else {
-      sink->AddFileRange("wasm_function", ItaniumDemangle(iter->second, sink->data_source()), func);
+      sink->AddRange("wasm_function",
+                     ItaniumDemangle(iter->second, sink->data_source()),
+                     ToVMAddr(func), func.size(),
+                     func);
     }
   }
 }
@@ -431,12 +447,11 @@ class WebAssemblyObjectFile : public ObjectFile {
           ParseSymbols(sink);
           break;
         case DataSource::kCompileUnits: {
-          // TODO: do we need to fill these in?
-          SymbolTable symtab;
+          // TODO: do we need to fill this in?
           DualMap symbol_map;
           dwarf::File dwarf;
           ReadDWARFSections(sink->input_file(), &dwarf);
-          ReadDWARFCompileUnits(dwarf, symtab, symbol_map, sink);
+          ReadDWARFCompileUnits(dwarf, symbol_map, sink);
           break;
         }
         case DataSource::kArchiveMembers:
