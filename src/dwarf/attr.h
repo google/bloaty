@@ -45,7 +45,7 @@ class AttrValue {
   // Attempts to coerce to uint, returning nullopt if this is not possible.
   absl::optional<uint64_t> ToUint(const CU& cu) const;
 
-  // REQUIRES: IsUint().
+  // REQUIRES: IsUint() && form() != DW_FORM_implicit_const.
   uint64_t GetUint(const CU& cu) const;
 
   // REQUIRES: IsString().

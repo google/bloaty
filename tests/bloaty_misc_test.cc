@@ -37,6 +37,13 @@ TEST_F(BloatyTest, GoBinary) {
       {"bloaty", "-d", "inlines", "04-go-binary-with-ref-addr.bin"});
 }
 
+TEST_F(BloatyTest, ImplicitConstAndLineStrp) {
+  RunBloaty(
+      {"bloaty", "-d", "compileunits", "05-implicit-const-and-line-strp.bin"});
+  RunBloaty(
+      {"bloaty", "-d", "inlines", "05-implicit-const-and-line-strp.bin"});
+}
+
 TEST_F(BloatyTest, MultiThreaded) {
   RunBloaty({"bloaty", "02-section-count-overflow.o"});
   size_t file_size = top_row_->filesize;

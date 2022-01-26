@@ -26,6 +26,12 @@ namespace bloaty {
 namespace dwarf {
 
 absl::optional<uint64_t> AttrValue::ToUint(const CU& cu) const {
+  if (form_ == DW_FORM_implicit_const) {
+    // DW_FORM_implicit_const value is stored in AbbrevTable, but
+    // we don't keep it in AttrValue (discarded in AbbrevTable::ReadAbbrevs()).
+    // return absl::nullopt to make sure the value is not available.
+    return absl::nullopt;
+  }
   if (IsUint()) return GetUint(cu);
   string_view str = GetString(cu);
   switch (str.size()) {
@@ -46,6 +52,10 @@ uint64_t AttrValue::GetUint(const CU& cu) const {
     return ResolveIndirectAddress(cu);
   } else {
     assert(type_ == Type::kUint);
+    // DW_FORM_implicit_const value is stored in AbbrevTable, but
+    // we don't keep it in AttrValue (discarded in AbbrevTable::ReadAbbrevs()).
+    // Assertion makes sure that nobody is trying to read a fake value.
+    assert(form_ != DW_FORM_implicit_const);
     return uint_;
   }
 }
@@ -176,6 +186,7 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint16_t form, string_view* data) {
     case DW_FORM_string:
       return AttrValue(form, ReadNullTerminated(data));
     case DW_FORM_strp:
+    case DW_FORM_line_strp:
       if (cu.unit_sizes().dwarf64()) {
         return AttrValue(form, ReadIndirectString<uint64_t>(cu, data));
       } else {
@@ -201,6 +212,8 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint16_t form, string_view* data) {
       return AttrValue(form, ReadFixed<uint8_t>(data));
     case DW_FORM_sdata:
       return AttrValue(form, ReadLEB128<uint64_t>(data));
+    case DW_FORM_implicit_const:
+      return AttrValue(form, 1);
     default:
       THROWF("Don't know how to parse DWARF form: $0", form);
   }
