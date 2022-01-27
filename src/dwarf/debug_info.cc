@@ -65,7 +65,10 @@ void AbbrevTable::ReadAbbrevs(string_view data) {
       if (attr.name == 0 && attr.form == 0) {
         break;  // End of this abbrev
       }
-
+      if (attr.form == DW_FORM_implicit_const) {
+        // We don't use the constant value, just discard it.
+        ReadLEB128<int64_t>(&data);
+      }
       abbrev.attr.push_back(attr);
     }
   }
