@@ -335,7 +335,7 @@ and cannot be specify on the command-line.
 
 The configuration file is a in Protocol Buffers text format.
 The schema is the `Options` message in
-[src/bloaty.proto](src/bloaty.proto).
+[src/bloaty.proto](../src/bloaty.proto).
 
 The two most useful cases for configuration files are:
 
@@ -353,7 +353,7 @@ The two most useful cases for configuration files are:
 2. For custom data sources, it can be very useful to put
    them in a config file, for greater reusability.  For
    example, see the custom data sources defined in
-   [custom_sources.bloaty](custom_sources.bloaty).
+   [custom_sources.bloaty](../custom_sources.bloaty).
    Also read more about custom data sources below.
 
 # Data Sources
