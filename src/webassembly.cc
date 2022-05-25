@@ -57,6 +57,10 @@ uint32_t ReadVarUInt32(string_view* data) {
   return static_cast<uint32_t>(ReadLEB128Internal(false, 32, data));
 }
 
+uint64_t ReadVarUInt64(string_view* data) {
+  return static_cast<uint64_t>(ReadLEB128Internal(false, 64, data));
+}
+
 int8_t ReadVarint7(string_view* data) {
   return static_cast<int8_t>(ReadLEB128Internal(true, 7, data));
 }
@@ -316,16 +320,35 @@ void ReadDataSection(const Section& section, const IndexedNames& names,
 
   for (uint32_t i = 0; i < count; i++) {
     string_view segment = data;
-    uint8_t mode = ReadFixed<uint8_t>(&data);
+    uint32_t mode = ReadVarUInt32(&data);
     if (mode > 1) THROW("multi-memory extension isn't supported");
     if (mode == 0) { // Active segment
-      // We will need to read the init expr.
-      // For the extended const proposal, read instructions until end is reached
-      // Otherwise, just read a constexpr inst (t.const or global.get)
-      // For now, we just need to support passive segments.
-      continue;
+      // Read the initializer expression. For now we don't care about the
+      // offset, only the index (because the name section refers to the index).
+      // We don't yet support the extended-const proposal, so we only need to
+      // decode t.const or global.get
+      uint8_t opcode = ReadFixed<uint8_t>(&data);
+      switch (opcode) {
+        case 0x23: // global.get
+        case 0x41: // i32.const
+          ReadVarUInt32(&data);
+          break;
+        case 0x42: // i64.const
+          ReadVarUInt64(&data);
+          break;
+        case 0x43: // f32.const
+          ReadFixed<float>(&data);
+          break;
+        case 0x44: // f64.const
+          ReadFixed<double>(&data);
+          break;
+        default:
+          THROW("Invalid or unsupported opcode in memory initializer expression");
+      }
+      uint8_t end = ReadFixed<uint8_t>(&data);
+      if (end != 0x0b) THROW("End opcode not found at end of memory initializer");
     }
-    // else, a passive segment
+
 
     uint32_t segment_size = ReadVarUInt32(&data);
     uint32_t total_size = segment_size + (data.data() - segment.data());

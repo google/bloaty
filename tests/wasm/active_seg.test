@@ -1,0 +1,46 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty -d symbols --raw-map %t.obj | %FileCheck %s
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            MEMORY
+    Memories:
+      - Flags:           [ HAS_MAX ]
+        Minimum:         0x2
+        Maximum:         0x2
+  - Type:            EXPORT
+    Exports:
+      - Name:            memory
+        Kind:            MEMORY
+        Index:           0
+  - Type:            DATA
+    Segments:
+      - SectionOffset:   3
+        InitFlags:       1
+        Content:         '03000000'
+      - SectionOffset:   9
+        InitFlags:       1
+        Content:         EFBEADDE
+      - SectionOffset:   15
+        InitFlags:       1
+        Content:         '05000000'
+  - Type:            CUSTOM
+    Name:            name
+    DataSegmentNames:
+      - Index:           0
+        Name:            .data.global2
+      - Index:           1
+        Name:            .data.global3
+      - Index:           2
+        Name:            .data.global4
+
+...
+
+# Check output for active data segments
+
+# Data section
+# CHECK: 1d-23           6             .data.global2
+# CHECK: 23-29           6             .data.global3
+# CHECK: 29-2f           6             .data.global4
