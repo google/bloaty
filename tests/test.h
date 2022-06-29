@@ -81,16 +81,16 @@ class BloatyTest : public ::testing::Test {
       uint64_t vmtotal = 0;
       uint64_t filetotal = 0;
       for (const auto& child : row.sorted_children) {
-        vmtotal += child.vmsize;
-        filetotal += child.filesize;
+        vmtotal += child.size.vm;
+        filetotal += child.size.file;
         CheckConsistencyForRow(child, false, diff_mode, count);
         ASSERT_TRUE(names.insert(child.name).second);
-        ASSERT_FALSE(child.vmsize == 0 && child.filesize == 0);
+        ASSERT_FALSE(child.size.vm == 0 && child.size.file == 0);
       }
 
       if (!diff_mode) {
-        ASSERT_EQ(vmtotal, row.vmsize);
-        ASSERT_EQ(filetotal, row.filesize);
+        ASSERT_EQ(vmtotal, row.size.vm);
+        ASSERT_EQ(filetotal, row.size.file);
       }
     } else {
       // Count leaf rows.
@@ -147,7 +147,7 @@ class BloatyTest : public ::testing::Test {
         ASSERT_TRUE(GetFileSize(filename, &size));
         total_input_size += size;
       }
-      ASSERT_EQ(top_row_->filesize, total_input_size);
+      ASSERT_EQ(top_row_->size.file, total_input_size);
     }
 
     int rows = 0;
@@ -248,21 +248,21 @@ class BloatyTest : public ::testing::Test {
       if (expected_vm == kUnknown) {
         // Always pass.
       } else if (expected_vm > 0) {
-        EXPECT_GE(child.vmsize, expected_vm);
+        EXPECT_GE(child.size.vm, expected_vm);
         // Allow some overhead.
-        EXPECT_LE(child.vmsize, (expected_vm * 1.1) + 100);
+        EXPECT_LE(child.size.vm, (expected_vm * 1.1) + 100);
       } else {
         ASSERT_TRUE(false);
       }
 
       if (expected_file == kSameAsVM) {
-        expected_file = child.vmsize;
+        expected_file = child.size.vm;
       }
 
       if (expected_file != kUnknown) {
-        EXPECT_GE(child.filesize, expected_file);
+        EXPECT_GE(child.size.file, expected_file);
         // Allow some overhead.
-        EXPECT_LE(child.filesize, (expected_file * 1.2) + 180);
+        EXPECT_LE(child.size.file, (expected_file * 1.2) + 180);
       }
 
       if (++i == children.size()) {

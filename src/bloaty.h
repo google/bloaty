@@ -337,18 +337,31 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink);
 
 class Rollup;
 
+struct DomainSizes {
+  int64_t vm;
+  int64_t file;
+};
+
 struct RollupRow {
   RollupRow(const std::string& name_) : name(name_) {}
 
   std::string name;
-  int64_t vmsize = 0;
-  int64_t filesize = 0;
-  int64_t filtered_vmsize = 0;
-  int64_t filtered_filesize = 0;
+  DomainSizes size = {0, 0};
+  DomainSizes filtered_size = {0, 0};
+
   int64_t other_count = 0;
   int64_t sortkey;
   double vmpercent;
   double filepercent;
+
+  // The size of this row in a diff base.  Same as `size` for non-diff.
+  DomainSizes old_size = {0, 0};
+  // The current size of this row (this is not the same as `size` in the case
+  // of a diff -- `size` is the delta).
+  DomainSizes new_size = {0, 0};
+
+  DomainSizes capacity = {0, 0};
+  
   std::vector<RollupRow> sorted_children;
 
   static bool Compare(const RollupRow& a, const RollupRow& b) {
