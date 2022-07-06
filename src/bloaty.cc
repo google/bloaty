@@ -288,20 +288,6 @@ class Rollup {
     filter_regex_ = regex;
   }
 
-  // Subtract the values in "other" from this.
-  void Subtract(const Rollup& other) {
-    vm_total_ -= other.vm_total_;
-    file_total_ -= other.file_total_;
-
-    for (const auto& other_child : other.children_) {
-      auto& child = children_[other_child.first];
-      if (child.get() == NULL) {
-        child.reset(new Rollup());
-      }
-      child->Subtract(*other_child.second);
-    }
-  }
-
   // Add the values in "other" from this.
   void Add(const Rollup& other) {
     vm_total_ += other.vm_total_;
