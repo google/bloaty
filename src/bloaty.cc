@@ -302,6 +302,18 @@ class Rollup {
     }
   }
 
+  // Create entries for all children which exist in "other" but not in this.
+  void AddEntriesFrom(const Rollup& other) {
+    for (const auto& other_child : other.children_) {
+      auto& child = children_[other_child.first];
+      if (child.get() == NULL) {
+        child.reset(new Rollup());
+      }
+      child->AddEntriesFrom(*other_child.second);
+    }
+  }
+
+
   int64_t file_total() const { return file_total_; }
   int64_t filtered_file_total() const { return filtered_file_total_; }
 
@@ -1865,7 +1877,7 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
       base_filenames.push_back(file_info.filename_);
     }
     ScanAndRollupFiles(base_filenames, &build_ids, &base);
-    rollup.Subtract(base);
+    rollup.AddEntriesFrom(base);
     rollup.CreateDiffModeRollupOutput(&base, options, output);
   } else {
     rollup.CreateRollupOutput(options, output);
