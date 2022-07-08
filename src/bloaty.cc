@@ -878,8 +878,6 @@ void RollupOutput::PrintToCSV(std::ostream* out, bool tabs) const {
   std::vector<std::string> names(source_names_);
   names.push_back("vmsize");
   names.push_back("filesize");
-  names.push_back("vmcapacity");	
-  names.push_back("filecapacity");	
   names.push_back("original_vmsize");	
   names.push_back("original_filesize");	
   names.push_back("current_vmsize");	
