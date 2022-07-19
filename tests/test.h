@@ -125,14 +125,23 @@ class BloatyTest : public ::testing::Test {
         std::vector<std::string> expected_headers(output_->source_names());
         expected_headers.push_back("vmsize");
         expected_headers.push_back("filesize");
+        expected_headers.push_back("original_vmsize");
+        expected_headers.push_back("original_filesize");
+        expected_headers.push_back("current_vmsize");
+        expected_headers.push_back("current_filesize");
         ASSERT_EQ(cols, expected_headers);
         first = false;
       } else {
         // Final two columns should parse as integer.
         int out;
-        ASSERT_EQ(output_->source_names().size() + 2, cols.size());
+        ASSERT_EQ(output_->source_names().size() + 6, cols.size());
         ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 1], &out));
         ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 2], &out));
+        ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 3], &out));
+        ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 4], &out));
+        ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 5], &out));
+        ASSERT_TRUE(absl::SimpleAtoi(cols[cols.size() - 6], &out));
+
       }
     }
   }
