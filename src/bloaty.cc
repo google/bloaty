@@ -18,6 +18,12 @@
 // It's very hard to figure out why. For the moment this seems to fix it,
 // but ideally we'd have a better solution here.
 typedef size_t z_size_t;
+#include <assert.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <math.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <zlib.h>
 
 #include <atomic>
@@ -33,13 +39,6 @@ typedef size_t z_size_t;
 #include <thread>
 #include <unordered_map>
 #include <vector>
-
-#include <assert.h>
-#include <fcntl.h>
-#include <limits.h>
-#include <math.h>
-#include <signal.h>
-#include <stdlib.h>
 #if !defined(_WIN32)
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -53,14 +52,13 @@ typedef size_t z_size_t;
 #include "absl/debugging/internal/demangle.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/numbers.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
-#include "google/protobuf/text_format.h"
-
 #include "bloaty.h"
 #include "bloaty.pb.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/text_format.h"
 #include "re.h"
 #include "util.h"
 
@@ -187,8 +185,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
       return std::string(symbol);
     }
   } else if (source == DataSource::kFullSymbols) {
-    char* demangled =
-        __cxa_demangle(demangle_from.data(), NULL, NULL, NULL);
+    char* demangled = __cxa_demangle(demangle_from.data(), NULL, NULL, NULL);
     if (demangled) {
       std::string ret(demangled);
       free(demangled);
@@ -202,10 +199,10 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
   }
 }
 
-
 // NameMunger //////////////////////////////////////////////////////////////////
 
-void NameMunger::AddRegex(const std::string& regex, const std::string& replacement) {
+void NameMunger::AddRegex(const std::string& regex,
+                          const std::string& replacement) {
   auto reg = absl::make_unique<ReImpl>(regex);
   regexes_.push_back(std::make_pair(std::move(reg), replacement));
 }
@@ -222,7 +219,6 @@ std::string NameMunger::Munge(string_view name) const {
 
   return name_str;
 }
-
 
 // Rollup //////////////////////////////////////////////////////////////////////
 
@@ -259,8 +255,8 @@ class Rollup {
   Rollup(Rollup&& other) = default;
   Rollup& operator=(Rollup&& other) = default;
 
-  void AddSizes(const std::vector<std::string>& names,
-                uint64_t size, bool is_vmsize) {
+  void AddSizes(const std::vector<std::string>& names, uint64_t size,
+                bool is_vmsize) {
     // We start at 1 to exclude the base map (see base_map_).
     AddInternal(names, 1, size, is_vmsize);
   }
@@ -284,9 +280,7 @@ class Rollup {
     CreateRows(row, base, options, true);
   }
 
-  void SetFilterRegex(const ReImpl* regex) {
-    filter_regex_ = regex;
-  }
+  void SetFilterRegex(const ReImpl* regex) { filter_regex_ = regex; }
 
   // Add the values in "other" from this.
   void Add(const Rollup& other) {
@@ -312,7 +306,6 @@ class Rollup {
       child->AddEntriesFrom(*other_child.second);
     }
   }
-
 
   int64_t file_total() const { return file_total_; }
   int64_t filtered_file_total() const { return filtered_file_total_; }
@@ -437,7 +430,7 @@ void Rollup::CreateRows(RollupRow* row, const Rollup* base,
       if (base_child) {
         child_row.old_size.vm = base_child->vm_total_;
         child_row.old_size.file = base_child->file_total_;
-       }
+      }
     }
   }
 
@@ -581,7 +574,6 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
   }
 }
 
-
 // RollupOutput ////////////////////////////////////////////////////////////////
 
 // RollupOutput represents rollup data after we have applied output massaging
@@ -620,14 +612,14 @@ std::string LeftPad(const std::string& input, size_t size) {
   return ret;
 }
 
-std::string DoubleStringPrintf(const char *fmt, double d) {
+std::string DoubleStringPrintf(const char* fmt, double d) {
   char buf[1024];
   snprintf(buf, sizeof(buf), fmt, d);
   return std::string(buf);
 }
 
 std::string SiPrint(int64_t size, bool force_sign) {
-  const char *prefixes[] = {"", "Ki", "Mi", "Gi", "Ti"};
+  const char* prefixes[] = {"", "Ki", "Mi", "Gi", "Ti"};
   size_t num_prefixes = 5;
   size_t n = 0;
   double size_d = size;
@@ -697,10 +689,10 @@ void RollupOutput::Print(const OutputOptions& options, std::ostream* out) {
         PrettyPrint(options, out);
         break;
       case bloaty::OutputFormat::kCSV:
-        PrintToCSV(out, /*tabs=*/false);
+        PrintToCSV(out, /*tabs=*/false, options.showAllSizesCSV);
         break;
       case bloaty::OutputFormat::kTSV:
-        PrintToCSV(out, /*tabs=*/true);
+        PrintToCSV(out, /*tabs=*/true, options.showAllSizesCSV);
         break;
       default:
         BLOATY_UNREACHABLE();
@@ -826,12 +818,12 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
     *out << SiPrint(vm_filtered, /*force_sign=*/false);
   }
 
-   *out << " of entries\n";
+  *out << " of entries\n";
 }
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
                                  std::vector<std::string> parent_labels,
-                                 std::ostream* out, bool tabs) const {
+                                 std::ostream* out, bool tabs, bool csvDiff) const {
   while (parent_labels.size() < source_names_.size()) {
     // If this label had no data at this level, append an empty string.
     parent_labels.push_back("");
@@ -840,18 +832,14 @@ void RollupOutput::PrintRowToCSV(const RollupRow& row,
   parent_labels.push_back(std::to_string(row.size.vm));
   parent_labels.push_back(std::to_string(row.size.file));
 
-  // If in diff where both old size are 0, get new size by adding diff size to old size.
-  parent_labels.push_back(std::to_string(row.old_size.vm));	
-  parent_labels.push_back(std::to_string(row.old_size.file));
-  if (row.old_size.vm != 0 && row.old_size.file != 0){
-    parent_labels.push_back(std::to_string(row.old_size.vm + (row.size.vm)));	
-    parent_labels.push_back(std::to_string(row.old_size.file + (row.size.file)));	
-  } else {
-    parent_labels.push_back(std::to_string(0));	
-    parent_labels.push_back(std::to_string(0));	
-  }
-  
-  
+  // If in diff where both old size are 0, get new size by adding diff size to
+  // old size.
+  if (csvDiff) {
+    parent_labels.push_back(std::to_string(row.old_size.vm));
+  	parent_labels.push_back(std::to_string(row.old_size.file));
+    parent_labels.push_back(std::to_string(row.old_size.vm + (row.size.vm)));
+    parent_labels.push_back(
+        std::to_string(row.old_size.file + (row.size.file)));}
 
   std::string sep = tabs ? "\t" : ",";
   *out << absl::StrJoin(parent_labels, sep) << "\n";
@@ -859,7 +847,7 @@ void RollupOutput::PrintRowToCSV(const RollupRow& row,
 
 void RollupOutput::PrintTreeToCSV(const RollupRow& row,
                                   std::vector<std::string> parent_labels,
-                                  std::ostream* out, bool tabs) const {
+                                  std::ostream* out, bool tabs, bool csvDiff) const {
   if (tabs) {
     parent_labels.push_back(row.name);
   } else {
@@ -868,32 +856,34 @@ void RollupOutput::PrintTreeToCSV(const RollupRow& row,
 
   if (row.sorted_children.size() > 0) {
     for (const auto& child_row : row.sorted_children) {
-      PrintTreeToCSV(child_row, parent_labels, out, tabs);
+      PrintTreeToCSV(child_row, parent_labels, out, tabs, csvDiff);
     }
   } else {
-    PrintRowToCSV(row, parent_labels, out, tabs);
+    PrintRowToCSV(row, parent_labels, out, tabs, csvDiff);
   }
 }
 
-void RollupOutput::PrintToCSV(std::ostream* out, bool tabs) const {
+void RollupOutput::PrintToCSV(std::ostream* out, bool tabs,
+                              bool csvDiff) const {
   std::vector<std::string> names(source_names_);
   names.push_back("vmsize");
   names.push_back("filesize");
-  names.push_back("original_vmsize");	
-  names.push_back("original_filesize");	
-  names.push_back("current_vmsize");	
-  names.push_back("current_filesize");
+  if (csvDiff) {
+    names.push_back("original_vmsize");
+    names.push_back("original_filesize");
+    names.push_back("current_vmsize");
+    names.push_back("current_filesize");
+  }
   std::string sep = tabs ? "\t" : ",";
   *out << absl::StrJoin(names, sep) << "\n";
   for (const auto& child_row : toplevel_row_.sorted_children) {
-    PrintTreeToCSV(child_row, std::vector<std::string>(), out, tabs);
+    PrintTreeToCSV(child_row, std::vector<std::string>(), out, tabs, csvDiff);
   }
 }
 
 // RangeMap ////////////////////////////////////////////////////////////////////
 
 constexpr uint64_t RangeSink::kUnknownSize;
-
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
@@ -912,7 +902,6 @@ class MmapInputFile : public InputFile {
   static bool DoTryOpen(absl::string_view filename,
                         std::unique_ptr<InputFile>& file);
 };
-
 
 class FileDescriptor {
  public:
@@ -935,7 +924,7 @@ bool MmapInputFile::DoTryOpen(absl::string_view filename,
   std::string str(filename);
   FileDescriptor fd(open(str.c_str(), O_RDONLY));
   struct stat buf;
-  const char *map;
+  const char* map;
 
   if (fd.fd() < 0) {
     std::cerr << absl::Substitute("couldn't open file '$0': $1\n", filename,
@@ -983,7 +972,7 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
   return ret;
 }
 
-#else // !_WIN32
+#else  // !_WIN32
 
 // MmapInputFile ///////////////////////////////////////////////////////////////
 
@@ -1027,9 +1016,9 @@ Win32MMapInputFile::Win32MMapInputFile(string_view filename, string_view data)
 bool Win32MMapInputFile::DoTryOpen(absl::string_view filename,
                                    std::unique_ptr<InputFile>& file) {
   std::string str(filename);
-  Win32Handle fd(::CreateFileA(str.c_str(), FILE_GENERIC_READ,
-                               FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                               FILE_ATTRIBUTE_NORMAL, NULL));
+  Win32Handle fd(::CreateFileA(str.c_str(), FILE_GENERIC_READ, FILE_SHARE_READ,
+                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                               NULL));
   LARGE_INTEGER li = {};
   const char* map;
 
@@ -1084,11 +1073,14 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 // RangeSink ///////////////////////////////////////////////////////////////////
 
-RangeSink::RangeSink(const InputFile *file, const Options &options,
-                     DataSource data_source, const DualMap *translator,
-                     google::protobuf::Arena *arena)
-    : file_(file), options_(options), data_source_(data_source),
-      translator_(translator), arena_(arena) {}
+RangeSink::RangeSink(const InputFile* file, const Options& options,
+                     DataSource data_source, const DualMap* translator,
+                     google::protobuf::Arena* arena)
+    : file_(file),
+      options_(options),
+      data_source_(data_source),
+      translator_(translator),
+      arena_(arena) {}
 
 RangeSink::~RangeSink() {}
 
@@ -1384,21 +1376,23 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
   }
   uint64_t mb = 1 << 20;
   // Limit for uncompressed size is 30x the compressed size + 128MB.
-  if (uncompressed_size > static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
+  if (uncompressed_size >
+      static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
     fprintf(stderr,
             "warning: ignoring compressed debug data, implausible uncompressed "
             "size (compressed: %zu, uncompressed: %" PRIu64 ")\n",
             data.size(), uncompressed_size);
     return absl::string_view();
   }
-  unsigned char *dbuf =
+  unsigned char* dbuf =
       arena_->google::protobuf::Arena::CreateArray<unsigned char>(
           arena_, uncompressed_size);
   uLongf zliblen = uncompressed_size;
-  if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) != Z_OK) {
+  if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) !=
+      Z_OK) {
     THROW("Error decompressing debug info");
   }
-  string_view sv(reinterpret_cast<char *>(dbuf), zliblen);
+  string_view sv(reinterpret_cast<char*>(dbuf), zliblen);
   return sv;
 }
 
@@ -1440,7 +1434,6 @@ class ThreadSafeIterIndex {
   std::mutex mutex_;
   const int max_;
 };
-
 
 // Bloaty //////////////////////////////////////////////////////////////////////
 
@@ -1539,8 +1532,9 @@ class Bloaty {
   std::unique_ptr<google::protobuf::Arena> arena_;
 };
 
-Bloaty::Bloaty(const InputFileFactory &factory, const Options &options)
-    : file_factory_(factory), options_(options),
+Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
+    : file_factory_(factory),
+      options_(options),
       arena_(std::make_unique<google::protobuf::Arena>()) {
   AddBuiltInSources(data_sources, options);
 }
@@ -1601,8 +1595,10 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
   auto iter = all_known_sources_.find(source.base_data_source());
 
   if (iter == all_known_sources_.end()) {
-    THROWF("custom data source '$0': no such base source '$1'.\nTry --list-sources to see valid sources.", source.name(),
-           source.base_data_source());
+    THROWF(
+        "custom data source '$0': no such base source '$1'.\nTry "
+        "--list-sources to see valid sources.",
+        source.name(), source.base_data_source());
   } else if (!iter->second->munger->IsEmpty()) {
     THROWF("custom data source '$0' tries to depend on custom data source '$1'",
            source.name(), source.base_data_source());
@@ -1620,7 +1616,8 @@ void Bloaty::AddDataSource(const std::string& name) {
   source_names_.emplace_back(name);
   auto it = all_known_sources_.find(name);
   if (it == all_known_sources_.end()) {
-    THROWF("no such data source: $0.\nTry --list-sources to see valid sources.", name);
+    THROWF("no such data source: $0.\nTry --list-sources to see valid sources.",
+           name);
   }
 
   sources_.emplace_back(it->second.get());
@@ -1687,7 +1684,8 @@ struct DualMaps {
     return ret;
   }
 
-  void PrintMapRow(string_view str, uint64_t start, uint64_t end, int hex_digits) {
+  void PrintMapRow(string_view str, uint64_t start, uint64_t end,
+                   int hex_digits) {
     printf("%.*" PRIx64 "-%.*" PRIx64 "\t %s\t\t%.*s\n", hex_digits, start,
            hex_digits, end, LeftPad(std::to_string(end - start), 10).c_str(),
            (int)str.size(), str.data());
@@ -1715,7 +1713,7 @@ struct DualMaps {
   std::vector<std::unique_ptr<DualMap>> maps_;
 };
 
-void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
+void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
                                std::vector<std::string>* out_build_ids) const {
   auto file = GetObjectFile(filename);
 
@@ -1732,9 +1730,9 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   sink_ptrs.push_back(sinks.back().get());
 
   for (auto source : sources_) {
-    sinks.push_back(absl::make_unique<RangeSink>(&file->file_data(), options_,
-                                                 source->effective_source,
-                                                 maps.base_map(), arena_.get()));
+    sinks.push_back(absl::make_unique<RangeSink>(
+        &file->file_data(), options_, source->effective_source, maps.base_map(),
+        arena_.get()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
     // We handle the kInputFiles data source internally, without handing it off
     // to the file format implementation.  This seems slightly simpler, since
@@ -1757,8 +1755,8 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
     }
   }
 
-  int64_t filesize_before = rollup->file_total() +
-      rollup->filtered_file_total();
+  int64_t filesize_before =
+      rollup->file_total() + rollup->filtered_file_total();
   file->ProcessFile(sink_ptrs);
 
   // kInputFile source: Copy the base map to the filename sink(s).
@@ -1778,8 +1776,8 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   maps.ComputeRollup(rollup);
 
   // The ObjectFile implementation must guarantee this.
-  int64_t filesize = rollup->file_total() +
-      rollup->filtered_file_total() - filesize_before;
+  int64_t filesize =
+      rollup->file_total() + rollup->filtered_file_total() - filesize_before;
   (void)filesize;
   assert(filesize == file->file_data().data().size());
 
@@ -1796,10 +1794,9 @@ void Bloaty::ScanAndRollupFile(const std::string &filename, Rollup* rollup,
   }
 }
 
-void Bloaty::ScanAndRollupFiles(
-    const std::vector<std::string>& filenames,
-    std::vector<std::string>* build_ids,
-    Rollup * rollup) const {
+void Bloaty::ScanAndRollupFiles(const std::vector<std::string>& filenames,
+                                std::vector<std::string>* build_ids,
+                                Rollup* rollup) const {
   int num_cpus = std::thread::hardware_concurrency();
   int num_threads = std::min(num_cpus, static_cast<int>(filenames.size()));
 
@@ -1820,16 +1817,18 @@ void Bloaty::ScanAndRollupFiles(
   for (int i = 0; i < num_threads; i++) {
     thread_data[i].rollup.SetFilterRegex(regex.get());
 
-    threads[i] = std::thread([this, &index, &filenames](PerThreadData* data) {
-      try {
-        int j;
-        while (index.TryGetNext(&j)) {
-          ScanAndRollupFile(filenames[j], &data->rollup, &data->build_ids);
-        }
-      } catch (const bloaty::Error& e) {
-        index.Abort(e.what());
-      }
-    }, &thread_data[i]);
+    threads[i] = std::thread(
+        [this, &index, &filenames](PerThreadData* data) {
+          try {
+            int j;
+            while (index.TryGetNext(&j)) {
+              ScanAndRollupFile(filenames[j], &data->rollup, &data->build_ids);
+            }
+          } catch (const bloaty::Error& e) {
+            index.Abort(e.what());
+          }
+        },
+        &thread_data[i]);
   }
 
   for (int i = 0; i < num_threads; i++) {
@@ -1841,8 +1840,7 @@ void Bloaty::ScanAndRollupFiles(
       rollup->Add(data->rollup);
     }
 
-    build_ids->insert(build_ids->end(),
-                      data->build_ids.begin(),
+    build_ids->insert(build_ids->end(), data->build_ids.begin(),
                       data->build_ids.end());
   }
 
@@ -1892,8 +1890,7 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
     std::string unused_debug;
     for (const auto& pair : debug_files_) {
       unused_debug += absl::Substitute(
-          "$0   $1\n",
-          absl::BytesToHexString(pair.first).c_str(),
+          "$0   $1\n", absl::BytesToHexString(pair.first).c_str(),
           pair.second.c_str());
     }
 
@@ -1907,9 +1904,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
           "$0   $1\n", absl::BytesToHexString(file_info.build_id_).c_str(),
           file_info.filename_.c_str());
     }
-    THROWF(
-        "Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
-        unused_debug.c_str(), input_files.c_str());
+    THROWF("Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
+           unused_debug.c_str(), input_files.c_str());
   }
 }
 
@@ -1999,9 +1995,7 @@ class ArgParser {
     return ret;
   }
 
-  void ConsumeAndSaveArg() {
-    (*out_argv_)[(*out_argc_)++] = argv_[index_++];
-  }
+  void ConsumeAndSaveArg() { (*out_argv_)[(*out_argc_)++] = argv_[index_++]; }
 
   // Singular flag like --csv or -v.
   bool TryParseFlag(string_view flag) {
@@ -2192,6 +2186,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else {
       if (saw_separator) {
+        output_options->showAllSizesCSV = true;
         options->add_base_filename(std::string(args.ConsumeArg()));
       } else {
         options->add_filename(std::string(args.ConsumeArg()));

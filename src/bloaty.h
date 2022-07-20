@@ -385,6 +385,7 @@ struct OutputOptions {
   OutputFormat output_format = OutputFormat::kPrettyPrint;
   size_t max_label_len = 80;
   ShowDomain show = ShowDomain::kShowBoth;
+  bool showAllSizesCSV = false;
 };
 
 struct RollupOutput {
@@ -421,17 +422,17 @@ struct RollupOutput {
 
   static bool IsSame(const std::string& a, const std::string& b);
   void PrettyPrint(const OutputOptions& options, std::ostream* out) const;
-  void PrintToCSV(std::ostream* out, bool tabs) const;
+  void PrintToCSV(std::ostream* out, bool tabs, bool csvDiff) const;
   void PrettyPrintRow(const RollupRow& row, size_t indent,
                       const OutputOptions& options, std::ostream* out) const;
   void PrettyPrintTree(const RollupRow& row, size_t indent,
                        const OutputOptions& options, std::ostream* out) const;
   void PrintRowToCSV(const RollupRow& row,
                      std::vector<std::string> parent_labels,
-                     std::ostream* out, bool tabs) const;
+                     std::ostream* out, bool tabs, bool csvDiff) const;
   void PrintTreeToCSV(const RollupRow& row,
                       std::vector<std::string> parent_labels,
-                      std::ostream* out, bool tabs) const;
+                      std::ostream* out, bool tabs, bool csvDiff) const;
 };
 
 bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,

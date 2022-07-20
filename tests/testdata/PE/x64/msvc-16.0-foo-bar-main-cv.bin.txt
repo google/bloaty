@@ -1,9 +1,9 @@
-sections	vmsize	filesize	original_vmsize	original_filesize	current_vmsize	current_filesize
-.rdata	8236	8704	0	0	0	0
-.text	5340	5632	0	0	0	0
-.data	5624	512	0	0	0	0
-.pdata	588	1024	0	0	0	0
-.reloc	52	512	0	0	0	0
-[PE Headers]	496	496	0	0	0	0
-[Unmapped]	0	328	0	0	0	0
-[PE Section Headers]	200	200	0	0	0	0
+sections	vmsize	filesize
+.rdata	8236	8704
+.text	5340	5632
+.data	5624	512
+.pdata	588	1024
+.reloc	52	512
+[PE Headers]	496	496
+[Unmapped]	0	328
+[PE Section Headers]	200	200
