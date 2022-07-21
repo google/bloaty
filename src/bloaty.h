@@ -337,18 +337,26 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink);
 
 class Rollup;
 
+struct DomainSizes {
+  int64_t vm;
+  int64_t file;
+};
+
 struct RollupRow {
   RollupRow(const std::string& name_) : name(name_) {}
 
   std::string name;
-  int64_t vmsize = 0;
-  int64_t filesize = 0;
-  int64_t filtered_vmsize = 0;
-  int64_t filtered_filesize = 0;
+  DomainSizes size = {0, 0};
+  DomainSizes filtered_size = {0, 0};
+
   int64_t other_count = 0;
   int64_t sortkey;
   double vmpercent;
   double filepercent;
+
+  // The size of the base in a diff mode. Otherwise stay 0.
+  DomainSizes old_size = {0, 0};
+  
   std::vector<RollupRow> sorted_children;
 
   static bool Compare(const RollupRow& a, const RollupRow& b) {
@@ -377,6 +385,7 @@ struct OutputOptions {
   OutputFormat output_format = OutputFormat::kPrettyPrint;
   size_t max_label_len = 80;
   ShowDomain show = ShowDomain::kShowBoth;
+  bool showAllSizesCSV = false;
 };
 
 struct RollupOutput {
@@ -413,17 +422,17 @@ struct RollupOutput {
 
   static bool IsSame(const std::string& a, const std::string& b);
   void PrettyPrint(const OutputOptions& options, std::ostream* out) const;
-  void PrintToCSV(std::ostream* out, bool tabs) const;
+  void PrintToCSV(std::ostream* out, bool tabs, bool csvDiff) const;
   void PrettyPrintRow(const RollupRow& row, size_t indent,
                       const OutputOptions& options, std::ostream* out) const;
   void PrettyPrintTree(const RollupRow& row, size_t indent,
                        const OutputOptions& options, std::ostream* out) const;
   void PrintRowToCSV(const RollupRow& row,
                      std::vector<std::string> parent_labels,
-                     std::ostream* out, bool tabs) const;
+                     std::ostream* out, bool tabs, bool csvDiff) const;
   void PrintTreeToCSV(const RollupRow& row,
                       std::vector<std::string> parent_labels,
-                      std::ostream* out, bool tabs) const;
+                      std::ostream* out, bool tabs, bool csvDiff) const;
 };
 
 bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,

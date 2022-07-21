@@ -27,7 +27,7 @@ TEST_F(BloatyTest, InlinesOnSmallFile) {
       {"bloaty", "-d", "compileunits", "03-small-binary-that-crashed-inlines.bin"});
   RunBloaty(
       {"bloaty", "-d", "inlines", "03-small-binary-that-crashed-inlines.bin"});
-  EXPECT_EQ(top_row_->vmsize, 2340);
+  EXPECT_EQ(top_row_->size.vm, 2340);
 }
 
 TEST_F(BloatyTest, GoBinary) {
@@ -46,7 +46,7 @@ TEST_F(BloatyTest, ImplicitConstAndLineStrp) {
 
 TEST_F(BloatyTest, MultiThreaded) {
   RunBloaty({"bloaty", "02-section-count-overflow.o"});
-  size_t file_size = top_row_->filesize;
+  size_t file_size = top_row_->size.file;
 
   // Bloaty doesn't know or care that you are passing the same file multiple
   // times.
@@ -56,5 +56,5 @@ TEST_F(BloatyTest, MultiThreaded) {
     args.push_back("02-section-count-overflow.o");
   }
   RunBloaty(args);  // Heavily multithreaded test.
-  EXPECT_EQ(top_row_->filesize, file_size * 100);
+  EXPECT_EQ(top_row_->size.file, file_size * 100);
 }

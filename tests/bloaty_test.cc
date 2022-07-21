@@ -21,20 +21,20 @@ TEST_F(BloatyTest, EmptyObjectFile) {
 
   // Empty .c file should result in a .o file with no vmsize.
   RunBloaty({"bloaty", file});
-  EXPECT_EQ(top_row_->vmsize, 0);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_EQ(top_row_->size.vm, 0);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
   // Same with segments (we fake segments on .o files).
   RunBloaty({"bloaty", "-d", "segments", file});
-  EXPECT_EQ(top_row_->vmsize, 0);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_EQ(top_row_->size.vm, 0);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
   // Same with symbols.
   RunBloaty({"bloaty", "-d", "symbols", file});
-  EXPECT_EQ(top_row_->vmsize, 0);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_EQ(top_row_->size.vm, 0);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
   // We can't run any of these targets against object files.
@@ -50,16 +50,16 @@ TEST_F(BloatyTest, SimpleObjectFile) {
 
   // Test "-n 0" which should return an unlimited number of rows.
   RunBloaty({"bloaty", "-n", "0", file});
-  EXPECT_GT(top_row_->vmsize, 64);
-  EXPECT_LT(top_row_->vmsize, 300);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 64);
+  EXPECT_LT(top_row_->size.vm, 300);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
   // Same with segments (we fake segments on .o files).
   RunBloaty({"bloaty", "-d", "segments", file});
-  EXPECT_GT(top_row_->vmsize, 64);
-  EXPECT_LT(top_row_->vmsize, 300);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 64);
+  EXPECT_LT(top_row_->size.vm, 300);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
   // For inputfiles we should get everything attributed to the input file.
@@ -111,15 +111,15 @@ TEST_F(BloatyTest, SimpleArchiveFile) {
   ASSERT_TRUE(GetFileSize(file, &size));
 
   RunBloaty({"bloaty", file});
-  EXPECT_GT(top_row_->vmsize, 8000);
-  EXPECT_LT(top_row_->vmsize, 12000);
-  //EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 8000);
+  EXPECT_LT(top_row_->size.vm, 12000);
+  //EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 3);
 
   RunBloaty({"bloaty", "-d", "segments", file});
-  EXPECT_GT(top_row_->vmsize, 8000);
-  EXPECT_LT(top_row_->vmsize, 12000);
-  //EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 8000);
+  EXPECT_LT(top_row_->size.vm, 12000);
+  //EXPECT_EQ(top_row_->size.file, size);
 
   RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
   AssertChildren(*top_row_, {
@@ -174,15 +174,15 @@ TEST_F(BloatyTest, SimpleSharedObjectFile) {
   ASSERT_TRUE(GetFileSize(file, &size));
 
   RunBloaty({"bloaty", file});
-  EXPECT_GT(top_row_->vmsize, 8000);
-  EXPECT_LT(top_row_->vmsize, 12000);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 8000);
+  EXPECT_LT(top_row_->size.vm, 12000);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 3);
 
   RunBloaty({"bloaty", "-d", "segments", file});
-  EXPECT_GT(top_row_->vmsize, 8000);
-  EXPECT_LT(top_row_->vmsize, 12000);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 8000);
+  EXPECT_LT(top_row_->size.vm, 12000);
+  EXPECT_EQ(top_row_->size.file, size);
 
   RunBloaty({"bloaty", "-d", "symbols", "-n", "50", file});
   AssertChildren(*top_row_, {
@@ -199,15 +199,15 @@ TEST_F(BloatyTest, SimpleBinary) {
   ASSERT_TRUE(GetFileSize(file, &size));
 
   RunBloaty({"bloaty", file});
-  EXPECT_GT(top_row_->vmsize, 8000);
-  EXPECT_LT(top_row_->vmsize, 12000);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 8000);
+  EXPECT_LT(top_row_->size.vm, 12000);
+  EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 3);
 
   RunBloaty({"bloaty", "-d", "segments", file});
-  EXPECT_GT(top_row_->vmsize, 8000);
-  EXPECT_LT(top_row_->vmsize, 12000);
-  EXPECT_EQ(top_row_->filesize, size);
+  EXPECT_GT(top_row_->size.vm, 8000);
+  EXPECT_LT(top_row_->size.vm, 12000);
+  EXPECT_EQ(top_row_->size.file, size);
 
   RunBloaty({"bloaty", "-d", "symbols", "-n", "50", "-s", "vm", file});
   AssertChildren(*top_row_, {
