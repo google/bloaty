@@ -906,6 +906,12 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               if (verbose_level > 1) {
                 printf("Disassembling function: %s\n", name.data());
               }
+              // TODO(brandonvu) Continue if VM pointer cannot be translated. Issue #315
+              uint64_t unused;
+              if (!sink->Translator()->vm_map.Translate(full_addr, &unused)) {
+                WARN("Can't translate VM pointer ($0) to file", full_addr);
+                continue;
+              }
               infop->text = sink->TranslateVMToFile(full_addr).substr(0, sym.st_size);
               infop->start_address = full_addr;
               DisassembleFindReferences(*infop, sink);

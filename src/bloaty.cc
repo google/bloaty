@@ -1364,7 +1364,8 @@ absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   uint64_t translated;
   if (!translator_->vm_map.Translate(address, &translated) ||
       translated > file_->data().size()) {
-    THROW("Can't translate VM pointer to file");
+    THROWF("Can't translate VM pointer ($0) to file", address);
+
   }
   return file_->data().substr(translated);
 }

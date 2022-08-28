@@ -203,6 +203,8 @@ public:
   // input_file().data()) to a VM address.
   uint64_t TranslateFileToVM(const char* ptr);
   absl::string_view TranslateVMToFile(uint64_t address);
+  const DualMap* Translator() { return translator_; }
+
 
   // Decompresses zlib-formatted data and returns the decompressed data.
   // Since the decompressed data is not actually part of the file, any
