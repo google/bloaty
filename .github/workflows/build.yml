@@ -36,7 +36,7 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.arch }}-${{ steps.llvm-revision.outputs.revision }}
       - name: configure LLVM
         if: steps.llvm-build.outputs.cache-hit != 'true'
-        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release -G "Visual Studio 16 2019" -S ${{ github.workspace }}/llvm-project/llvm
+        run: cmake -B ${{ github.workspace }}/build/llvm-project -D CMAKE_BUILD_TYPE=Release -G "Visual Studio 17 2022" -S ${{ github.workspace }}/llvm-project/llvm
       - name: build LLVM tools
         if: steps.llvm-build.outputs.cache-hit != 'true'
         run: |
@@ -47,7 +47,7 @@ jobs:
         with:
           path: bloaty
       - name: configure
-        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/FileCheck.exe -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/yaml2obj.exe -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/FileCheck.exe -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/yaml2obj.exe -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
       - name: build
         run: cmake --build build/bloaty --config Debug
       - name: test
