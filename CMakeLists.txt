@@ -264,6 +264,9 @@ add_library(libbloaty STATIC
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
+target_link_libraries(libbloaty PUBLIC
+  $<$<BOOL:${CAPSTONE_FOUND}>:${CAPSTONE_LIBRARIES}>
+  $<$<NOT:$<BOOL:${CAPSTONE_FOUND}>>:capstone-static>)
 set_property(TARGET libbloaty PROPERTY FOLDER "bloaty")
 
 if(UNIX OR MINGW)
@@ -280,18 +283,12 @@ if(UNIX OR MINGW)
       list(APPEND LIBBLOATY_LIBS re2)
     endif()
   endif()
-  if(CAPSTONE_FOUND)
-    list(APPEND LIBBLOATY_LIBS ${CAPSTONE_LIBRARIES})
-  else()
-    list(APPEND LIBBLOATY_LIBS capstone-static)
-  endif()
   if(ZLIB_FOUND)
     list(APPEND LIBBLOATY_LIBS ZLIB::ZLIB)
   else()
     list(APPEND LIBBLOATY_LIBS zlibstatic)
   endif()
 else()
-  set(LIBBLOATY_LIBS libbloaty libprotoc capstone-static)
   if(BLOATY_ENABLE_RE2)
     list(APPEND LIBBLOATY_LIBS  re2)
   endif()
