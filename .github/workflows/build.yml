@@ -47,7 +47,7 @@ jobs:
         with:
           path: bloaty
       - name: configure
-        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 16 2019" -A ${{ matrix.arch }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/FileCheck.exe -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/yaml2obj.exe -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
+        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -S ${{ github.workspace }}/bloaty -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/FileCheck.exe -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/Release/bin/yaml2obj.exe -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
       - name: build
         run: cmake --build build/bloaty --config Debug
       - name: test
