@@ -126,7 +126,7 @@ void CheckedAdd(int64_t* accum, int64_t val) {
   }
 #else
   bool safe = *accum < 0
-                  ? (val >= std::numeric_limits<int64_t>::max() - *accum)
+                  ? (val >= std::numeric_limits<int64_t>::min() - *accum)
                   : (val <= std::numeric_limits<int64_t>::max() - *accum);
   if (!safe) {
     THROW("integer overflow");
