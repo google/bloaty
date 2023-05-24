@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <vector>
