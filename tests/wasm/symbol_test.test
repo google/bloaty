@@ -185,6 +185,7 @@ Sections:
 
 # Data section
 # FIXME: This is wrong, should be the data section header
+# CHECK!!!!: 1c6-1c9           3             [Wasm Section Headers]
 # BUG: 1c6-1c9           3             main
 # CHECK: 1c9-1cf           6             .data.global2
 # CHECK: 1cf-1d5           6             .data.global3
@@ -193,6 +194,7 @@ Sections:
 # Name section
 # FIXME: Name section header and subsection header is 1db-1e6
 # BUG: 1db-1e6          11             .data.global4
+# CHECK!!: 1db-1e6          11             [Wasm Section Headers]
 # Function names
 # CHECK: 1e6-1f9          19             __wasm_call_ctors
 # CHECK: 1f9-20a          17             __wasm_init_tls
@@ -200,9 +202,19 @@ Sections:
 # CHECK: 21e-225           7             func1
 # CHECK: 225-22c           7             func2
 # CHECK: 22c-23d          17             __original_main
-# FIXME: Subsection headers and global names
-# BUG: 23d-243           6             main
-# BUG: 243-27f          60             [section name]
+
+# FIXME: this is the following:
+# BUG: 23d-246           9             main
+# But it should be:
+# CHECK!!: 23d-243           6             main
+
+
+
+# Global names
+# CHECK: 246-257	         17		__stack_pointer
+# CHECK: 257-263	         12		__tls_base
+# CHECK: 263-26f	         12		__tls_size
+# CHECK: 26f-27f	         16		__tls_align
 # Data names
 # CHECK: 27f-28e          15             .data.global2
 # CHECK: 28e-29d          15             .data.global3
