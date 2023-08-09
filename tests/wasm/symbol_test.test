@@ -175,35 +175,35 @@ Sections:
 # Check output for function and passive data segments
 
 # Code section
-# CHECK: 06b-06e           3             __wasm_call_ctors
-# CHECK: 06e-071           3             __wasm_init_tls
-# CHECK: 071-0e2         113             __wasm_init_memory
-# CHECK: 0e2-14b         105             func1
-# CHECK: 14b-15f          20             func2
-# CHECK: 15f-1b6          87             __original_main
-# CHECK: 1b6-1c6          16             main
+# CHECK: 092-095           3             __wasm_call_ctors
+# CHECK: 095-098           3             __wasm_init_tls
+# CHECK: 098-109         113             __wasm_init_memory
+# CHECK: 109-172         105             func1
+# CHECK: 172-186          20             func2
+# CHECK: 186-1dd          87             __original_main
+# CHECK: 1dd-1ed          16             main
 
 # Data section
 # FIXME: This is wrong, should be the data section header
-# BUG: 1c6-1c9           3             main
-# CHECK: 1c9-1cf           6             .data.global2
-# CHECK: 1cf-1d5           6             .data.global3
-# CHECK: 1d5-1db           6             .data.global4
+# BUG:   1ed-1f4           7             main
+# CHECK: 1f4-1fa           6             .data.global2
+# CHECK: 1fa-200           6             .data.global3
+# CHECK: 200-206           6             .data.global4
 
 # Name section
-# FIXME: Name section header and subsection header is 1db-1e6
-# BUG: 1db-1e6          11             .data.global4
+# FIXME: Name section header and subsection header is 206-214
+# BUG:   206-214          14             .data.global4
 # Function names
-# CHECK: 1e6-1f9          19             __wasm_call_ctors
-# CHECK: 1f9-20a          17             __wasm_init_tls
-# CHECK: 20a-21e          20             __wasm_init_memory
-# CHECK: 21e-225           7             func1
-# CHECK: 225-22c           7             func2
-# CHECK: 22c-23d          17             __original_main
+# CHECK: 214-227          19             __wasm_call_ctors
+# CHECK: 227-238          17             __wasm_init_tls
+# CHECK: 238-24c          20             __wasm_init_memory
+# CHECK: 24c-253           7             func1
+# CHECK: 253-25a           7             func2
+# CHECK: 25a-26b          17             __original_main
 # FIXME: Subsection headers and global names
-# BUG: 23d-243           6             main
-# BUG: 243-27f          60             [section name]
+# BUG:   26b-271           6             main
+# BUG:   271-2ad          60             [section name]
 # Data names
-# CHECK: 27f-28e          15             .data.global2
-# CHECK: 28e-29d          15             .data.global3
-# CHECK: 29d-2ac          15             .data.global4
+# CHECK: 2ad-2bc          15             .data.global2
+# CHECK: 2bc-2cb          15             .data.global3
+# CHECK: 2cb-2da          15             .data.global4

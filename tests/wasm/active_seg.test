@@ -41,6 +41,6 @@ Sections:
 # Check output for active data segments
 
 # Data section
-# CHECK: 1d-23           6             .data.global2
-# CHECK: 23-29           6             .data.global3
-# CHECK: 29-2f           6             .data.global4
+# CHECK: 29-2f           6             .data.global2
+# CHECK: 2f-35           6             .data.global3
+# CHECK: 35-3b           6             .data.global4
