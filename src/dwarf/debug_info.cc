@@ -146,9 +146,9 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
     switch (unit_type_) {
       case DW_UT_skeleton:
       case DW_UT_split_compile:
-      case DW_UT_split_type:
         dwo_id_ = ReadFixed<uint64_t>(&data);
         break;
+      case DW_UT_split_type:
       case DW_UT_type:
         unit_type_signature_ = ReadFixed<uint64_t>(&data);
         unit_type_offset_ = unit_sizes_.ReadDWARFOffset(&data);
