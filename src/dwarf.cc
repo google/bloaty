@@ -202,6 +202,8 @@ string_view* File::GetFieldByName(string_view name) {
     return &debug_str;
   } else if (name == "str_offsets") {
     return &debug_str_offsets;
+  } else if (name == "line_str") {
+    return &debug_line_str;
   } else if (name == "info") {
     return &debug_info;
   } else if (name == "types") {
