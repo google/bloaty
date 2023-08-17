@@ -47,7 +47,7 @@ inline int DivRoundUp(int n, int d) {
   return (n + (d - 1)) / d;
 }
 
-absl::string_view ReadDebugStrEntry(absl::string_view debug_str, size_t ofs);
+absl::string_view ReadDebugStrEntry(absl::string_view section, size_t ofs);
 
 }  // namepsace dwarf
 }  // namepsace bloaty

@@ -107,6 +107,10 @@ class AttrValue {
   static absl::string_view ReadIndirectString(const CU& cu,
                                               absl::string_view* data);
   static absl::string_view ResolveIndirectString(const CU& cu, uint64_t ofs);
+  template <class D>
+  static absl::string_view ReadIndirectLineString(const CU& cu,
+                                              absl::string_view* data);
+  static absl::string_view ResolveIndirectLineString(const CU& cu, uint64_t ofs);
 
   absl::string_view ResolveDoubleIndirectString(const CU &cu) const;
   uint64_t ResolveIndirectAddress(const CU& cu) const;

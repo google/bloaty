@@ -66,9 +66,9 @@ void SkipLEB128(string_view* data) {
   THROW("corrupt DWARF data, unterminated LEB128");
 }
 
-absl::string_view ReadDebugStrEntry(absl::string_view debug_str, size_t ofs) {
-  SkipBytes(ofs, &debug_str);
-  return ReadNullTerminated(&debug_str);
+absl::string_view ReadDebugStrEntry(absl::string_view section, size_t ofs) {
+  SkipBytes(ofs, &section);
+  return ReadNullTerminated(&section);
 }
 
 }  // namespace dwarf
