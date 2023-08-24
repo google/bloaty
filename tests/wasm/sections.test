@@ -208,14 +208,13 @@ Sections:
 
 # CHECK: FILE MAP:
 # CHECK: 000-008           8             [WASM Header]
-# CHECK: 008-015          13             Type
-# CHECK: 015-068          83             Import
-# CHECK: 068-06f           7             Function
-# CHECK: 06f-078           9             Element
-# CHECK: 078-07b           3             DataCount
-# CHECK: 07b-163         232             Code
-# CHECK: 163-18a          39             Data
-# CHECK: 18a-23f         181             linking
-# CHECK: 23f-2b7         120             producers
-# CHECK: 2b7-2f1          58             reloc.CODE
-
+# CHECK: 008-019          17             Type
+# CHECK: 019-070          87             Import
+# CHECK: 070-07b          11             Function
+# CHECK: 07b-088          13             Element
+# CHECK: 088-08f           7             DataCount
+# CHECK: 08f-17a         235             Code
+# CHECK: 17a-1a5          43             Data
+# CHECK: 1a5-25d         184             linking
+# CHECK: 25d-2d9         124             producers
+# CHECK: 2d9-313          58             reloc.CODE
