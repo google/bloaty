@@ -81,7 +81,15 @@ string_view AttrValue::ReadVariableBlock(string_view* data) {
 }
 
 string_view AttrValue::ResolveIndirectString(const CU& cu, uint64_t ofs) {
+  // offset into a string table contained in the .debug_str of the object file.
   string_view ret = ReadDebugStrEntry(cu.dwarf().debug_str, ofs);
+  cu.AddIndirectString(ret);
+  return ret;
+}
+
+string_view AttrValue::ResolveIndirectLineString(const CU& cu, uint64_t ofs) {
+  // offset into a string table contained in the .debug_line_str of the object file.
+  string_view ret = ReadDebugStrEntry(cu.dwarf().debug_line_str, ofs);
   cu.AddIndirectString(ret);
   return ret;
 }
@@ -89,6 +97,11 @@ string_view AttrValue::ResolveIndirectString(const CU& cu, uint64_t ofs) {
 template <class D>
 string_view AttrValue::ReadIndirectString(const CU& cu, string_view* data) {
   return ResolveIndirectString(cu, ReadFixed<D>(data));
+}
+
+template <class D>
+string_view AttrValue::ReadIndirectLineString(const CU& cu, string_view* data) {
+  return ResolveIndirectLineString(cu, ReadFixed<D>(data));
 }
 
 string_view
@@ -188,11 +201,16 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint16_t form, string_view* data) {
     case DW_FORM_string:
       return AttrValue(form, ReadNullTerminated(data));
     case DW_FORM_strp:
-    case DW_FORM_line_strp:
       if (cu.unit_sizes().dwarf64()) {
         return AttrValue(form, ReadIndirectString<uint64_t>(cu, data));
       } else {
         return AttrValue(form, ReadIndirectString<uint32_t>(cu, data));
+      }
+    case DW_FORM_line_strp:
+      if (cu.unit_sizes().dwarf64()) {
+        return AttrValue(form, ReadIndirectLineString<uint64_t>(cu, data));
+      } else {
+        return AttrValue(form, ReadIndirectLineString<uint32_t>(cu, data));
       }
     case DW_FORM_data1:
       return AttrValue(form, ReadBytes(1, data));
