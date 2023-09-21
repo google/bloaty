@@ -276,6 +276,10 @@ class Rollup {
     row->filtered_size.file = filtered_file_total_;
     row->vmpercent = 100;
     row->filepercent = 100;
+    if (base) {
+      row->size.vm -= base->vm_total_;
+      row->size.file -= base->file_total_;
+    }
     output->diff_mode_ = true;
     CreateRows(row, base, options, true);
   }
@@ -399,8 +403,8 @@ void Rollup::CreateRows(RollupRow* row, const Rollup* base,
   if (base) {
     // For a diff, the percentage is a comparison against the previous size of
     // the same label at the same level.
-    row->vmpercent = Percent(vm_total_, base->vm_total_);
-    row->filepercent = Percent(file_total_, base->file_total_);
+    row->vmpercent = Percent(vm_total_ - base->vm_total_, base->vm_total_);
+    row->filepercent = Percent(file_total_ - base->file_total_, base->file_total_);
   }
 
   for (const auto& value : children_) {
