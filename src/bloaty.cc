@@ -1334,7 +1334,8 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
   if (translator_) {
     if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
         !translator_->file_map.CoversRange(fileoff, filesize)) {
-      THROW("Tried to add range that is not covered by base map.");
+      WARN("Tried to add range not covered by base map, range ignored.");
+      return;
     }
   }
 
