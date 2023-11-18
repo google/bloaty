@@ -26,13 +26,14 @@ namespace bloaty {
 
 uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
                             const char* data_base, RangeSink* sink) {
+  if (encoding == DW_EH_PE_omit) {
+    return 0;
+  }
   uint64_t value;
   const char* ptr = data->data();
   uint8_t format = encoding & DW_EH_PE_FORMAT_MASK;
 
   switch (format) {
-    case DW_EH_PE_omit:
-      return 0;
     case DW_EH_PE_absptr:
       if (is_64bit) {
         value = ReadFixed<uint64_t>(data);
