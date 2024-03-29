@@ -178,7 +178,14 @@ void ForEachSection(string_view file, Func&& section_func) {
 
 void ParseSections(RangeSink* sink) {
   ForEachSection(sink->input_file().data(), [sink](const Section& section) {
-    sink->AddFileRange("wasm_sections", section.name, section.data);
+      if (section.name == "Code") {
+        // Here the "VM" represents just the code section
+        sink->AddRange("wasm_sections", section.name,
+                       0, section.data.size(),
+                       section.data);
+      } else {
+        sink->AddFileRange("wasm_sections", section.name, section.data);
+      }
   });
 }
 
@@ -292,6 +299,10 @@ void ReadCodeSection(const Section& section, const IndexedNames& names,
                      uint32_t num_imports, RangeSink* sink) {
   string_view data = section.contents;
 
+  auto ToVMAddr = [data](string_view f) {
+    return f.data() - data.data();
+  };
+
   uint32_t count = ReadVarUInt32(&data);
 
   for (uint32_t i = 0; i < count; i++) {
@@ -306,9 +317,14 @@ void ReadCodeSection(const Section& section, const IndexedNames& names,
 
     if (iter == names.end()) {
       std::string name = "func[" + std::to_string(i) + "]";
-      sink->AddFileRange("wasm_function", name, func);
+      sink->AddRange("wasm_function", name,
+                     ToVMAddr(func), func.size(),
+                     func);
     } else {
-      sink->AddFileRange("wasm_function", ItaniumDemangle(iter->second, sink->data_source()), func);
+      sink->AddRange("wasm_function",
+                     ItaniumDemangle(iter->second, sink->data_source()),
+                     ToVMAddr(func), func.size(),
+                     func);
     }
   }
 }
@@ -406,6 +422,33 @@ void AddWebAssemblyFallback(RangeSink* sink) {
                      StrictSubstr(sink->input_file().data(), 0, 8));
 }
 
+static void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf) {
+  ForEachSection(file.data(),
+                 [dwarf](const Section& section) {
+                   if (section.name == ".debug_info") {
+                     dwarf->debug_info = section.contents;
+                   } else if (section.name == ".debug_aranges") {
+                     dwarf->debug_aranges = section.contents;
+                   } else if (section.name == ".debug_str") {
+                     dwarf->debug_str = section.contents;
+                   } else if (section.name == ".debug_types") {
+                     dwarf->debug_types = section.contents;
+                   } else if (section.name == ".debug_abbrev") {
+                     dwarf->debug_abbrev = section.contents;
+                   } else if (section.name == ".debug_line") {
+                     dwarf->debug_line = section.contents;
+                   } else if (section.name == ".debug_loc") {
+                     dwarf->debug_loc = section.contents;
+                   } else if (section.name == ".debug_pubnames") {
+                     dwarf->debug_pubnames = section.contents;
+                   } else if (section.name == ".debug_pubtypes") {
+                     dwarf->debug_pubtypes = section.contents;
+                   } else if (section.name == ".debug_ranges") {
+                     dwarf->debug_ranges = section.contents;
+                   }
+                 });
+}
+
 class WebAssemblyObjectFile : public ObjectFile {
  public:
   WebAssemblyObjectFile(std::unique_ptr<InputFile> file_data)
@@ -429,8 +472,15 @@ class WebAssemblyObjectFile : public ObjectFile {
         case DataSource::kFullSymbols:
           ParseSymbols(sink);
           break;
+        case DataSource::kCompileUnits: {
+          // TODO: do we need to fill this in?
+          DualMap symbol_map;
+          dwarf::File dwarf;
+          ReadDWARFSections(sink->input_file(), &dwarf);
+          ReadDWARFCompileUnits(dwarf, symbol_map, sink);
+          break;
+        }
         case DataSource::kArchiveMembers:
-        case DataSource::kCompileUnits:
         case DataSource::kInlines:
         default:
           THROW("WebAssembly doesn't support this data source");
