@@ -50,13 +50,6 @@ else()
 endif()
 endif()
 
-find_package(absl CONFIG)
-if(absl_FOUND)
-  MESSAGE(STATUS "System absl found, using")
-else()
-  MESSAGE(STATUS "System absl not found, using bundled version")
-endif()
-
 # Set default build type.
 if(NOT CMAKE_BUILD_TYPE)
   message(STATUS "Setting build type to 'RelWithDebInfo' as none was specified.")
@@ -164,9 +157,7 @@ endif()
 
 include_directories(.)
 include_directories(src)
-if(NOT absl_FOUND)
-  include_directories(third_party/abseil-cpp)
-endif()
+include_directories(third_party/abseil-cpp)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 
 # Baseline build flags.
@@ -253,6 +244,26 @@ add_library(libbloaty STATIC
     src/util.cc
     src/util.h
     src/webassembly.cc
+    # Until Abseil has a proper CMake build system
+    third_party/abseil-cpp/absl/base/internal/raw_logging.cc # Grrrr...
+    third_party/abseil-cpp/absl/base/internal/throw_delegate.cc
+    third_party/abseil-cpp/absl/debugging/internal/demangle.cc
+    third_party/abseil-cpp/absl/numeric/int128.cc
+    third_party/abseil-cpp/absl/strings/ascii.cc
+    third_party/abseil-cpp/absl/strings/charconv.cc
+    third_party/abseil-cpp/absl/strings/escaping.cc
+    third_party/abseil-cpp/absl/strings/internal/charconv_bigint.cc
+    third_party/abseil-cpp/absl/strings/internal/charconv_parse.cc
+    third_party/abseil-cpp/absl/strings/internal/escaping.cc
+    third_party/abseil-cpp/absl/strings/internal/memutil.cc
+    third_party/abseil-cpp/absl/strings/internal/utf8.cc
+    third_party/abseil-cpp/absl/strings/match.cc
+    third_party/abseil-cpp/absl/strings/numbers.cc
+    third_party/abseil-cpp/absl/strings/str_cat.cc
+    third_party/abseil-cpp/absl/strings/string_view.cc
+    third_party/abseil-cpp/absl/strings/str_split.cc
+    third_party/abseil-cpp/absl/strings/substitute.cc
+    third_party/abseil-cpp/absl/types/bad_optional_access.cc
     # One source file, no special build system needed.
     third_party/demumble/third_party/libcxxabi/cxa_demangle.cpp
     )
@@ -304,14 +315,6 @@ if(UNIX OR MINGW)
   endif()
 endif()
 
-if(NOT absl_FOUND)
-  set(BLOATY_BUILD_TESTING_SAVE "${BUILD_TESTING}")
-  set(BUILD_TESTING OFF)
-  add_subdirectory(third_party/abseil-cpp)
-  set(BUILD_TESTING "${BLOATY_BUILD_TESTING_SAVE}")
-endif()
-list(APPEND LIBBLOATY_LIBS absl::strings)
-list(APPEND LIBBLOATY_LIBS absl::optional)
 list(APPEND LIBBLOATY_LIBS Threads::Threads)
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
