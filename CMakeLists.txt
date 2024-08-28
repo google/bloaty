@@ -312,6 +312,7 @@ if(NOT absl_FOUND)
 endif()
 list(APPEND LIBBLOATY_LIBS absl::strings)
 list(APPEND LIBBLOATY_LIBS absl::optional)
+list(APPEND LIBBLOATY_LIBS absl::demangle_internal)
 list(APPEND LIBBLOATY_LIBS Threads::Threads)
 
 if(DEFINED ENV{LIB_FUZZING_ENGINE})
