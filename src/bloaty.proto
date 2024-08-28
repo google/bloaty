@@ -75,6 +75,9 @@ message Options {
 
   // Dump raw memory map instead of printing normal output.
   optional bool dump_raw_map = 14;
+
+  // Regex with which to exclude names in the data sources.
+  optional string exclude_source_filter = 15;
 }
 
 // A custom data source allows users to create their own label space by
