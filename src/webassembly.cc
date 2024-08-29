@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bloaty.h"
-#include "util.h"
+#include <cstdint>
+#include <cstdio>
+#include "third_party/bloaty/src/bloaty.h"
+#include "third_party/bloaty/src/source_map.h"
+#include "third_party/bloaty/src/util.h"
 
-#include "absl/strings/substitute.h"
+#include "third_party/absl/strings/substitute.h"
 
 using absl::string_view;
 
@@ -173,6 +176,20 @@ void ForEachSection(string_view file, Func&& section_func) {
   while (!data.empty()) {
     Section section = Section::Read(&data);
     section_func(section);
+  }
+}
+
+template <class Func>
+void FindSection(string_view file, std::string name, Func&& section_func) {
+  string_view data = file;
+  ReadMagic(&data);
+
+  while (!data.empty()) {
+    Section section = Section::Read(&data);
+    if (section.name == name) {
+      section_func(section);
+      break;
+    }
   }
 }
 
@@ -412,8 +429,20 @@ class WebAssemblyObjectFile : public ObjectFile {
       : ObjectFile(std::move(file_data)) {}
 
   std::string GetBuildId() const override {
-    // TODO(haberman): does WebAssembly support this?
-    return std::string();
+    // Use the sourceMappingURL as the build ID to be able to match to the
+    // source map.
+    std::string id;
+
+    FindSection(file_data().data(), "sourceMappingURL",
+                [&id](Section& section) {
+                  uint32_t size = ReadVarUInt32(&section.contents);
+                  string_view source_mapping_url =
+                      ReadPiece(size, &section.contents);
+                  id.resize(size);
+                  memcpy(&id[0], &source_mapping_url[0], size);
+                });
+
+    return id;
   }
 
   void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
@@ -429,9 +458,17 @@ class WebAssemblyObjectFile : public ObjectFile {
         case DataSource::kFullSymbols:
           ParseSymbols(sink);
           break;
-        case DataSource::kArchiveMembers:
         case DataSource::kCompileUnits:
         case DataSource::kInlines:
+          if (const sourcemap::SourceMapObjectFile* source_map =
+                dynamic_cast<const sourcemap::SourceMapObjectFile*>(
+                  &debug_file())) {
+            source_map->ProcessFileToSink(sink);
+          } else {
+            THROWF("Data source $0 requires a source map", sink->data_source());
+          }
+          break;
+        case DataSource::kArchiveMembers:
         default:
           THROW("WebAssembly doesn't support this data source");
       }
@@ -461,3 +498,4 @@ std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(
 }
 
 }  // namespace bloaty
+

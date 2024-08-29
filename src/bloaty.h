@@ -21,7 +21,7 @@
 
 #include <stdlib.h>
 #define __STDC_LIMIT_MACROS
-#define __STDC_FORMAT_MACROS
+/* #define __STDC_FORMAT_MACROS */
 #include <stdint.h>
 #include <inttypes.h>
 
@@ -31,14 +31,14 @@
 #include <unordered_map>
 #include <vector>
 
-#include "absl/strings/string_view.h"
-#include "absl/strings/strip.h"
-#include "capstone/capstone.h"
+#include "third_party/absl/strings/string_view.h"
+#include "third_party/absl/strings/strip.h"
+#include "third_party/capstone/capstone.h"
 
-#include "dwarf/debug_info.h"
-#include "bloaty.pb.h"
-#include "range_map.h"
-#include "re.h"
+#include "third_party/bloaty/src/dwarf/debug_info.h"
+#include "third_party/bloaty/src/bloaty.pb.h"
+#include "third_party/bloaty/src/range_map.h"
+#include "third_party/bloaty/src/re.h"
 
 namespace bloaty {
 
@@ -113,7 +113,7 @@ class RangeSink {
 public:
   RangeSink(const InputFile *file, const Options &options,
             DataSource data_source, const DualMap *translator,
-            google::protobuf::Arena *arena);
+            proto2::Arena *arena);
   RangeSink(const RangeSink &) = delete;
   RangeSink &operator=(const RangeSink &) = delete;
   ~RangeSink();
@@ -230,7 +230,7 @@ public:
   DataSource data_source_;
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
-  google::protobuf::Arena *arena_;
+  proto2::Arena *arena_;
 };
 
 // NameMunger //////////////////////////////////////////////////////////////////
@@ -294,6 +294,8 @@ std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
+std::unique_ptr<ObjectFile> TryOpenSourceMapFile(
+    std::unique_ptr<InputFile>& file, std::string build_id);
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
@@ -445,3 +447,4 @@ bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
 }  // namespace bloaty
 
 #endif
+

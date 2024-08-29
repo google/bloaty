@@ -49,18 +49,18 @@ typedef size_t z_size_t;
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "absl/debugging/internal/demangle.h"
-#include "absl/memory/memory.h"
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_join.h"
-#include "absl/strings/string_view.h"
-#include "absl/strings/substitute.h"
-#include "bloaty.h"
-#include "bloaty.pb.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
-#include "google/protobuf/text_format.h"
-#include "re.h"
-#include "util.h"
+#include "third_party/absl/debugging/internal/demangle.h"
+#include "third_party/absl/memory/memory.h"
+#include "third_party/absl/strings/numbers.h"
+#include "third_party/absl/strings/str_join.h"
+#include "third_party/absl/strings/string_view.h"
+#include "third_party/absl/strings/substitute.h"
+#include "third_party/bloaty/src/bloaty.h"
+#include "third_party/bloaty/src/bloaty.pb.h"
+#include "third_party/protobuf/io/zero_copy_stream_impl.h"
+#include "net/proto2/public/text_format.h"
+#include "third_party/bloaty/src/re.h"
+#include "third_party/bloaty/src/util.h"
 
 using absl::string_view;
 
@@ -1079,7 +1079,7 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 RangeSink::RangeSink(const InputFile* file, const Options& options,
                      DataSource data_source, const DualMap* translator,
-                     google::protobuf::Arena* arena)
+                     proto2::Arena* arena)
     : file_(file),
       options_(options),
       data_source_(data_source),
@@ -1334,10 +1334,7 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
   if (translator_) {
     if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
         !translator_->file_map.CoversRange(fileoff, filesize)) {
-      WARN("AddRange($0, $1, $2, $3, $4) will be ignored, because it is not "
-           "covered by base map.",
-           name.data(), vmaddr, vmsize, fileoff, filesize);
-      return;
+      THROW("Tried to add range that is not covered by base map.");
     }
   }
 
@@ -1393,7 +1390,7 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
     return absl::string_view();
   }
   unsigned char* dbuf =
-      arena_->google::protobuf::Arena::CreateArray<unsigned char>(
+      arena_->proto2::Arena::CreateArray<unsigned char>(
           arena_, uncompressed_size);
   uLongf zliblen = uncompressed_size;
   if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) !=
@@ -1468,6 +1465,7 @@ class Bloaty {
 
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
+  void AddSourceMapFilename(const std::string& filename);
 
   size_t GetSourceCount() const { return sources_.size(); }
 
@@ -1535,15 +1533,16 @@ class Bloaty {
   std::vector<InputFileInfo> input_files_;
   std::vector<InputFileInfo> base_files_;
   std::map<std::string, std::string> debug_files_;
+  std::map<std::string, std::string> sourcemap_files_;
 
   // For allocating memory, like to decompress compressed sections.
-  std::unique_ptr<google::protobuf::Arena> arena_;
+  std::unique_ptr<proto2::Arena> arena_;
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
     : file_factory_(factory),
       options_(options),
-      arena_(std::make_unique<google::protobuf::Arena>()) {
+      arena_(std::make_unique<proto2::Arena>()) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -1590,6 +1589,18 @@ void Bloaty::AddDebugFilename(const std::string& filename) {
            filename);
   }
   debug_files_[build_id] = filename;
+}
+
+void Bloaty::AddSourceMapFilename(const std::string& filename) {
+  std::size_t delimiter = filename.find('=');
+  if (delimiter == std::string::npos) {
+    THROWF("Source map filename '$0' must have a build id and file name "
+           "separated by '='",
+           filename);
+  }
+  std::string sourcemap_build_id = filename.substr(0, delimiter);
+  std::string sourcemap_filename = filename.substr(delimiter + 1);
+  sourcemap_files_[sourcemap_build_id] = sourcemap_filename;
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
@@ -1758,6 +1769,18 @@ void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
     auto iter = debug_files_.find(build_id);
     if (iter != debug_files_.end()) {
       debug_file = GetObjectFile(iter->second);
+      file->set_debug_file(debug_file.get());
+      out_build_ids->push_back(build_id);
+    }
+
+    // Maybe it's a source map file?
+    auto sourcemap_iter = sourcemap_files_.find(build_id);
+    if (sourcemap_iter != sourcemap_files_.end()) {
+      std::unique_ptr<InputFile> sourcemap_file(
+          file_factory_.OpenFile(sourcemap_iter->second));
+      // The build id is not present in the source map file itself, so it must
+      // be passed here.
+      debug_file = TryOpenSourceMapFile(sourcemap_file, build_id);
       file->set_debug_file(debug_file.get());
       out_build_ids->push_back(build_id);
     }
@@ -2103,8 +2126,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       if (!input_file.is_open()) {
         THROWF("couldn't open file $0", option);
       }
-      google::protobuf::io::IstreamInputStream stream(&input_file);
-      if (!google::protobuf::TextFormat::Merge(&stream, options)) {
+      proto2::io::IstreamInputStream stream(&input_file);
+      if (!proto2::TextFormat::Merge(&stream, options)) {
         THROWF("error parsing configuration out of file $0", option);
       }
     } else if (args.TryParseOption("-d", &option)) {
@@ -2166,6 +2189,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseOption("--source-filter", &option)) {
       options->set_source_filter(std::string(option));
+    } else if (args.TryParseOption("--source-map", &option)) {
+      options->add_source_map(std::string(option));
     } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
     } else if (args.TryParseFlag("-vv")) {
@@ -2260,6 +2285,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
     bloaty.AddDebugFilename(debug_filename);
   }
 
+  for (auto& sourcemap : options.source_map()) {
+    bloaty.AddSourceMapFilename(sourcemap);
+  }
+
   for (const auto& custom_data_source : options.custom_data_source()) {
     bloaty.DefineCustomDataSource(custom_data_source);
   }
@@ -2296,3 +2325,4 @@ bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
 }
 
 }  // namespace bloaty
+
