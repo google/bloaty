@@ -1079,7 +1079,7 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 RangeSink::RangeSink(const InputFile* file, const Options& options,
                      DataSource data_source, const DualMap* translator,
-                     proto2::Arena* arena)
+                     google::protobuf::Arena* arena)
     : file_(file),
       options_(options),
       data_source_(data_source),
@@ -1390,7 +1390,7 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
     return absl::string_view();
   }
   unsigned char* dbuf =
-      arena_->proto2::Arena::CreateArray<unsigned char>(
+      arena_->google::protobuf::Arena::CreateArray<unsigned char>(
           arena_, uncompressed_size);
   uLongf zliblen = uncompressed_size;
   if (uncompress(dbuf, &zliblen, (unsigned char*)(data.data()), data.size()) !=
@@ -1536,13 +1536,13 @@ class Bloaty {
   std::map<std::string, std::string> sourcemap_files_;
 
   // For allocating memory, like to decompress compressed sections.
-  std::unique_ptr<proto2::Arena> arena_;
+  std::unique_ptr<google::protobuf::Arena> arena_;
 };
 
 Bloaty::Bloaty(const InputFileFactory& factory, const Options& options)
     : file_factory_(factory),
       options_(options),
-      arena_(std::make_unique<proto2::Arena>()) {
+      arena_(std::make_unique<google::protobuf::Arena>()) {
   AddBuiltInSources(data_sources, options);
 }
 
@@ -2126,8 +2126,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       if (!input_file.is_open()) {
         THROWF("couldn't open file $0", option);
       }
-      proto2::io::IstreamInputStream stream(&input_file);
-      if (!proto2::TextFormat::Merge(&stream, options)) {
+      google::protobuf::io::IstreamInputStream stream(&input_file);
+      if (!google::protobuf::TextFormat::Merge(&stream, options)) {
         THROWF("error parsing configuration out of file $0", option);
       }
     } else if (args.TryParseOption("-d", &option)) {
@@ -2325,4 +2325,3 @@ bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
 }
 
 }  // namespace bloaty
-

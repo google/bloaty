@@ -194,4 +194,3 @@ void SkipWhitespace(absl::string_view* data);
 }  // namespace bloaty
 
 #endif  // BLOATY_UTIL_H_
-

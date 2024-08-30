@@ -113,7 +113,7 @@ class RangeSink {
 public:
   RangeSink(const InputFile *file, const Options &options,
             DataSource data_source, const DualMap *translator,
-            proto2::Arena *arena);
+            google::protobuf::Arena *arena);
   RangeSink(const RangeSink &) = delete;
   RangeSink &operator=(const RangeSink &) = delete;
   ~RangeSink();
@@ -230,7 +230,7 @@ public:
   DataSource data_source_;
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
-  proto2::Arena *arena_;
+  google::protobuf::Arena *arena_;
 };
 
 // NameMunger //////////////////////////////////////////////////////////////////
@@ -447,4 +447,3 @@ bool BloatyMain(const Options& options, const InputFileFactory& file_factory,
 }  // namespace bloaty
 
 #endif
-
