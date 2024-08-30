@@ -17,9 +17,9 @@
 
 #include <stdexcept>
 
-#include "third_party/absl/numeric/int128.h"
-#include "third_party/absl/strings/string_view.h"
-#include "third_party/absl/strings/substitute.h"
+#include "absl/numeric/int128.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
 
 namespace bloaty {
 

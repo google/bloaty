@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstdint>
-#include <cstdio>
-#include "third_party/bloaty/src/bloaty.h"
-#include "third_party/bloaty/src/source_map.h"
-#include "third_party/bloaty/src/util.h"
+#include "bloaty.h"
+#include "source_map.h"
+#include "util.h"
 
-#include "third_party/absl/strings/substitute.h"
+#include "absl/strings/substitute.h"
 
 using absl::string_view;
 

@@ -17,11 +17,11 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "third_party/bloaty/src/bloaty.h"
-#include "third_party/bloaty/src/source_map.h"
-#include "third_party/bloaty/src/util.h"
+#include "bloaty.h"
+#include "source_map.h"
+#include "util.h"
 
-#include "third_party/absl/strings/string_view.h"
+#include "absl/strings/string_view.h"
 
 namespace bloaty {
 namespace sourcemap {

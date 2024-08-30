@@ -49,18 +49,18 @@ typedef size_t z_size_t;
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "third_party/absl/debugging/internal/demangle.h"
-#include "third_party/absl/memory/memory.h"
-#include "third_party/absl/strings/numbers.h"
-#include "third_party/absl/strings/str_join.h"
-#include "third_party/absl/strings/string_view.h"
-#include "third_party/absl/strings/substitute.h"
-#include "third_party/bloaty/src/bloaty.h"
-#include "third_party/bloaty/src/bloaty.pb.h"
-#include "third_party/protobuf/io/zero_copy_stream_impl.h"
-#include "net/proto2/public/text_format.h"
-#include "third_party/bloaty/src/re.h"
-#include "third_party/bloaty/src/util.h"
+#include "absl/debugging/internal/demangle.h"
+#include "absl/memory/memory.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
+#include "bloaty.h"
+#include "bloaty.pb.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/text_format.h"
+#include "re.h"
+#include "util.h"
 
 using absl::string_view;
 

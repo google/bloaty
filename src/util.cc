@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "third_party/bloaty/src/util.h"
+#include "util.h"
 
 using absl::string_view;
 

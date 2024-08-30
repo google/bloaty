@@ -21,7 +21,7 @@
 
 #include <stdlib.h>
 #define __STDC_LIMIT_MACROS
-/* #define __STDC_FORMAT_MACROS */
+#define __STDC_FORMAT_MACROS
 #include <stdint.h>
 #include <inttypes.h>
 
@@ -31,14 +31,14 @@
 #include <unordered_map>
 #include <vector>
 
-#include "third_party/absl/strings/string_view.h"
-#include "third_party/absl/strings/strip.h"
-#include "third_party/capstone/capstone.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
+#include "capstone/capstone.h"
 
-#include "third_party/bloaty/src/dwarf/debug_info.h"
-#include "third_party/bloaty/src/bloaty.pb.h"
-#include "third_party/bloaty/src/range_map.h"
-#include "third_party/bloaty/src/re.h"
+#include "dwarf/debug_info.h"
+#include "bloaty.pb.h"
+#include "range_map.h"
+#include "re.h"
 
 namespace bloaty {
 
