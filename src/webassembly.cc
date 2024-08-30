@@ -463,7 +463,7 @@ class WebAssemblyObjectFile : public ObjectFile {
                   &debug_file())) {
             source_map->ProcessFileToSink(sink);
           } else {
-            THROWF("Data source $0 requires a source map", sink->data_source());
+            THROW("Data source requires a source map");
           }
           break;
         case DataSource::kArchiveMembers:
