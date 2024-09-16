@@ -436,8 +436,7 @@ class WebAssemblyObjectFile : public ObjectFile {
                   uint32_t size = ReadVarUInt32(&section.contents);
                   string_view source_mapping_url =
                       ReadPiece(size, &section.contents);
-                  id.resize(size);
-                  memcpy(&id[0], &source_mapping_url[0], size);
+                  id.assign(source_mapping_url);
                 });
 
     return id;
