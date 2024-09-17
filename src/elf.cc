@@ -530,7 +530,9 @@ void ElfFile::ReadSegment(Elf64_Word index, Segment* segment) const {
       entire_file(),
       CheckedAdd(header_.e_phoff, CheckedMul(header_.e_phentsize, index)),
       PhdrMunger(), &segment->range_, header);
-  segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
+  if (header->p_filesz > 0) {
+    segment->contents_ = GetRegion(header->p_offset, header->p_filesz);
+  }
 }
 
 void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
