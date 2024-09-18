@@ -1778,6 +1778,10 @@ void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
 
     // Maybe it's a source map file?
     auto sourcemap_iter = sourcemap_files_.find(build_id);
+    // If the source map by build id isn't found, try the file name.
+    if (sourcemap_iter == sourcemap_files_.end()) {
+      sourcemap_iter = sourcemap_files_.find(filename);
+    }
     if (sourcemap_iter != sourcemap_files_.end()) {
       std::unique_ptr<InputFile> sourcemap_file(
           file_factory_.OpenFile(sourcemap_iter->second));
