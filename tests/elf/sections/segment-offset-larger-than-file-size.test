@@ -1,0 +1,71 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty --raw-map %t.obj | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_EXEC
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x1
+  - Name:            .data
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x1
+  - Name:            .bss
+    Type:            SHT_NOBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x1
+  - Name:            .comment
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_MERGE, SHF_STRINGS ]
+    AddressAlign:    0x1
+    EntSize:         0x1
+    Content:         004743433A202844656269616E2031302E322E312D362B6275696C6432292031302E322E3120323032313031313000
+  - Name:            .note.GNU-stack
+    Type:            SHT_PROGBITS
+    AddressAlign:    0x1
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_W, PF_R ]
+    VAddr:           0x20000000
+    Align:           0x00010000
+    FileSize:        0x0
+    MemSize:         0x08010000
+    Offset:          0x00690000
+Symbols:
+  - Name:            'null'
+    Type:            STT_FILE
+    Index:           SHN_ABS
+  - Name:            .text
+    Type:            STT_SECTION
+    Section:         .text
+  - Name:            .data
+    Type:            STT_SECTION
+    Section:         .data
+  - Name:            .bss
+    Type:            STT_SECTION
+    Section:         .bss
+  - Name:            .note.GNU-stack
+    Type:            STT_SECTION
+    Section:         .note.GNU-stack
+  - Name:            .comment
+    Type:            STT_SECTION
+    Section:         .comment
+...
+
+# CHECK: FILE MAP:
+# CHECK: 000-040          64             [ELF Header]
+# CHECK: 040-078          56             [ELF Program Headers]
+# CHECK: 078-0a8          48             .comment
+# CHECK: 0a8-150         168             .symtab
+# CHECK: 150-180          48             .strtab
+# CHECK: 180-1c8          72             .shstrtab
+# CHECK: 1c8-408         576             [ELF Section Headers]
+# CHECK: VM MAP:
+# CHECK: 00000000-20000000         536870912             [-- Nothing mapped --]
+# CHECK: 20000000-28010000         134283264             [LOAD #0 [RW]]
