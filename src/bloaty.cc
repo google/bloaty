@@ -1973,6 +1973,11 @@ Options:
   -c FILE            Load configuration from <file>.
   -d SOURCE,SOURCE   Comma-separated list of sources to scan.
   --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  --source-map=ID=FILE
+                     Use this source map file for the binary. The ID can be
+                     the build ID (or Wasm sourceMappingURL) or the file path
+                     as specified in the command line.
+                     Currently only supported for Wasm.
   -C MODE            How to demangle symbols.  Possible values are:
   --demangle=MODE      --demangle=none   no demangling, print raw symbols
                        --demangle=short  demangle, but omit arg/return types
