@@ -1,0 +1,32 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: echo "{\"version\": 3, \"sources\": [\"test1.java\",\"test2.java\"], \"names\": [], \"mappings\": \"QAEI,Y,QACF,Y,oBACA,Y,QCFE,Y\"}" > %t.map
+# RUN: %bloaty --raw-map %t.obj --source-map=./sourcemap.wasm.map=%t.map -d inlines | %FileCheck %s
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            CODE
+    Functions:
+      - Index:           0
+        Locals:
+          - Type:            I32
+            Count:           13
+        Body:            41002100200028028880808000210141052102200120026A210341002104200428028C808080002105200320056A2106410021072007280280808080002108200820066A21094100210A200A200936028080808000418480808000210B200B210C200C0F0B
+  - Type:            CUSTOM
+    Name:            sourceMappingURL
+    # ./sourcemap.wasm.map
+    Payload:         142E2F736F757263656D61702E7761736D2E6D6170
+
+# CHECK: FILE MAP:
+# CHECK: 00-08             8             [WASM Header]
+# Note: Due to IsShortFallback, the 8 byte fallback (from mapping 'Y' to 'QACF') is considered part of the following line.
+# This line covers 2 segment ranges: QAEI->Y and Y->QACF (short fallback).
+# CHECK: 08-1c            20             test1.java:2
+# CHECK: 1c-28            12             test1.java:3
+# CHECK: 28-3c            20             [section Code]
+# CHECK: 3c-50            20             test1.java:4
+# CHECK: 50-5c            12             test2.java:2
+# CHECK: 5c-78            28             [section Code]
+# CHECK: 78-a4            44             [section sourceMappingURL]
+

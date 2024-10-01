@@ -23,19 +23,42 @@ void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }
 
-absl::string_view ReadNullTerminated(absl::string_view* data) {
-  const char* nullz =
-      static_cast<const char*>(memchr(data->data(), '\0', data->size()));
+absl::string_view ReadUntilConsuming(absl::string_view* data, char c) {
+  absl::string_view ret = ReadUntil(data, c);
 
-  // Return false if not NULL-terminated.
-  if (nullz == NULL) {
-    THROW("DWARF string was not NULL-terminated");
+  if (data->empty() || data->front() != c) {
+    // Nothing left, meaning we didn't find the terminating character.
+    if (c == '\0') {
+      THROW("string is not NULL-terminated");
+    }
+    THROWF("could not find terminating character '$0'", c);
   }
 
-  size_t len = nullz - data->data();
+  data->remove_prefix(1);  // Remove the terminating character also.
+  return ret;
+}
+
+absl::string_view ReadUntil(absl::string_view* data, char c) {
+  const char* found =
+      static_cast<const char*>(memchr(data->data(), c, data->size()));
+
+  size_t len = (found == NULL) ? data->size() : (found - data->data());
   absl::string_view val = data->substr(0, len);
-  data->remove_prefix(len + 1);  // Remove NULL also.
+  data->remove_prefix(len);
   return val;
+}
+
+void SkipWhitespace(absl::string_view* data) {
+  const char* c = data->data();
+  const char* limit = c + data->size();
+  while (c < limit) {
+    if (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r') {
+      c++;
+    } else {
+      break;
+    }
+  }
+  data->remove_prefix(c - data->data());
 }
 
 }  // namespace bloaty

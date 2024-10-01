@@ -29,6 +29,9 @@ message Options {
   // debug_filename will *not* have their file size counted.
   repeated string debug_filename = 10;
 
+  // Build id to source map file names, delimited by '='.
+  repeated string source_map = 15;
+
   // The data sources to scan in each file.  At least one data source must be
   // specified.  If more than one source is specified, the output is
   // hierarchical.
@@ -101,3 +104,4 @@ message Regex {
   optional string pattern = 1;
   optional string replacement = 2;
 }
+

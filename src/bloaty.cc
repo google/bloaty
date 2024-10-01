@@ -1468,6 +1468,7 @@ class Bloaty {
 
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
+  void AddSourceMapFilename(const std::string& filename);
 
   size_t GetSourceCount() const { return sources_.size(); }
 
@@ -1535,6 +1536,7 @@ class Bloaty {
   std::vector<InputFileInfo> input_files_;
   std::vector<InputFileInfo> base_files_;
   std::map<std::string, std::string> debug_files_;
+  std::map<std::string, std::string> sourcemap_files_;
 
   // For allocating memory, like to decompress compressed sections.
   std::unique_ptr<google::protobuf::Arena> arena_;
@@ -1590,6 +1592,18 @@ void Bloaty::AddDebugFilename(const std::string& filename) {
            filename);
   }
   debug_files_[build_id] = filename;
+}
+
+void Bloaty::AddSourceMapFilename(const std::string& filename) {
+  std::size_t delimiter = filename.find('=');
+  if (delimiter == std::string::npos) {
+    THROWF("Source map filename '$0' must have a build id and file name "
+           "separated by '='",
+           filename);
+  }
+  std::string sourcemap_build_id = filename.substr(0, delimiter);
+  std::string sourcemap_filename = filename.substr(delimiter + 1);
+  sourcemap_files_[sourcemap_build_id] = sourcemap_filename;
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
@@ -1758,6 +1772,22 @@ void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
     auto iter = debug_files_.find(build_id);
     if (iter != debug_files_.end()) {
       debug_file = GetObjectFile(iter->second);
+      file->set_debug_file(debug_file.get());
+      out_build_ids->push_back(build_id);
+    }
+
+    // Maybe it's a source map file?
+    auto sourcemap_iter = sourcemap_files_.find(build_id);
+    // If the source map by build id isn't found, try the file name.
+    if (sourcemap_iter == sourcemap_files_.end()) {
+      sourcemap_iter = sourcemap_files_.find(filename);
+    }
+    if (sourcemap_iter != sourcemap_files_.end()) {
+      std::unique_ptr<InputFile> sourcemap_file(
+          file_factory_.OpenFile(sourcemap_iter->second));
+      // The build id is not present in the source map file itself, so it must
+      // be passed here.
+      debug_file = TryOpenSourceMapFile(sourcemap_file, build_id);
       file->set_debug_file(debug_file.get());
       out_build_ids->push_back(build_id);
     }
@@ -1943,6 +1973,11 @@ Options:
   -c FILE            Load configuration from <file>.
   -d SOURCE,SOURCE   Comma-separated list of sources to scan.
   --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  --source-map=ID=FILE
+                     Use this source map file for the binary. The ID can be
+                     the build ID (or Wasm sourceMappingURL) or the file path
+                     as specified in the command line.
+                     Currently only supported for Wasm.
   -C MODE            How to demangle symbols.  Possible values are:
   --demangle=MODE      --demangle=none   no demangling, print raw symbols
                        --demangle=short  demangle, but omit arg/return types
@@ -2166,6 +2201,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseOption("--source-filter", &option)) {
       options->set_source_filter(std::string(option));
+    } else if (args.TryParseOption("--source-map", &option)) {
+      options->add_source_map(std::string(option));
     } else if (args.TryParseFlag("-v")) {
       options->set_verbose_level(1);
     } else if (args.TryParseFlag("-vv")) {
@@ -2258,6 +2295,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   for (auto& debug_filename : options.debug_filename()) {
     bloaty.AddDebugFilename(debug_filename);
+  }
+
+  for (auto& sourcemap : options.source_map()) {
+    bloaty.AddSourceMapFilename(sourcemap);
   }
 
   for (const auto& custom_data_source : options.custom_data_source()) {

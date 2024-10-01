@@ -160,7 +160,13 @@ template <class T> T ReadBigEndian(absl::string_view *data) {
 
 // General data reading  ///////////////////////////////////////////////////////
 
-absl::string_view ReadNullTerminated(absl::string_view* data);
+absl::string_view ReadUntil(absl::string_view* data, char c);
+
+absl::string_view ReadUntilConsuming(absl::string_view* data, char c);
+
+inline absl::string_view ReadNullTerminated(absl::string_view* data) {
+  return ReadUntilConsuming(data, '\0');
+}
 
 inline absl::string_view ReadBytes(size_t bytes, absl::string_view* data) {
   if (data->size() < bytes) {
@@ -171,9 +177,19 @@ inline absl::string_view ReadBytes(size_t bytes, absl::string_view* data) {
   return ret;
 }
 
+inline void RequireChar(absl::string_view* data, char c) {
+  if (data->empty() || data->front() != c) {
+    THROWF("unexpected '$0', expected '$1'",
+           data->empty() ? "EOF" : data->substr(0, 1), c);
+  }
+  data->remove_prefix(1);
+}
+
 inline void SkipBytes(size_t bytes, absl::string_view* data) {
   ReadBytes(bytes, data);  // Discard result.
 }
+
+void SkipWhitespace(absl::string_view* data);
 
 }  // namespace bloaty
 

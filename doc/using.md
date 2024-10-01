@@ -99,6 +99,11 @@ Options:
   -c FILE            Load configuration from <file>.
   -d SOURCE,SOURCE   Comma-separated list of sources to scan.
   --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  --source-map=ID=FILE
+                     Use this source map file for the binary. The ID can be
+                     the build ID (or Wasm sourceMappingURL) or the file path
+                     as specified in the command line.
+                     Currently only supported for Wasm.
   -C MODE            How to demangle symbols.  Possible values are:
   --demangle=MODE      --demangle=none   no demangling, print raw symbols
                        --demangle=short  demangle, but omit arg/return types
@@ -843,6 +848,33 @@ $ ./bloaty -c config.bloaty -d bloaty_package,compileunits bloaty
    0.0%  3.23Ki   0.0%  3.23Ki    [section .plt]
    0.0%  2.50Ki   0.0%       0    [ELF Headers]
  100.0%  29.5Mi 100.0%  6.69Mi    TOTAL
+```
+
+# Source maps
+
+Bloaty provides a `--source-map` option which allows
+specifying a source map for the binary. It takes an ID and
+source map file name, separated by '='. The ID can be the
+build ID or path to the binary file as specified in the
+command line.
+
+For example, to use the `compileunits` and `inlines` data
+sources for Wasm, a source map must be provided. For Wasm,
+the ID can be the text in the `sourceMappingURL` section of
+the binary.
+
+```cmdoutput
+$ ./bloaty -d compileunits --domain=file --source-map=o.wasm=o.wasm.map o.wasm
+    FILE SIZE   
+ -------------- 
+  45.0%      49    [section sourceMappingURL]
+  19.3%      21    Main.java
+  12.8%      14    [section Export]
+   7.3%       8    [WASM Header]
+   6.4%       7    [section Code]
+   5.5%       6    [section Type]
+   3.7%       4    [section Function]
+ 100.0%     109    TOTAL
 ```
 
 # Source filter

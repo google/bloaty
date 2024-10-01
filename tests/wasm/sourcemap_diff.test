@@ -1,0 +1,36 @@
+# RUN: %yaml2obj %s -o %t.obj
+# Make a copy of the same Wasm binary, with the same sourceMappingURL. This case
+# tests that we can handle multiple source maps keyed by file name.
+# RUN: cp %t.obj %t2.obj
+# RUN: echo "{\"version\": 3, \"sources\": [\"test1.java\"], \"names\": [], \"mappings\": \"QAEI,gC\"}" > %t.map
+# RUN: echo "{\"version\": 3, \"sources\": [\"test2.java\"], \"names\": [], \"mappings\": \"QAEI,gC\"}" > %t2.map
+# RUN: %bloaty --raw-map %t.obj --source-map=%t.obj=%t.map --source-map=%t2.obj=%t2.map -- %t2.obj -d compileunits | %FileCheck %s
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            CODE
+    Functions:
+      - Index:           0
+        Locals:
+          - Type:            I32
+            Count:           13
+        Body:            41002100200028028880808000210141052102200120026A210341002104200428028C808080002105200320056A2106410021072007280280808080002108200820066A21094100210A200A200936028080808000418480808000210B200B210C200C0F0B
+  - Type:            CUSTOM
+    Name:            sourceMappingURL
+    # ./sourcemap.wasm.map
+    Payload:         142E2F736F757263656D61702E7761736D2E6D6170
+
+# CHECK: FILE MAP:
+# CHECK: 00-08             8             [WASM Header]
+# CHECK: 08-28            32             test1.java
+# CHECK: 28-78            80             [section Code]
+# CHECK: 78-a4            44             [section sourceMappingURL]
+
+# CHECK: FILE MAP:
+# CHECK: 00-08             8             [WASM Header]
+# CHECK: 08-28            32             test2.java
+# CHECK: 28-78            80             [section Code]
+# CHECK: 78-a4            44             [section sourceMappingURL]
+

@@ -294,6 +294,8 @@ std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
+std::unique_ptr<ObjectFile> TryOpenSourceMapFile(
+    std::unique_ptr<InputFile>& file, std::string build_id);
 
 // Provided by dwarf.cc.  To use these, a module should fill in a dwarf::File
 // and then call these functions.
