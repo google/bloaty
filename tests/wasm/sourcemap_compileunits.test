@@ -20,7 +20,8 @@ Sections:
 
 # CHECK: FILE MAP:
 # CHECK: 00-08             8             [WASM Header]
-# Note: Due to IsShortFallback, the 8 byte fallback (from mapping 'Y' to 'QACF') is considered part of this file.
+# Note: Due to IsShortFallback, the 8 byte fallback (from mapping 'Y' to 'QACF') is considered part of the following file.
+# This actually covers 3 segment ranges: QAEI->Y, Y->QACF (short fallback), and QACF->Y.
 # CHECK: 08-28            32             test1.java
 # CHECK: 28-3c            20             [section Code]
 # CHECK: 3c-50            20             test1.java
