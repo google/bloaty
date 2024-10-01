@@ -29,6 +29,10 @@
 
 using absl::string_view;
 
+#ifndef ELFCOMPRESS_ZSTD
+#define ELFCOMPRESS_ZSTD 2
+#endif
+
 namespace bloaty {
 
 namespace {
@@ -57,6 +61,12 @@ template <class T>
 void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
 }
+
+enum class SectionCompressionType {
+  Zlib,
+  Zstd,
+  None
+};
 
 // ElfFile /////////////////////////////////////////////////////////////////////
 
@@ -1198,6 +1208,7 @@ void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
     string_view name = section.GetName();
     string_view contents = section.contents();
     uint64_t uncompressed_size = 0;
+    SectionCompressionType compression_type = SectionCompressionType::None;
 
     if (section.header().sh_flags & SHF_COMPRESSED) {
       // Standard ELF section compression, produced when you link with
@@ -1205,9 +1216,16 @@ void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
       Elf64_Chdr chdr;
       absl::string_view range;
       elf.ReadStruct<Elf32_Chdr>(contents, 0, ChdrMunger(), &range, &chdr);
-      if (chdr.ch_type != ELFCOMPRESS_ZLIB) {
-        // Unknown compression format.
-        continue;
+      switch (chdr.ch_type) {
+        case ELFCOMPRESS_ZLIB:
+          compression_type = SectionCompressionType::Zlib;
+          break;
+        case ELFCOMPRESS_ZSTD:
+          compression_type = SectionCompressionType::Zstd;
+          break;
+        default:
+          // Unknown compression format.
+          continue;
       }
       uncompressed_size = chdr.ch_size;
       contents.remove_prefix(range.size());
@@ -1222,6 +1240,7 @@ void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
       if (ReadBytes(4, &contents) != "ZLIB") {
         continue;  // Bad compression header.
       }
+      compression_type = SectionCompressionType::Zlib;
       uncompressed_size = ReadBigEndian<uint64_t>(&contents);
     }
 
@@ -1232,10 +1251,15 @@ void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
     }
 
     if (string_view* member = dwarf->GetFieldByName(name)) {
-      if (uncompressed_size) {
-        *member = sink->ZlibDecompress(contents, uncompressed_size);
-      } else {
-        *member = section.contents();
+      switch (compression_type) {
+        case SectionCompressionType::Zlib:
+          *member = sink->ZlibDecompress(contents, uncompressed_size);
+          break;
+        case SectionCompressionType::Zstd:
+          *member = sink->ZstdDecompress(contents, uncompressed_size);
+          break;
+        default:
+          *member = section.contents();
       }
     }
   }

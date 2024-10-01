@@ -212,6 +212,12 @@ public:
   absl::string_view ZlibDecompress(absl::string_view contents,
                                    uint64_t uncompressed_size);
 
+  // Decompresses zstd-formatted data and returns the decompressed data.
+  // Since the decompressed data is not actually part of the file, any
+  // Add*Range() calls to this region will be no-ops.
+  absl::string_view ZstdDecompress(absl::string_view contents,
+                                   uint64_t uncompressed_size);
+
   static constexpr uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
  private:
