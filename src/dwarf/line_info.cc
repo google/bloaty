@@ -80,12 +80,19 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   sizes_.SetAddressSize(address_size);
   data = sizes_.ReadInitialLength(&data);
   sizes_.ReadDWARFVersion(&data);
+  if (sizes_.dwarf_version() >= 5) {
+    auto encoded_addr_size = ReadFixed<uint8_t>(&data);
+    auto encoded_selector_size = ReadFixed<uint8_t>(&data);
+    assert(encoded_addr_size == address_size);
+    (void)encoded_selector_size;
+  }
+
   uint64_t header_length = sizes_.ReadDWARFOffset(&data);
   string_view program = data;
   SkipBytes(header_length, &program);
 
   params_.minimum_instruction_length = ReadFixed<uint8_t>(&data);
-  if (sizes_.dwarf_version() == 4) {
+  if (sizes_.dwarf_version() >= 4) {
     params_.maximum_operations_per_instruction = ReadFixed<uint8_t>(&data);
 
     if (params_.maximum_operations_per_instruction == 0) {
@@ -109,37 +116,120 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
 
   // Read include_directories.
   include_directories_.clear();
-
-  // Implicit current directory entry.
-  include_directories_.push_back(string_view());
-
-  while (true) {
-    string_view dir = ReadNullTerminated(&data);
-    if (dir.empty()) {
-      break;
-    }
-    include_directories_.push_back(dir);
-  }
-
-  // Read file_names.
   filenames_.clear();
   expanded_filenames_.clear();
 
-  // Filename 0 is unused.
-  filenames_.push_back(FileName());
-  while (true) {
-    FileName file_name;
-    file_name.name = ReadNullTerminated(&data);
-    if (file_name.name.empty()) {
-      break;
+  if (sizes_.dwarf_version() <= 4) {
+    // Implicit current directory entry.
+    include_directories_.push_back(string_view());
+
+    while (true) {
+      string_view dir = ReadNullTerminated(&data);
+      if (dir.empty()) {
+        break;
+      }
+      include_directories_.push_back(dir);
     }
-    file_name.directory_index = ReadLEB128<uint32_t>(&data);
-    file_name.modified_time = ReadLEB128<uint64_t>(&data);
-    file_name.file_size = ReadLEB128<uint64_t>(&data);
-    if (file_name.directory_index >= include_directories_.size()) {
-      THROW("directory index out of range");
+
+    // Read file_names.
+
+    // Filename 0 is unused.
+    filenames_.push_back(FileName());
+    while (true) {
+      FileName file_name;
+      file_name.name = ReadNullTerminated(&data);
+      if (file_name.name.empty()) {
+        break;
+      }
+      file_name.directory_index = ReadLEB128<uint32_t>(&data);
+      file_name.modified_time = ReadLEB128<uint64_t>(&data);
+      file_name.file_size = ReadLEB128<uint64_t>(&data);
+      if (file_name.directory_index >= include_directories_.size()) {
+        THROW("directory index out of range");
+      }
+      filenames_.push_back(file_name);
     }
-    filenames_.push_back(file_name);
+  } else {
+    // Dwarf V5 and beyond.
+    //
+    auto readPath = [&] (DwarfForm form) {
+      switch (form) {
+        case DW_FORM_string:
+          return ReadNullTerminated(&data);
+        case DW_FORM_line_strp: {
+          auto offset = sizes_.ReadDWARFOffset(&data);
+          return ReadDebugStrEntry(file_.debug_line_str, offset);
+        }
+        default:
+          THROW("directory index out of range");
+      }
+    };
+
+    auto readEntryFormats = [&]() {
+      std::vector<std::pair<DwarfLineNumberContentType, DwarfForm>> entryFormats;
+      auto formatCount = ReadFixed<uint8_t>(&data);
+      for (uint8_t i = 0; i < formatCount; ++i) {
+        auto type = static_cast<DwarfLineNumberContentType>(
+            ReadLEB128<uint32_t>(&data));
+        auto form = static_cast<DwarfForm>(ReadLEB128<uint32_t>(&data));
+        entryFormats.emplace_back(type, form);
+      }
+      return entryFormats;
+    };
+
+    auto entryFormats = readEntryFormats();
+
+    auto directoryCount = ReadLEB128<uint32_t>(&data);
+    while (directoryCount--) {
+      std::string_view path = "";
+      for (auto [ type, form ] : entryFormats) {
+        switch (type) {
+          case DW_LNCT_path:
+            path = readPath(form);
+            break;
+          default:
+            THROW("unhandled directory entry format");
+        }
+      }
+      include_directories_.push_back(path);
+    }
+    auto fileFormats = readEntryFormats();
+    auto fileCount = ReadLEB128<uint32_t>(&data);
+    while (fileCount--) {
+      FileName file_name;
+      auto &idx = file_name.directory_index;
+      idx = 0;
+      for (auto &[ type, form ] : fileFormats) {
+        switch (type) {
+          case DW_LNCT_path:
+            file_name.name = readPath(form);
+            break;
+          case DW_LNCT_directory_index: {
+            switch (form) {
+              case DW_FORM_udata:
+                idx = ReadLEB128<uint32_t>(&data);
+                break;
+              case DW_FORM_data1:
+                idx = ReadFixed<uint8_t>(&data);
+                break;
+              case DW_FORM_data2:
+                idx = ReadFixed<uint16_t>(&data);
+                break;
+              case DW_FORM_data4:
+                idx = ReadFixed<uint32_t>(&data);
+                break;
+              default:
+                THROW("unhandled form for directory index");
+            }
+            break;
+          }
+          default: {
+            THROW("unhandled type for file format");
+          }
+        }
+      }
+      filenames_.push_back(file_name);
+    }
   }
 
   info_ = LineInfo(params_.default_is_stmt);

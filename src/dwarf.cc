@@ -724,25 +724,23 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
   dwarf::InfoReader reader(file);
   dwarf::CUIter iter = reader.GetCUIter(dwarf::InfoReader::Section::kDebugInfo);
   dwarf::CU cu;
-  dwarf::DIEReader die_reader = cu.GetDIEReader();
   dwarf::LineInfoReader line_info_reader(file);
 
-  if (!iter.NextCU(reader, &cu)) {
-    THROW("debug info is present, but empty");
-  }
+  while (iter.NextCU(reader, &cu)) {
+    dwarf::DIEReader die_reader = cu.GetDIEReader();
+    while (auto abbrev = die_reader.ReadCode(cu)) {
+      absl::optional<uint64_t> stmt_list;
+      die_reader.ReadAttributes(cu, abbrev,
+          [&](uint16_t tag, dwarf::AttrValue val) {
+            if (tag == DW_AT_stmt_list) {
+              stmt_list = val.ToUint(cu);
+            }});
 
-  while (auto abbrev = die_reader.ReadCode(cu)) {
-    absl::optional<uint64_t> stmt_list;
-    die_reader.ReadAttributes(
-        cu, abbrev, [&stmt_list, &cu](uint16_t tag, dwarf::AttrValue val) {
-          if (tag == DW_AT_stmt_list) {
-            stmt_list = val.ToUint(cu);
-          }
-        });
-
-    if (stmt_list) {
-      line_info_reader.SeekToOffset(*stmt_list, cu.unit_sizes().address_size());
-      ReadDWARFStmtList(include_line, &line_info_reader, sink);
+      if (stmt_list) {
+        line_info_reader.SeekToOffset(*stmt_list, cu.unit_sizes().address_size());
+        ReadDWARFStmtList(include_line, &line_info_reader, sink);
+      }
+      break; // only root-level unit entries have DW_AT_stmt_list attributes.
     }
   }
 }
