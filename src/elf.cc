@@ -416,7 +416,7 @@ void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
 }
 
 void ElfFile::NoteIter::Next() {
-  if (remaining_.empty()) {
+  if (remaining_.empty() || remaining_.compare("\0")) {
     done_ = true;
     return;
   }
