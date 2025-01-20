@@ -279,7 +279,8 @@ class ObjectFile {
 
   // Sets the debug file for |this|.  |file| must outlive this instance.
   void set_debug_file(const ObjectFile* file) {
-    assert(debug_file_->GetBuildId() == GetBuildId());
+    assert(file != nullptr);
+    assert(file->GetBuildId() == GetBuildId());
     debug_file_ = file;
   }
 
