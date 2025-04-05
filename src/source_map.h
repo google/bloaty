@@ -17,12 +17,12 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+
 #include "bloaty.h"
 #include "util.h"
-
-#include "absl/strings/string_view.h"
 
 namespace bloaty {
 namespace sourcemap {
@@ -41,7 +41,7 @@ class SourceMapObjectFile : public ObjectFile {
     WARN("General processing not supported for source map files");
   }
 
-  bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+  bool GetDisassemblyInfo(std::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("Disassembly not supported for source map files");

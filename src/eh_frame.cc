@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <string_view>
+
 #include "bloaty.h"
 #include "util.h"
-#include "absl/strings/string_view.h"
 #include "dwarf_constants.h"
 #include "dwarf/dwarf_util.h"
 
-using absl::string_view;
+using std::string_view;
 using namespace dwarf2reader;
 
 namespace bloaty {

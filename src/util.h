@@ -16,9 +16,9 @@
 #define BLOATY_UTIL_H_
 
 #include <stdexcept>
+#include <string_view>
 
 #include "absl/numeric/int128.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 
 namespace bloaty {
@@ -86,7 +86,7 @@ inline uint64_t CheckedMul(uint64_t a, uint64_t b) {
   return static_cast<uint64_t>(c);
 }
 
-inline absl::string_view StrictSubstr(absl::string_view data, size_t off,
+inline std::string_view StrictSubstr(std::string_view data, size_t off,
                                       size_t n) {
   uint64_t end = CheckedAdd(off, n);
   if (end > data.size()) {
@@ -95,7 +95,7 @@ inline absl::string_view StrictSubstr(absl::string_view data, size_t off,
   return data.substr(off, n);
 }
 
-inline absl::string_view StrictSubstr(absl::string_view data, size_t off) {
+inline std::string_view StrictSubstr(std::string_view data, size_t off) {
   if (off > data.size()) {
     THROW("region out-of-bounds");
   }
@@ -134,7 +134,7 @@ template <class T> constexpr T ByteSwap(T val) {
     return _BS<sizeof(T)>(val);
 }
 
-template <class T, size_t N = sizeof(T)> T ReadFixed(absl::string_view *data) {
+template <class T, size_t N = sizeof(T)> T ReadFixed(std::string_view *data) {
   static_assert(N <= sizeof(T), "N too big for this data type");
   T val = 0;
   if (data->size() < N) {
@@ -145,39 +145,39 @@ template <class T, size_t N = sizeof(T)> T ReadFixed(absl::string_view *data) {
   return val;
 }
 
-template <class T> T ReadEndian(absl::string_view *data, Endian endian) {
+template <class T> T ReadEndian(std::string_view *data, Endian endian) {
   T val = ReadFixed<T>(data);
   return endian == GetMachineEndian() ? val : ByteSwap(val);
 }
 
-template <class T> T ReadLittleEndian(absl::string_view *data) {
+template <class T> T ReadLittleEndian(std::string_view *data) {
   return ReadEndian<T>(data, Endian::kLittle);
 }
 
-template <class T> T ReadBigEndian(absl::string_view *data) {
+template <class T> T ReadBigEndian(std::string_view *data) {
   return ReadEndian<T>(data, Endian::kBig);
 }
 
 // General data reading  ///////////////////////////////////////////////////////
 
-absl::string_view ReadUntil(absl::string_view* data, char c);
+std::string_view ReadUntil(std::string_view* data, char c);
 
-absl::string_view ReadUntilConsuming(absl::string_view* data, char c);
+std::string_view ReadUntilConsuming(std::string_view* data, char c);
 
-inline absl::string_view ReadNullTerminated(absl::string_view* data) {
+inline std::string_view ReadNullTerminated(std::string_view* data) {
   return ReadUntilConsuming(data, '\0');
 }
 
-inline absl::string_view ReadBytes(size_t bytes, absl::string_view* data) {
+inline std::string_view ReadBytes(size_t bytes, std::string_view* data) {
   if (data->size() < bytes) {
     THROW("premature EOF reading variable-length DWARF data");
   }
-  absl::string_view ret = data->substr(0, bytes);
+  std::string_view ret = data->substr(0, bytes);
   data->remove_prefix(bytes);
   return ret;
 }
 
-inline void RequireChar(absl::string_view* data, char c) {
+inline void RequireChar(std::string_view* data, char c) {
   if (data->empty() || data->front() != c) {
     THROWF("unexpected '$0', expected '$1'",
            data->empty() ? "EOF" : data->substr(0, 1), c);
@@ -185,11 +185,11 @@ inline void RequireChar(absl::string_view* data, char c) {
   data->remove_prefix(1);
 }
 
-inline void SkipBytes(size_t bytes, absl::string_view* data) {
+inline void SkipBytes(size_t bytes, std::string_view* data) {
   ReadBytes(bytes, data);  // Discard result.
 }
 
-void SkipWhitespace(absl::string_view* data);
+void SkipWhitespace(std::string_view* data);
 
 }  // namespace bloaty
 

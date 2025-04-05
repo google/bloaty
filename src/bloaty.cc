@@ -36,9 +36,11 @@ typedef size_t z_size_t;
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
 #if !defined(_WIN32)
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -53,7 +55,6 @@ typedef size_t z_size_t;
 #include "absl/memory/memory.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_join.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "bloaty.h"
 #include "bloaty.pb.h"
@@ -62,7 +63,7 @@ typedef size_t z_size_t;
 #include "re.h"
 #include "util.h"
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 
@@ -899,11 +900,11 @@ class MmapInputFile : public InputFile {
   MmapInputFile& operator=(const MmapInputFile&) = delete;
   ~MmapInputFile() override;
 
-  bool TryOpen(absl::string_view filename,
+  bool TryOpen(std::string_view filename,
                std::unique_ptr<InputFile>& file) override {
     return DoTryOpen(filename, file);
   }
-  static bool DoTryOpen(absl::string_view filename,
+  static bool DoTryOpen(std::string_view filename,
                         std::unique_ptr<InputFile>& file);
 };
 
@@ -923,7 +924,7 @@ class FileDescriptor {
   int fd_;
 };
 
-bool MmapInputFile::DoTryOpen(absl::string_view filename,
+bool MmapInputFile::DoTryOpen(std::string_view filename,
                               std::unique_ptr<InputFile>& file) {
   std::string str(filename);
   FileDescriptor fd(open(str.c_str(), O_RDONLY));
@@ -987,11 +988,11 @@ class Win32MMapInputFile : public InputFile {
   Win32MMapInputFile& operator=(const Win32MMapInputFile&) = delete;
   ~Win32MMapInputFile() override;
 
-  bool TryOpen(absl::string_view filename,
+  bool TryOpen(std::string_view filename,
                std::unique_ptr<InputFile>& file) override {
     return DoTryOpen(filename, file);
   }
-  static bool DoTryOpen(absl::string_view filename,
+  static bool DoTryOpen(std::string_view filename,
                         std::unique_ptr<InputFile>& file);
 };
 
@@ -1017,7 +1018,7 @@ Win32MMapInputFile::Win32MMapInputFile(string_view filename, string_view data)
   data_ = data;
 }
 
-bool Win32MMapInputFile::DoTryOpen(absl::string_view filename,
+bool Win32MMapInputFile::DoTryOpen(std::string_view filename,
                                    std::unique_ptr<InputFile>& file) {
   std::string str(filename);
   Win32Handle fd(::CreateFileA(str.c_str(), FILE_GENERIC_READ, FILE_SHARE_READ,
@@ -1221,8 +1222,8 @@ void RangeSink::AddFileRangeForVMAddr(const char* analyzer,
 }
 
 void RangeSink::AddFileRangeForFileRange(const char* analyzer,
-                                         absl::string_view from_file_range,
-                                         absl::string_view file_range) {
+                                         std::string_view from_file_range,
+                                         std::string_view file_range) {
   uint64_t file_offset = file_range.data() - file_->data().data();
   uint64_t from_file_offset = from_file_range.data() - file_->data().data();
   bool verbose = IsVerboseForFileRange(file_offset, file_range.size());
@@ -1366,7 +1367,7 @@ uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
   return translated;
 }
 
-absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
+std::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   assert(translator_);
   uint64_t translated;
   if (!translator_->vm_map.Translate(address, &translated) ||
@@ -1377,7 +1378,7 @@ absl::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   return file_->data().substr(translated);
 }
 
-absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
+std::string_view RangeSink::ZlibDecompress(std::string_view data,
                                             uint64_t uncompressed_size) {
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
@@ -1390,7 +1391,7 @@ absl::string_view RangeSink::ZlibDecompress(absl::string_view data,
             "warning: ignoring compressed debug data, implausible uncompressed "
             "size (compressed: %zu, uncompressed: %" PRIu64 ")\n",
             data.size(), uncompressed_size);
-    return absl::string_view();
+    return std::string_view();
   }
   unsigned char* dbuf =
       arena_->google::protobuf::Arena::CreateArray<unsigned char>(

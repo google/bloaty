@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <string_view>
+
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "strarr.h"
 
-#include "absl/strings/string_view.h"
-
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 
@@ -29,7 +29,7 @@ class StringPieceInputFile : public InputFile {
     data_ = data;
   }
 
-  bool TryOpen(absl::string_view /* filename */,
+  bool TryOpen(std::string_view /* filename */,
                std::unique_ptr<InputFile>& file) override {
     file.reset(new StringPieceInputFile(data_));
     return true;

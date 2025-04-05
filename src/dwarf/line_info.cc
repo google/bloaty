@@ -18,7 +18,7 @@
 #include "dwarf_constants.h"
 
 using namespace dwarf2reader;
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 
@@ -39,7 +39,7 @@ const std::string& LineInfoReader::GetExpandedFilename(size_t index) {
   std::string& ret = expanded_filenames_[index];
   if (ret.empty()) {
     const FileName& filename = filenames_[index];
-    absl::string_view directory = include_directories_[filename.directory_index];
+    std::string_view directory = include_directories_[filename.directory_index];
     ret = std::string(directory);
     if (!ret.empty()) {
       ret += "/";

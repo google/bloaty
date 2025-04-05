@@ -15,22 +15,22 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+
 #include "bloaty.h"
 #include "source_map.h"
 #include "util.h"
 
-#include "absl/strings/string_view.h"
-
 namespace bloaty {
 namespace sourcemap {
 
-static bool ReadOpeningBrace(absl::string_view* data) {
+static bool ReadOpeningBrace(std::string_view* data) {
   return ReadFixed<char>(data) == '{';
 }
 
-static absl::string_view ReadQuotedString(absl::string_view* data) {
+static std::string_view ReadQuotedString(std::string_view* data) {
   RequireChar(data, '\"');
   // Simply read until the next '\"'. We currently do not handle escaped
   // characters. Field names never contain quotes and file names are unlikely to
@@ -40,7 +40,7 @@ static absl::string_view ReadQuotedString(absl::string_view* data) {
 
 // Finds the field with the given name in the source map. Any fields encountered
 // before the field are skipped.
-static void FindField(absl::string_view* data, const char* name) {
+static void FindField(std::string_view* data, const char* name) {
   while (!data->empty()) {
     SkipWhitespace(data);
     auto field_name = ReadQuotedString(data);
@@ -58,7 +58,7 @@ static void FindField(absl::string_view* data, const char* name) {
   THROWF("field \"$0\" not found in source map", name);
 }
 
-static int32_t ReadBase64VLQ(absl::string_view* data) {
+static int32_t ReadBase64VLQ(std::string_view* data) {
   uint32_t value = 0;
   uint32_t shift = 0;
   const char* ptr = data->data();
@@ -95,7 +95,7 @@ static bool IsBase64Digit(char ch) {
          (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
 }
 
-static int ReadBase64VLQSegment(absl::string_view* data, int32_t (&values)[5]) {
+static int ReadBase64VLQSegment(std::string_view* data, int32_t (&values)[5]) {
   for (int i = 0; i < 5; i++) {
     values[i] = ReadBase64VLQ(data);
     if (data->empty() || !IsBase64Digit(data->front())) {
@@ -118,7 +118,7 @@ class VlqSegment {
   int32_t source_col;
 
   VlqSegment(int32_t col, int32_t length,
-             absl::string_view source_file,
+             std::string_view source_file,
              int32_t source_line, int32_t source_col)
       : col(col), length(length),
         source_file(source_file),
@@ -133,8 +133,8 @@ class VlqSegment {
 };
 
 template <class Func>
-void ForEachVLQSegment(absl::string_view* data,
-                       const std::vector<absl::string_view>& sources,
+void ForEachVLQSegment(std::string_view* data,
+                       const std::vector<std::string_view>& sources,
                        Func&& segment_func) {
   if (data->empty() || data->front() == '\"') {
     return;
@@ -179,10 +179,10 @@ void ForEachVLQSegment(absl::string_view* data,
   }
 }
 
-static void ProcessToSink(absl::string_view data, RangeSink* sink) {
+static void ProcessToSink(std::string_view data, RangeSink* sink) {
   ReadOpeningBrace(&data);
 
-  std::vector<absl::string_view> sources;
+  std::vector<std::string_view> sources;
   FindField(&data, "sources");
   RequireChar(&data, '[');
   while (!data.empty()) {
@@ -226,7 +226,7 @@ void SourceMapObjectFile::ProcessFileToSink(RangeSink* sink) const {
 
 std::unique_ptr<ObjectFile> TryOpenSourceMapFile(
     std::unique_ptr<InputFile>& file, std::string build_id) {
-  absl::string_view data = file->data();
+  std::string_view data = file->data();
   if (sourcemap::ReadOpeningBrace(&data)) {
     return std::unique_ptr<ObjectFile>(
         new sourcemap::SourceMapObjectFile(std::move(file), build_id));

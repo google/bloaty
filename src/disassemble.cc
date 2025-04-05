@@ -13,18 +13,18 @@
 // limitations under the License.
 
 #include <string>
+#include <string_view>
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "bloaty.h"
 #include "capstone/capstone.h"
 #include "re.h"
 #include "util.h"
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 

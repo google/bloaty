@@ -14,7 +14,7 @@
 
 #include "util.h"
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 
@@ -23,8 +23,8 @@ void Throw(const char *str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }
 
-absl::string_view ReadUntilConsuming(absl::string_view* data, char c) {
-  absl::string_view ret = ReadUntil(data, c);
+std::string_view ReadUntilConsuming(std::string_view* data, char c) {
+  std::string_view ret = ReadUntil(data, c);
 
   if (data->empty() || data->front() != c) {
     // Nothing left, meaning we didn't find the terminating character.
@@ -38,17 +38,17 @@ absl::string_view ReadUntilConsuming(absl::string_view* data, char c) {
   return ret;
 }
 
-absl::string_view ReadUntil(absl::string_view* data, char c) {
+std::string_view ReadUntil(std::string_view* data, char c) {
   const char* found =
       static_cast<const char*>(memchr(data->data(), c, data->size()));
 
   size_t len = (found == NULL) ? data->size() : (found - data->data());
-  absl::string_view val = data->substr(0, len);
+  std::string_view val = data->substr(0, len);
   data->remove_prefix(len);
   return val;
 }
 
-void SkipWhitespace(absl::string_view* data) {
+void SkipWhitespace(std::string_view* data) {
   const char* c = data->data();
   const char* limit = c + data->size();
   while (c < limit) {
