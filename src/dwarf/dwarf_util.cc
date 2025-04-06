@@ -14,7 +14,7 @@
 
 #include "dwarf/dwarf_util.h"
 
-using string_view = absl::string_view;
+using string_view = std::string_view;
 
 namespace bloaty {
 namespace dwarf {
@@ -66,7 +66,7 @@ void SkipLEB128(string_view* data) {
   THROW("corrupt DWARF data, unterminated LEB128");
 }
 
-absl::string_view ReadDebugStrEntry(absl::string_view section, size_t ofs) {
+std::string_view ReadDebugStrEntry(std::string_view section, size_t ofs) {
   SkipBytes(ofs, &section);
   return ReadNullTerminated(&section);
 }

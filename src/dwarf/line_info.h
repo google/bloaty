@@ -16,8 +16,8 @@
 #define BLOATY_DWARF_LINE_INFO_H_
 
 #include <cstdint>
+#include <string_view>
 
-#include "absl/strings/string_view.h"
 #include "dwarf/debug_info.h"
 
 // Code to read the .line_info programs in a DWARF file.  Currently we use this
@@ -57,7 +57,7 @@ class LineInfoReader {
   };
 
   struct FileName {
-    absl::string_view name;
+    std::string_view name;
     uint32_t directory_index;
     uint64_t modified_time;
     uint64_t file_size;
@@ -67,7 +67,7 @@ class LineInfoReader {
   bool ReadLineInfo();
   const LineInfo& lineinfo() const { return info_; }
   const FileName& filename(size_t i) const { return filenames_[i]; }
-  absl::string_view include_directory(size_t i) const {
+  std::string_view include_directory(size_t i) const {
     return include_directories_[i];
   }
 
@@ -86,12 +86,12 @@ class LineInfoReader {
   const File& file_;
 
   CompilationUnitSizes sizes_;
-  std::vector<absl::string_view> include_directories_;
+  std::vector<std::string_view> include_directories_;
   std::vector<FileName> filenames_;
   std::vector<uint8_t> standard_opcode_lengths_;
   std::vector<std::string> expanded_filenames_;
 
-  absl::string_view remaining_;
+  std::string_view remaining_;
 
   // Whether we are in a "shadow" part of the bytecode program.  Sometimes
   // parts of the line info program make it into the final binary even though

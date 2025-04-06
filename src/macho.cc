@@ -18,16 +18,16 @@
 #include "util.h"
 
 #include <cassert>
+#include <string_view>
 
 #include "absl/strings/str_join.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "third_party/darwin_xnu_macho/mach-o/loader.h"
 #include "third_party/darwin_xnu_macho/mach-o/fat.h"
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
 #include "third_party/darwin_xnu_macho/mach-o/reloc.h"
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 namespace macho {
@@ -599,7 +599,7 @@ class MachOObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+  bool GetDisassemblyInfo(std::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("Mach-O files do not support disassembly yet");

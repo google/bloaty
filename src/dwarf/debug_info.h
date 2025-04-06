@@ -49,9 +49,9 @@
 #define BLOATY_DWARF_DEBUG_INFO_H_
 
 #include <functional>
+#include <string_view>
 #include <unordered_map>
 
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "dwarf/attr.h"
 #include "dwarf/dwarf_util.h"
@@ -70,26 +70,26 @@ struct File;
 typedef void OpenDwarf(const InputFile &file, File *dwarf, RangeSink *sink);
 
 struct File {
-  absl::string_view debug_abbrev;
-  absl::string_view debug_addr;
-  absl::string_view debug_aranges;
-  absl::string_view debug_info;
-  absl::string_view debug_line;
-  absl::string_view debug_loc;
-  absl::string_view debug_pubnames;
-  absl::string_view debug_pubtypes;
-  absl::string_view debug_ranges;
-  absl::string_view debug_rnglists;
-  absl::string_view debug_str;
-  absl::string_view debug_str_offsets;
-  absl::string_view debug_line_str;
-  absl::string_view debug_types;
+  std::string_view debug_abbrev;
+  std::string_view debug_addr;
+  std::string_view debug_aranges;
+  std::string_view debug_info;
+  std::string_view debug_line;
+  std::string_view debug_loc;
+  std::string_view debug_pubnames;
+  std::string_view debug_pubtypes;
+  std::string_view debug_ranges;
+  std::string_view debug_rnglists;
+  std::string_view debug_str;
+  std::string_view debug_str_offsets;
+  std::string_view debug_line_str;
+  std::string_view debug_types;
   const InputFile* file;
   OpenDwarf* open;
 
-  absl::string_view* GetFieldByName(absl::string_view name);
-  void SetFieldByName(absl::string_view name, absl::string_view contents) {
-    absl::string_view *member = GetFieldByName(name);
+  std::string_view* GetFieldByName(std::string_view name);
+  void SetFieldByName(std::string_view name, std::string_view contents) {
+    std::string_view *member = GetFieldByName(name);
     if (member) *member = contents;
   }
 };
@@ -116,12 +116,12 @@ class CompilationUnitSizes {
 
   // Reads a DWARF offset based on whether we are reading dwarf32 or dwarf64
   // format.
-  uint64_t ReadDWARFOffset(absl::string_view* data) const {
+  uint64_t ReadDWARFOffset(std::string_view* data) const {
     return dwarf64_ ? ReadFixed<uint64_t>(data) : ReadFixed<uint32_t>(data);
   }
 
   // Reads an address according to the expected address_size.
-  uint64_t ReadAddress(absl::string_view* data) const {
+  uint64_t ReadAddress(std::string_view* data) const {
     return addr8_ ? ReadFixed<uint64_t>(data) : ReadFixed<uint32_t>(data);
   }
 
@@ -135,9 +135,9 @@ class CompilationUnitSizes {
   //
   // Returns the range for this section and stores the remaining data
   // in |remaining|.
-  absl::string_view ReadInitialLength(absl::string_view* remaining);
+  std::string_view ReadInitialLength(std::string_view* remaining);
 
-  void ReadDWARFVersion(absl::string_view* data) {
+  void ReadDWARFVersion(std::string_view* data) {
     dwarf_version_ = ReadFixed<uint16_t>(data);
   }
 
@@ -162,7 +162,7 @@ class CompilationUnitSizes {
 class AbbrevTable {
  public:
   // Reads abbreviations until a terminating abbreviation is seen.
-  void ReadAbbrevs(absl::string_view data);
+  void ReadAbbrevs(std::string_view data);
 
   // In a DWARF abbreviation, each attribute has a name and a form.
   struct Attribute {
@@ -179,7 +179,7 @@ class AbbrevTable {
   };
 
   bool IsEmpty() const { return abbrev_.empty(); }
-  absl::string_view abbrev_data() const { return abbrev_data_; }
+  std::string_view abbrev_data() const { return abbrev_data_; }
 
   // Looks for an abbreviation with the given code.  Returns true if the lookup
   // succeeded.
@@ -198,7 +198,7 @@ class AbbrevTable {
   // Generally we expect these to be small, so we could almost use a vector<>.
   // But you never know what crazy input data is going to do...
   std::unordered_map<uint32_t, Abbrev> abbrev_;
-  absl::string_view abbrev_data_;
+  std::string_view abbrev_data_;
 };
 
 class CUIter;
@@ -242,12 +242,12 @@ class CUIter {
 
  private:
   friend class InfoReader;
-  CUIter(InfoReader::Section section, absl::string_view next_unit)
+  CUIter(InfoReader::Section section, std::string_view next_unit)
       : section_(section), next_unit_(next_unit) {}
 
   // Data for the next compilation unit.
   InfoReader::Section section_;
-  absl::string_view next_unit_;
+  std::string_view next_unit_;
 };
 
 // CompilationUnit: stores info about a single compilation unit in .debug_info
@@ -260,20 +260,20 @@ class CU {
   const CU& skeleton() const { return *skeleton_; }
   const CompilationUnitSizes& unit_sizes() const { return unit_sizes_; }
   const std::string& unit_name() const { return unit_name_; }
-  absl::string_view entire_unit() const { return entire_unit_; }
+  std::string_view entire_unit() const { return entire_unit_; }
   uint64_t addr_base() const { return addr_base_; }
   uint64_t str_offsets_base() const { return str_offsets_base_; }
   uint64_t range_lists_base() const { return range_lists_base_; }
   const AbbrevTable& unit_abbrev() const { return *unit_abbrev_; }
 
-  void AddIndirectString(absl::string_view range) const {
+  void AddIndirectString(std::string_view range) const {
     if (strp_callback_) {
       strp_callback_(range);
     }
   }
 
   void SetIndirectStringCallback(
-      std::function<void(absl::string_view)> strp_sink) {
+      std::function<void(std::string_view)> strp_sink) {
     strp_callback_ = strp_sink;
   }
 
@@ -285,15 +285,15 @@ class CU {
   friend class CUIter;
   friend class DIEReader;
 
-  void ReadHeader(absl::string_view entire_unit, absl::string_view data,
+  void ReadHeader(std::string_view entire_unit, std::string_view data,
                   InfoReader::Section section, InfoReader& reader);
   void ReadTopLevelDIE(InfoReader& reader);
 
   const File* dwarf_;
 
   // Info that comes from the CU header.
-  absl::string_view entire_unit_;  // Entire CU's range.
-  absl::string_view data_;         // Entire unit excluding CU header.
+  std::string_view entire_unit_;  // Entire CU's range.
+  std::string_view data_;         // Entire unit excluding CU header.
   CompilationUnitSizes unit_sizes_;
   AbbrevTable* unit_abbrev_;
 
@@ -312,7 +312,7 @@ class CU {
   uint64_t str_offsets_base_ = 0;
   uint64_t range_lists_base_ = 0;
 
-  std::function<void(absl::string_view)> strp_callback_;
+  std::function<void(std::string_view)> strp_callback_;
 };
 
 // DIEReader: for reading a sequence of Debugging Information Entries in a
@@ -331,16 +331,16 @@ class DIEReader {
   // Internal APIs.
   friend class CU;
 
-  DIEReader(absl::string_view data) : remaining_(data) {}
+  DIEReader(std::string_view data) : remaining_(data) {}
   void SkipNullEntries();
 
   // Our current read position.
-  absl::string_view remaining_;
+  std::string_view remaining_;
   int depth_ = 0;
 };
 
 inline uint64_t ReadIndirectAddress(const CU& cu, uint64_t val) {
-  absl::string_view addrs = cu.skeleton().dwarf().debug_addr;
+  std::string_view addrs = cu.skeleton().dwarf().debug_addr;
   uint64_t base = cu.skeleton().addr_base();
   switch (cu.unit_sizes().address_size()) {
     case 4:

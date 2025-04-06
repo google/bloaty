@@ -21,13 +21,13 @@
 #include <limits>
 #include <memory>
 #include <stack>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "absl/base/attributes.h"
 #include "absl/base/macros.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "absl/types/optional.h"
 #include "bloaty.h"
@@ -39,7 +39,7 @@
 #include "dwarf/line_info.h"
 
 using namespace dwarf2reader;
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 
@@ -446,7 +446,7 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
   if (die.location_uint64) {
     uint64_t location = *die.location_uint64;;
     if (location < cu.dwarf().debug_loc.size()) {
-      absl::string_view loc_range = cu.dwarf().debug_loc.substr(location);
+      std::string_view loc_range = cu.dwarf().debug_loc.substr(location);
       loc_range = GetLocationListRange(cu.unit_sizes(), loc_range);
       sink->AddFileRange("dwarf_locrange", cu.unit_name(), loc_range);
     } else if (verbose_level > 0) {
@@ -526,7 +526,7 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
 
     if (ranges_offset != UINT64_MAX) {
       if (ranges_offset < cu.dwarf().debug_ranges.size()) {
-        absl::string_view data = cu.dwarf().debug_ranges.substr(ranges_offset);
+        std::string_view data = cu.dwarf().debug_ranges.substr(ranges_offset);
         const char* start = data.data();
         ReadRangeList(cu, low_pc, cu.unit_name(), sink, &data);
         string_view all(start, data.data() - start);

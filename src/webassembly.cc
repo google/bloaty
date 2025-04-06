@@ -18,7 +18,7 @@
 
 #include "absl/strings/substitute.h"
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 namespace wasm {
@@ -473,7 +473,7 @@ class WebAssemblyObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(absl::string_view /*symbol*/,
+  bool GetDisassemblyInfo(std::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("WebAssembly files do not support disassembly yet");

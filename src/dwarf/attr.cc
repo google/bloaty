@@ -19,7 +19,7 @@
 #include "dwarf_constants.h"
 #include "util.h"
 
-using string_view = absl::string_view;
+using string_view = std::string_view;
 using namespace dwarf2reader;
 
 namespace bloaty {

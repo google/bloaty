@@ -16,8 +16,8 @@
 #define BLOATY_DWARF_ATTR_H_
 
 #include <cstdint>
+#include <string_view>
 
-#include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 
 namespace bloaty {
@@ -27,7 +27,7 @@ class CU;
 
 class AttrValue {
  public:
-  static AttrValue ParseAttr(const CU& cu, uint16_t form, absl::string_view* data);
+  static AttrValue ParseAttr(const CU& cu, uint16_t form, std::string_view* data);
 
   AttrValue(const AttrValue &) = default;
   AttrValue &operator=(const AttrValue &) = default;
@@ -49,12 +49,12 @@ class AttrValue {
   uint64_t GetUint(const CU& cu) const;
 
   // REQUIRES: IsString().
-  absl::string_view GetString(const CU& cu) const;
+  std::string_view GetString(const CU& cu) const;
 
  private:
   explicit AttrValue(uint16_t form, uint64_t val)
       : uint_(val), form_(form), type_(Type::kUint) {}
-  explicit AttrValue(uint16_t form, absl::string_view val)
+  explicit AttrValue(uint16_t form, std::string_view val)
       : string_(val), form_(form), type_(Type::kString) {}
 
   // We delay the resolution of indirect strings and addresses, both to avoid
@@ -94,25 +94,25 @@ class AttrValue {
 
   union {
     uint64_t uint_;
-    absl::string_view string_;
+    std::string_view string_;
   };
 
   uint16_t form_;
   Type type_;
 
   template <class D>
-  static absl::string_view ReadBlock(absl::string_view* data);
-  static absl::string_view ReadVariableBlock(absl::string_view* data);
+  static std::string_view ReadBlock(std::string_view* data);
+  static std::string_view ReadVariableBlock(std::string_view* data);
   template <class D>
-  static absl::string_view ReadIndirectString(const CU& cu,
-                                              absl::string_view* data);
-  static absl::string_view ResolveIndirectString(const CU& cu, uint64_t ofs);
+  static std::string_view ReadIndirectString(const CU& cu,
+                                              std::string_view* data);
+  static std::string_view ResolveIndirectString(const CU& cu, uint64_t ofs);
   template <class D>
-  static absl::string_view ReadIndirectLineString(const CU& cu,
-                                              absl::string_view* data);
-  static absl::string_view ResolveIndirectLineString(const CU& cu, uint64_t ofs);
+  static std::string_view ReadIndirectLineString(const CU& cu,
+                                              std::string_view* data);
+  static std::string_view ResolveIndirectLineString(const CU& cu, uint64_t ofs);
 
-  absl::string_view ResolveDoubleIndirectString(const CU &cu) const;
+  std::string_view ResolveDoubleIndirectString(const CU &cu) const;
   uint64_t ResolveIndirectAddress(const CU& cu) const;
 };
 

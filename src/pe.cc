@@ -16,7 +16,7 @@
 #include "bloaty.h"
 #include "util.h"
 
-using absl::string_view;
+using std::string_view;
 using std::string;
 
 namespace bloaty {
@@ -193,7 +193,7 @@ void ParseSections(const PeFile& pe, RangeSink* sink) {
   ForEachSection(pe, [sink, &pe](const Section& section) {
     uint64_t vmaddr = section.virtual_addr();
     uint64_t vmsize = section.virtual_size();
-    absl::string_view section_data = StrictSubstr(
+    std::string_view section_data = StrictSubstr(
         pe.entire_file(), section.raw_offset(), section.raw_size());
 
     sink->AddRange("pe_sections", section.name, vmaddr, vmsize, section_data);

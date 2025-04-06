@@ -16,19 +16,19 @@
 #define BLOATY_DWARF_UTIL_H_
 
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 
-#include "absl/strings/string_view.h"
 #include "util.h"
 
 namespace bloaty {
 namespace dwarf {
 
-uint64_t ReadLEB128Internal(bool is_signed, absl::string_view* data);
+uint64_t ReadLEB128Internal(bool is_signed, std::string_view* data);
 
 // Reads a DWARF LEB128 varint, where high bits indicate continuation.
 template <typename T>
-T ReadLEB128(absl::string_view* data) {
+T ReadLEB128(std::string_view* data) {
   typedef typename std::conditional<std::is_signed<T>::value, int64_t,
                                     uint64_t>::type Int64Type;
   Int64Type val = ReadLEB128Internal(std::is_signed<T>::value, data);
@@ -39,7 +39,7 @@ T ReadLEB128(absl::string_view* data) {
   return static_cast<T>(val);
 }
 
-void SkipLEB128(absl::string_view* data);
+void SkipLEB128(std::string_view* data);
 
 bool IsValidDwarfAddress(uint64_t addr, uint8_t address_size);
 
@@ -47,7 +47,7 @@ inline int DivRoundUp(int n, int d) {
   return (n + (d - 1)) / d;
 }
 
-absl::string_view ReadDebugStrEntry(absl::string_view section, size_t ofs);
+std::string_view ReadDebugStrEntry(std::string_view section, size_t ofs);
 
 }  // namepsace dwarf
 }  // namepsace bloaty

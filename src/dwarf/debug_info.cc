@@ -18,7 +18,7 @@
 
 using namespace dwarf2reader;
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 namespace dwarf {
@@ -74,8 +74,8 @@ void AbbrevTable::ReadAbbrevs(string_view data) {
   }
 }
 
-absl::string_view CompilationUnitSizes::ReadInitialLength(
-    absl::string_view* remaining) {
+std::string_view CompilationUnitSizes::ReadInitialLength(
+    std::string_view* remaining) {
   uint64_t len = ReadFixed<uint32_t>(remaining);
 
   if (len == 0xffffffff) {
@@ -89,7 +89,7 @@ absl::string_view CompilationUnitSizes::ReadInitialLength(
     THROW("short DWARF compilation unit");
   }
 
-  absl::string_view unit = *remaining;
+  std::string_view unit = *remaining;
   unit.remove_suffix(remaining->size() - len);
   *remaining = remaining->substr(len);
   return unit;

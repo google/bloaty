@@ -28,10 +28,10 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 #include "capstone/capstone.h"
 
@@ -69,21 +69,21 @@ enum class DataSource {
 
 class InputFile {
  public:
-  InputFile(absl::string_view filename) : filename_(filename) {}
+  InputFile(std::string_view filename) : filename_(filename) {}
   InputFile(const InputFile&) = delete;
   InputFile& operator=(const InputFile&) = delete;
-  virtual bool TryOpen(absl::string_view filename,
+  virtual bool TryOpen(std::string_view filename,
                        std::unique_ptr<InputFile>& file) = 0;
   virtual ~InputFile() {}
 
   const std::string& filename() const { return filename_; }
-  absl::string_view data() const { return data_; }
+  std::string_view data() const { return data_; }
 
  private:
   const std::string filename_;
 
  protected:
-  absl::string_view data_;
+  std::string_view data_;
 };
 
 class InputFileFactory {
@@ -129,34 +129,34 @@ public:
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(const char *analyzer, absl::string_view name, uint64_t vmaddr,
+  void AddRange(const char *analyzer, std::string_view name, uint64_t vmaddr,
                 uint64_t vmsize, uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(const char *analyzer, absl::string_view name, uint64_t vmaddr,
-                uint64_t vmsize, absl::string_view file_range) {
+  void AddRange(const char *analyzer, std::string_view name, uint64_t vmaddr,
+                uint64_t vmsize, std::string_view file_range) {
     AddRange(analyzer, name, vmaddr, vmsize,
              file_range.data() - file_->data().data(), file_range.size());
   }
 
-  void AddFileRange(const char* analyzer, absl::string_view name,
+  void AddFileRange(const char* analyzer, std::string_view name,
                     uint64_t fileoff, uint64_t filesize);
 
   // Like AddFileRange(), but the label is whatever label was previously
   // assigned to VM address |label_from_vmaddr|.  If no existing label is
   // assigned to |label_from_vmaddr|, this function does nothing.
   void AddFileRangeForVMAddr(const char* analyzer, uint64_t label_from_vmaddr,
-                             absl::string_view file_range);
+                             std::string_view file_range);
   void AddVMRangeForVMAddr(const char* analyzer, uint64_t label_from_vmaddr,
                            uint64_t addr, uint64_t size);
 
   // Applies this label from |from_file_range| to |file_range|, but only if the
   // entire |from_file_range| has a single label.  If not, this does nothing.
   void AddFileRangeForFileRange(const char* analyzer,
-                                absl::string_view from_file_range,
-                                absl::string_view file_range);
+                                std::string_view from_file_range,
+                                std::string_view file_range);
 
-  void AddFileRange(const char* analyzer, absl::string_view name,
-                    absl::string_view file_range) {
+  void AddFileRange(const char* analyzer, std::string_view name,
+                    std::string_view file_range) {
     // When separate debug files are being used, the DWARF analyzer will try to
     // add sections of the debug file.  We want to prevent this because we only
     // want to profile the main file (not the debug file), so we filter these
@@ -202,21 +202,21 @@ public:
   // Translates the given pointer (which must be within the range of
   // input_file().data()) to a VM address.
   uint64_t TranslateFileToVM(const char* ptr);
-  absl::string_view TranslateVMToFile(uint64_t address);
+  std::string_view TranslateVMToFile(uint64_t address);
   const DualMap* Translator() { return translator_; }
 
 
   // Decompresses zlib-formatted data and returns the decompressed data.
   // Since the decompressed data is not actually part of the file, any
   // Add*Range() calls to this region will be no-ops.
-  absl::string_view ZlibDecompress(absl::string_view contents,
+  std::string_view ZlibDecompress(std::string_view contents,
                                    uint64_t uncompressed_size);
 
   static constexpr uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
  private:
   bool FileContainsPointer(const void* ptr) const {
-    absl::string_view file_data = file_->data();
+    std::string_view file_data = file_->data();
     return ptr >= file_data.data() && ptr < file_data.data() + file_data.size();
   }
 
@@ -246,7 +246,7 @@ class NameMunger {
   // Adds a regex that will be applied to all names.  All regexes will be
   // applied in sequence.
   void AddRegex(const std::string& regex, const std::string& replacement);
-  std::string Munge(absl::string_view name) const;
+  std::string Munge(std::string_view name) const;
 
   bool IsEmpty() const { return regexes_.empty(); }
 
@@ -254,7 +254,7 @@ class NameMunger {
   std::vector<std::pair<std::unique_ptr<ReImpl>, std::string>> regexes_;
 };
 
-typedef std::map<absl::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
+typedef std::map<std::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
 
 // Represents an object/executable file in a format like ELF, Mach-O, PE, etc.
 // To support a new file type, implement this interface.
@@ -271,7 +271,7 @@ class ObjectFile {
   // given here, otherwise it is |this|.
   virtual void ProcessFile(const std::vector<RangeSink*>& sinks) const = 0;
 
-  virtual bool GetDisassemblyInfo(absl::string_view symbol,
+  virtual bool GetDisassemblyInfo(std::string_view symbol,
                                   DataSource symbol_source,
                                   DisassemblyInfo* info) const = 0;
 
@@ -307,12 +307,12 @@ inline void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& map,
 }
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
-void ReadEhFrame(absl::string_view contents, RangeSink* sink);
-void ReadEhFrameHdr(absl::string_view contents, RangeSink* sink);
+void ReadEhFrame(std::string_view contents, RangeSink* sink);
+void ReadEhFrameHdr(std::string_view contents, RangeSink* sink);
 
 // Demangle C++ symbols according to the Itanium ABI.  The |source| argument
 // controls what demangling mode we are using.
-std::string ItaniumDemangle(absl::string_view symbol, DataSource source);
+std::string ItaniumDemangle(std::string_view symbol, DataSource source);
 
 
 // DualMap /////////////////////////////////////////////////////////////////////
@@ -325,7 +325,7 @@ struct DualMap {
 };
 
 struct DisassemblyInfo {
-  absl::string_view text;
+  std::string_view text;
   DualMap symbol_map;
   cs_arch arch;
   cs_mode mode;
@@ -398,17 +398,17 @@ struct RollupOutput {
   RollupOutput(const RollupOutput&) = delete;
   RollupOutput& operator=(const RollupOutput&) = delete;
 
-  void AddDataSourceName(absl::string_view name) {
+  void AddDataSourceName(std::string_view name) {
     source_names_.emplace_back(std::string(name));
   }
 
   const std::vector<std::string>& source_names() const { return source_names_; }
   void Print(const OutputOptions& options, std::ostream* out);
-  void SetDisassembly(absl::string_view disassembly) {
+  void SetDisassembly(std::string_view disassembly) {
     disassembly_ = std::string(disassembly);
   }
 
-  absl::string_view GetDisassembly() { return disassembly_; }
+  std::string_view GetDisassembly() { return disassembly_; }
 
   // For debugging.
   const RollupRow& toplevel_row() const { return toplevel_row_; }

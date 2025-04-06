@@ -13,11 +13,12 @@
 // limitations under the License.
 
 #include <algorithm>
-#include <string>
 #include <iostream>
+#include <string>
+#include <string_view>
+
 #include "absl/numeric/int128.h"
 #include "absl/strings/escaping.h"
-#include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "third_party/freebsd_elf/elf.h"
 #include "bloaty.h"
@@ -27,7 +28,7 @@
 #include <limits.h>
 #include <stdlib.h>
 
-using absl::string_view;
+using std::string_view;
 
 namespace bloaty {
 
@@ -160,14 +161,14 @@ class ElfFile {
   void ReadSegment(Elf64_Word index, Segment* segment) const;
   void ReadSection(Elf64_Word index, Section* section) const;
 
-  bool FindSectionByName(absl::string_view name, Section* section) const;
+  bool FindSectionByName(std::string_view name, Section* section) const;
 
   bool is_64bit() const { return is_64bit_; }
   bool is_native_endian() const { return is_native_endian_; }
 
   template <class T32, class T64, class Munger>
-  void ReadStruct(absl::string_view contents, uint64_t offset, Munger munger,
-                  absl::string_view* range, T64* out) const {
+  void ReadStruct(std::string_view contents, uint64_t offset, Munger munger,
+                  std::string_view* range, T64* out) const {
     StructReader(*this, contents).Read<T32>(offset, munger, range, out);
   }
 
@@ -188,7 +189,7 @@ class ElfFile {
         : elf_(elf), data_(data) {}
 
     template <class T32, class T64, class Munger>
-    void Read(uint64_t offset, Munger /*munger*/, absl::string_view* range,
+    void Read(uint64_t offset, Munger /*munger*/, std::string_view* range,
               T64* out) const {
       if (elf_.is_64bit() && elf_.is_native_endian()) {
         return Memcpy(offset, range, out);
@@ -202,12 +203,12 @@ class ElfFile {
     string_view data_;
 
     template <class T32, class T64, class Munger>
-    void ReadFallback(uint64_t offset, absl::string_view* range,
+    void ReadFallback(uint64_t offset, std::string_view* range,
                       T64* out) const;
 
     template <class T>
-    void Memcpy(uint64_t offset, absl::string_view* out_range, T* out) const {
-      absl::string_view range = StrictSubstr(data_, offset, sizeof(*out));
+    void Memcpy(uint64_t offset, std::string_view* out_range, T* out) const {
+      std::string_view range = StrictSubstr(data_, offset, sizeof(*out));
       if (out_range) {
         *out_range = range;
       }
@@ -338,7 +339,7 @@ struct ChdrMunger {
 
 template <class T32, class T64, class Munger>
 void ElfFile::StructReader::ReadFallback(uint64_t offset,
-                                         absl::string_view* range,
+                                         std::string_view* range,
                                          T64* out) const {
   // Fallback for either 32-bit ELF file or non-native endian.
   if (elf_.is_64bit()) {
@@ -476,7 +477,7 @@ bool ElfFile::Initialize() {
       THROWF("unexpected ELF data: $0", ident[EI_DATA]);
   }
 
-  absl::string_view range;
+  std::string_view range;
   ReadStruct<Elf32_Ehdr>(entire_file(), 0, EhdrMunger(), &range, &header_);
 
   Section section0;
@@ -556,7 +557,7 @@ void ElfFile::ReadSection(Elf64_Word index, Section* section) const {
   section->elf_ = this;
 }
 
-bool ElfFile::FindSectionByName(absl::string_view name, Section* section) const {
+bool ElfFile::FindSectionByName(std::string_view name, Section* section) const {
   for (Elf64_Word i = 0; i < section_count_; i++) {
     ReadSection(i, section);
     if (section->GetName() == name) {
@@ -1203,7 +1204,7 @@ void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
       // Standard ELF section compression, produced when you link with
       //   --compress-debug-sections=zlib-gabi
       Elf64_Chdr chdr;
-      absl::string_view range;
+      std::string_view range;
       elf.ReadStruct<Elf32_Chdr>(contents, 0, ChdrMunger(), &range, &chdr);
       if (chdr.ch_type != ELFCOMPRESS_ZLIB) {
         // Unknown compression format.
@@ -1360,13 +1361,13 @@ class ElfObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(const absl::string_view symbol,
+  bool GetDisassemblyInfo(const std::string_view symbol,
                           DataSource symbol_source,
                           DisassemblyInfo* info) const override {
     return DoGetDisassemblyInfo(&symbol, symbol_source, info);
   }
 
-  bool DoGetDisassemblyInfo(const absl::string_view* symbol,
+  bool DoGetDisassemblyInfo(const std::string_view* symbol,
                             DataSource symbol_source,
                             DisassemblyInfo* info) const {
     // Find the corresponding file range.  This also could be optimized not to
