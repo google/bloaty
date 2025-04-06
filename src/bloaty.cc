@@ -67,6 +67,15 @@ using std::string_view;
 
 namespace bloaty {
 
+namespace {
+
+// In C++20 this can be replaced with `str.starts_with(prefix)`
+bool StartsWith(string_view str, string_view prefix) {
+  return str.substr(0, prefix.size()) == prefix;
+}
+
+}  // namespace
+
 // Use a global since we would have to plumb it through so many call-stacks
 // otherwise.  We would make this thread_local but that's not supported on OS X
 // right now.
@@ -173,7 +182,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
   }
 
   string_view demangle_from = symbol;
-  if (absl::StartsWith(demangle_from, "__Z")) {
+  if (StartsWith(demangle_from, "__Z")) {
     demangle_from.remove_prefix(1);
   }
 
@@ -2224,7 +2233,7 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
     } else if (args.TryParseFlag("--version")) {
       printf("Bloaty McBloatface 1.1\n");
       exit(0);
-    } else if (absl::StartsWith(args.Arg(), "-")) {
+    } else if (StartsWith(args.Arg(), "-")) {
       if (skip_unknown) {
         args.ConsumeAndSaveArg();
       } else {
