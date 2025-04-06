@@ -197,7 +197,7 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
 void CU::ReadTopLevelDIE(InfoReader& reader) {
   DIEReader die_reader = GetDIEReader();
   const auto* abbrev = die_reader.ReadCode(*this);
-  absl::optional<uint64_t> stmt_list;
+  std::optional<uint64_t> stmt_list;
   unit_name_.clear();
   die_reader.ReadAttributes(
       *this, abbrev, [this, &stmt_list](uint16_t tag, dwarf::AttrValue value) {

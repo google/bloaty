@@ -25,12 +25,12 @@ using namespace dwarf2reader;
 namespace bloaty {
 namespace dwarf {
 
-absl::optional<uint64_t> AttrValue::ToUint(const CU& cu) const {
+std::optional<uint64_t> AttrValue::ToUint(const CU& cu) const {
   if (form_ == DW_FORM_implicit_const) {
     // DW_FORM_implicit_const value is stored in AbbrevTable, but
     // we don't keep it in AttrValue (discarded in AbbrevTable::ReadAbbrevs()).
-    // return absl::nullopt to make sure the value is not available.
-    return absl::nullopt;
+    // return std::nullopt to make sure the value is not available.
+    return std::nullopt;
   }
   if (IsUint()) return GetUint(cu);
   string_view str = GetString(cu);
@@ -44,7 +44,7 @@ absl::optional<uint64_t> AttrValue::ToUint(const CU& cu) const {
     case 8:
       return ReadFixed<uint64_t>(&str);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 uint64_t AttrValue::GetUint(const CU& cu) const {

@@ -16,9 +16,8 @@
 #define BLOATY_DWARF_ATTR_H_
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
-
-#include "absl/types/optional.h"
 
 namespace bloaty {
 namespace dwarf {
@@ -43,7 +42,7 @@ class AttrValue {
   }
 
   // Attempts to coerce to uint, returning nullopt if this is not possible.
-  absl::optional<uint64_t> ToUint(const CU& cu) const;
+  std::optional<uint64_t> ToUint(const CU& cu) const;
 
   // REQUIRES: IsUint() && form() != DW_FORM_implicit_const.
   uint64_t GetUint(const CU& cu) const;

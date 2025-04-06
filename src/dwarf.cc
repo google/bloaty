@@ -20,6 +20,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stack>
 #include <string_view>
 #include <unordered_map>
@@ -29,7 +30,6 @@
 #include "absl/base/attributes.h"
 #include "absl/base/macros.h"
 #include "absl/strings/substitute.h"
-#include "absl/types/optional.h"
 #include "bloaty.h"
 #include "bloaty.pb.h"
 #include "dwarf_constants.h"
@@ -297,16 +297,16 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
 }
 
 struct GeneralDIE {
-  absl::optional<string_view> name;
-  absl::optional<string_view> location_string;
-  absl::optional<uint64_t> location_uint64;
-  absl::optional<uint64_t> low_pc;
-  absl::optional<uint64_t> high_pc_addr;
-  absl::optional<uint64_t> high_pc_size;
-  absl::optional<uint64_t> stmt_list;
-  absl::optional<uint64_t> rnglistx;
-  absl::optional<uint64_t> ranges;
-  absl::optional<uint64_t> start_scope;
+  std::optional<string_view> name;
+  std::optional<string_view> location_string;
+  std::optional<uint64_t> location_uint64;
+  std::optional<uint64_t> low_pc;
+  std::optional<uint64_t> high_pc_addr;
+  std::optional<uint64_t> high_pc_size;
+  std::optional<uint64_t> stmt_list;
+  std::optional<uint64_t> rnglistx;
+  std::optional<uint64_t> ranges;
+  std::optional<uint64_t> start_scope;
   bool declaration = false;
 };
 
@@ -732,7 +732,7 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
   }
 
   while (auto abbrev = die_reader.ReadCode(cu)) {
-    absl::optional<uint64_t> stmt_list;
+    std::optional<uint64_t> stmt_list;
     die_reader.ReadAttributes(
         cu, abbrev, [&stmt_list, &cu](uint16_t tag, dwarf::AttrValue val) {
           if (tag == DW_AT_stmt_list) {
