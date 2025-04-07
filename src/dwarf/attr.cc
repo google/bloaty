@@ -144,6 +144,7 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint16_t form, string_view* data) {
     case DW_FORM_ref8:
       return AttrValue(form, ReadFixed<uint64_t>(data));
     case DW_FORM_ref_udata:
+      return AttrValue(form, ReadLEB128<uint64_t>(data));
     case DW_FORM_strx1:
       return AttrValue::UnresolvedString(form, ReadFixed<uint8_t>(data));
     case DW_FORM_strx2:
