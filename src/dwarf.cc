@@ -185,6 +185,8 @@ void ReadRangeList(const CU& cu, uint64_t low_pc, string_view name,
       return;
     } else if (start == max_address) {
       low_pc = end;
+    } else if (end == 0) {
+      return;
     } else {
       uint64_t size = end - start;
       sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
