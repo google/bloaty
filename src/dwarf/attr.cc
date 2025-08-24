@@ -38,7 +38,7 @@ absl::optional<uint64_t> AttrValue::ToUint(const CU& cu) const {
     case 1:
       return ReadFixed<uint8_t>(&str);
     case 2:
-      return ReadFixed<uint8_t>(&str);
+      return ReadFixed<uint16_t>(&str);
     case 4:
       return ReadFixed<uint32_t>(&str);
     case 8:
