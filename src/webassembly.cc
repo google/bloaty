@@ -163,6 +163,7 @@ struct ExternalKind {
     kTable = 1,
     kMemory = 2,
     kGlobal = 3,
+    kTag = 4,
   };
 };
 
@@ -267,6 +268,11 @@ void ReadMemoryType(string_view* data) {
   ReadResizableLimits(data);
 }
 
+void ReadTagType(string_view* data) {
+  ReadFixed<uint8_t>(data);
+  ReadVarUInt32(data);
+}
+
 uint32_t GetNumFunctionImports(const Section& section) {
   assert(section.id == Section::kImport);
   string_view data = section.contents;
@@ -294,6 +300,9 @@ uint32_t GetNumFunctionImports(const Section& section) {
         break;
       case ExternalKind::kGlobal:
         ReadGlobalType(&data);
+        break;
+      case ExternalKind::kTag:
+        ReadTagType(&data);
         break;
       default:
         THROWF("Unrecognized import kind: $0", kind);
