@@ -25,6 +25,7 @@ typedef size_t z_size_t;
 #include <signal.h>
 #include <stdlib.h>
 #include <zlib.h>
+#include <zstd.h>
 
 #include <atomic>
 #include <cmath>
@@ -1427,6 +1428,36 @@ std::string_view RangeSink::ZlibDecompress(std::string_view data,
     THROW("Error decompressing debug info");
   }
   string_view sv(reinterpret_cast<char*>(dbuf), zliblen);
+  return sv;
+}
+
+std::string_view RangeSink::ZstdDecompress(std::string_view data,
+                                            uint64_t uncompressed_size) {
+  if (!arena_) {
+    THROW("This range sink isn't prepared to zlib decompress.");
+  }
+  uint64_t mb = 1 << 20;
+  // Limit for uncompressed size is 30x the compressed size + 128MB.
+  if (uncompressed_size >
+      static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
+    WARN("ignoring compressed debug data, implausible uncompressed size "
+         "(compressed: $0, uncompressed: $1)",
+         data.size(), uncompressed_size);
+    return std::string_view();
+  }
+  char* dbuf =
+      google::protobuf::Arena::CreateArray<char>(
+          arena_, uncompressed_size);
+  size_t zstd_len = uncompressed_size;
+  size_t decompress_len =
+      ZSTD_decompress(dbuf, uncompressed_size, data.data(), data.size());
+  if (ZSTD_isError(decompress_len)) {
+    THROWF("Error decompressing debug info: $0",
+           ZSTD_getErrorName(decompress_len));
+  } else if (decompress_len != zstd_len) {
+    THROW("Error decompressing debug info: size mismatch");
+  }
+  string_view sv(dbuf, zstd_len);
   return sv;
 }
 
