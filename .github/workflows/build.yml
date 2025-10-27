@@ -68,6 +68,18 @@ jobs:
     steps:
       - uses: seanmiddleditch/gha-setup-ninja@master
 
+      - name: Update Homebrew
+        run: brew update
+
+      - name: Install capstone
+        run: |
+          brew install capstone
+          if [ -d /opt/homebrew ]; then HB=/opt/homebrew; else HB=/usr/local; fi
+          CAPSTONE_PREFIX=$(brew --prefix capstone)
+          PC_FILE="${CAPSTONE_PREFIX}/lib/pkgconfig/capstone.pc"
+          EXPECTED_INCLUDE_DIR="${CAPSTONE_PREFIX}/include"
+          sed -i '' "s#^includedir=.*\$#includedir=${EXPECTED_INCLUDE_DIR}#" "$PC_FILE"
+
       - uses: actions/checkout@v2
         with:
           repository: llvm/llvm-project
@@ -96,7 +108,15 @@ jobs:
         with:
           path: ${{ github.workspace }}/bloaty
       - name: configure
-        run: cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug -D CMAKE_C_FLAGS=${{ matrix.cflags }} -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} -G Ninja -S ${{ github.workspace }}/bloaty -D BLOATY_PREFER_SYSTEM_CAPSTONE=NO -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py
+        run: |
+          cmake -B build/bloaty -D CMAKE_BUILD_TYPE=Debug \
+            -D CMAKE_C_FLAGS=${{ matrix.cflags }} \
+            -D CMAKE_CXX_FLAGS=${{ matrix.cxxflags }} \
+            -G Ninja -S ${{ github.workspace }}/bloaty \
+            -D FILECHECK_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/FileCheck \
+            -D YAML2OBJ_EXECUTABLE=${{ github.workspace }}/build/llvm-project/bin/yaml2obj \
+            -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/llvm/utils/lit/lit.py \
+            -D CMAKE_POLICY_VERSION_MINIMUM=3.5
       - name: build
         run: cmake --build build/bloaty --config Debug
       - name: test
