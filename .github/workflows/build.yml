@@ -16,7 +16,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ["Win32", "x64"] # "ARM64"
+        include:
+          - { arch: "Win32", artifact_key: "win32" }
+          - { arch: "x64", artifact_key: "win64" }
+          # - { arch: "ARM64 "}
 
     steps:
       - uses: actions/checkout@v2
@@ -42,6 +45,11 @@ jobs:
         run: |
           cmake --build ${{ github.workspace }}/build/llvm-project --config Release --target FileCheck
           cmake --build ${{ github.workspace }}/build/llvm-project --config Release --target yaml2obj
+      - name: Upload LLVM tools as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-tools-${{ matrix.artifact_key }}
+          path: ./build/llvm-project/Release/bin
 
       - uses: actions/checkout@v2
         with:
@@ -62,8 +70,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { cflags: "", cxxflags: "" }
-          - { cflags: "-fmodules", cxxflags: "-fmodules" }
+          - { cflags: "", cxxflags: "", artifact_key: "macos" }
+          - { cflags: "-fmodules", cxxflags: "-fmodules", artifact_key: "macos-modules" }
 
     steps:
       - uses: seanmiddleditch/gha-setup-ninja@master
@@ -91,6 +99,11 @@ jobs:
         run: |
           cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
           cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
+      - name: Upload LLVM tools as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-tools-${{ matrix.artifact_key }}
+          path: ./build/llvm-project/bin
 
       - uses: actions/checkout@v2
         with:
@@ -110,8 +123,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - { CC: gcc, CXX: g++ }
-          - { CC: clang, CXX: clang++ }
+          - { CC: gcc, CXX: g++, artifact_key: "linux-gcc" }
+          - { CC: clang, CXX: clang++, artifact_key: "linux-clang" }
 
     steps:
       - uses: seanmiddleditch/gha-setup-ninja@master
@@ -139,6 +152,11 @@ jobs:
         run: |
           cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
           cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
+      - name: Upload LLVM tools as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-tools-${{ matrix.artifact_key }}
+          path: ./build/llvm-project/bin
 
       - uses: actions/checkout@v2
         with:
