@@ -200,7 +200,11 @@ string_view* File::GetFieldByName(string_view name) {
     return &debug_addr;
   } else if (name == "str") {
     return &debug_str;
-  } else if (name == "str_offsets") {
+  } else if (name == "str_offsets" || name == "str_offs") {
+    // Mach-O section names are limited to 16 characters. The full name
+    // "__debug_str_offsets" gets truncated to "__debug_str_offs".
+    // After removing the "__debug_" prefix, we get "str_offs" instead of
+    // "str_offsets". This is the only DWARF section exceeds the limit.
     return &debug_str_offsets;
   } else if (name == "line_str") {
     return &debug_line_str;
