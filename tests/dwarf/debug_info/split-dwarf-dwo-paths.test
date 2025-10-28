@@ -1,0 +1,225 @@
+# Tests various combinations of comp_dir and dwo_name path handling for split DWARF.
+#
+# ==============================================================================
+# Test 1: comp_dir present + absolute dwo_name
+# Expected: Use absolute dwo_name, ignore comp_dir
+# ==============================================================================
+
+# RUN: mkdir -p %/t
+# RUN: cat %s | sed "s|__ABSOLUTE_PATH__|%/t/absolute.dwo|" | %yaml2obj --docnum=1 -o %t.test1.obj
+# RUN: %yaml2obj %s --docnum=2 -o %/t/absolute.dwo
+# RUN: %bloaty %t.test1.obj -d compileunits --raw-map --domain=vm | %FileCheck %s --check-prefix=TEST1
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+  Entry:           0x1040
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    FirstSec:        .text
+    LastSec:         .text
+    VAddr:           0x400000
+    Align:           0x1000
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x400000
+    AddressAlign:    0x10
+    Size:            0x100
+  - Name:            .debug_addr
+    Type:            SHT_PROGBITS
+    AddressAlign:    0x1
+    Content: '0000400000000000'
+DWARF:
+  debug_str:
+    - __ABSOLUTE_PATH__
+    - /some/comp/dir
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_comp_dir
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_GNU_addr_base
+              Form:            DW_FORM_sec_offset
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            # comp_dir (should be ignored since dwo_name is absolute)
+            - Value:           0x10
+            # dwo_name (absolute path)
+            - Value:           0x0
+            - Value:           0xdeaddeaddeadbeef
+            - Value:           0x0
+...
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+DWARF:
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_GNU_addr_index
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+  debug_str:
+    - absolute.c
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0
+            - Value:           0xdeaddeaddeadbeef
+            - Value:           0x0
+            - Value:           0x100
+
+...
+
+# TEST1: VM MAP:
+# TEST1: 000000-400000       4194304             [-- Nothing mapped --]
+# TEST1: 400000-400100           256             absolute.c
+
+# ==============================================================================
+# Test 2: comp_dir + relative dwo_name
+# Expected: comp_dir/dwo_name
+# ==============================================================================
+
+# RUN: mkdir -p %/t/compdir
+# RUN: cat %s | sed "s|__COMP_DIR__|%/t/compdir|" | %yaml2obj --docnum=3 -o %t.test2.obj
+# RUN: %yaml2obj %s --docnum=4 -o %/t/compdir/relative.dwo
+# RUN: %bloaty %t.test2.obj -d compileunits --raw-map --domain=vm | %FileCheck %s --check-prefix=TEST2
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    FirstSec:        .text
+    LastSec:         .text
+    VAddr:           0x500000
+    Align:           0x1000
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x500000
+    AddressAlign:    0x10
+    Size:            0x200
+  - Name:            .debug_addr
+    Type:            SHT_PROGBITS
+    AddressAlign:    0x1
+    Content: '0000500000000000'
+DWARF:
+  debug_str:
+    - relative.dwo
+    - __COMP_DIR__
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_comp_dir
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_GNU_addr_base
+              Form:            DW_FORM_sec_offset
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            # comp_dir (offset 0x0D = 13, after "relative.dwo\0")
+            - Value:           0xD
+            # dwo_name (relative)
+            - Value:           0x0
+            - Value:           0xcafecafecafebeef
+            - Value:           0x0
+...
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+DWARF:
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_data8
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_GNU_addr_index
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+  debug_str:
+    - relative.c
+  debug_info:
+    - Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0
+            - Value:           0xcafecafecafebeef
+            - Value:           0x0
+            - Value:           0x200
+...
+
+# TEST2: VM MAP:
+# TEST2: 000000-500000       5242880             [-- Nothing mapped --]
+# TEST2: 500000-500200           512             relative.c
