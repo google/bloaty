@@ -199,14 +199,13 @@ void CU::ReadTopLevelDIE(InfoReader& reader) {
   const auto* abbrev = die_reader.ReadCode(*this);
   absl::optional<uint64_t> stmt_list;
   unit_name_.clear();
+
+  // First pass: Parse base addresses that other attributes may depend on.
+  // Specifically, DW_AT_str_offsets_base must be parsed before DW_AT_name
+  // if DW_AT_name uses DW_FORM_strx form.
   die_reader.ReadAttributes(
       *this, abbrev, [this, &stmt_list](uint16_t tag, dwarf::AttrValue value) {
         switch (tag) {
-          case DW_AT_name:
-            if (value.IsString()) {
-              unit_name_ = std::string(value.GetString(*this));
-            }
-            break;
           case DW_AT_stmt_list:
             if (value.form() == DW_FORM_sec_offset) {
               stmt_list = value.GetUint(*this);
@@ -232,6 +231,17 @@ void CU::ReadTopLevelDIE(InfoReader& reader) {
             if (value.IsUint()) {
               dwo_id_ = value.GetUint(*this);
             }
+            break;
+        }
+      });
+
+  // Second pass: Parse DW_AT_name after base addresses are set.
+  die_reader = GetDIEReader();
+  abbrev = die_reader.ReadCode(*this);
+  die_reader.ReadAttributes(
+      *this, abbrev, [this](uint16_t tag, dwarf::AttrValue value) {
+        if (tag == DW_AT_name && value.IsString()) {
+          unit_name_ = std::string(value.GetString(*this));
         }
       });
 
