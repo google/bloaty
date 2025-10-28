@@ -16,6 +16,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
@@ -591,6 +592,20 @@ struct DwoFilePointer {
   std::string dwo_name;
 };
 
+static std::string ConstructDwoPath(const DwoFilePointer& dwo_info) {
+  if (dwo_info.dwo_name.empty()) {
+    return "";
+  }
+
+  std::filesystem::path dwo_path(dwo_info.dwo_name);
+  if (dwo_path.is_absolute()) {
+    return dwo_info.dwo_name;
+  }
+
+  std::filesystem::path result = std::filesystem::path(dwo_info.comp_dir) / dwo_info.dwo_name;
+  return result.string();
+}
+
 // The DWARF debug info can help us get compileunits info.  DIEs for compilation
 // units, functions, and global variables often have attributes that will
 // resolve to addresses.
@@ -626,8 +641,9 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
           }
         });
 
-    if (!dwo_info.comp_dir.empty() && !dwo_info.dwo_name.empty()) {
-      auto file = MmapInputFileFactory().OpenFile(dwo_info.comp_dir + "/" + dwo_info.dwo_name);
+    std::string dwo_path = ConstructDwoPath(dwo_info);
+    if (!dwo_path.empty()) {
+      auto file = MmapInputFileFactory().OpenFile(dwo_path);
       dwarf::File dwo_dwarf;
       cu.dwarf().open(*file, &dwo_dwarf, sink);
       ReadDWARFCompileUnits(dwo_dwarf, symbol_map, &cu, sink);
