@@ -29,6 +29,7 @@ typedef size_t z_size_t;
 
 #include <atomic>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -1526,6 +1527,9 @@ class Bloaty {
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
   void AddSourceMapFilename(const std::string& filename);
+  void AddDsymFilename(const Options& options, const std::string& filename);
+  void TryAutoLoadDsym(const std::string& binary_path,
+                       const std::string& build_id);
 
   size_t GetSourceCount() const { return sources_.size(); }
 
@@ -1572,6 +1576,15 @@ class Bloaty {
                          std::vector<std::string>* out_build_ids) const;
 
   std::unique_ptr<ObjectFile> GetObjectFile(const std::string& filename) const;
+
+  bool TryGetBuildId(const std::string& filename, std::string* build_id);
+  bool TryValidateAndAddDsym(const std::string& dsym_path,
+                             const std::string& main_binary_path,
+                             bool strict_validation);
+
+  std::filesystem::path ConstructDsymPath(const std::filesystem::path& binary_path);
+  std::filesystem::path GetDsymInternalPath(const std::filesystem::path& dsym_bundle,
+                                            const std::string& binary_name);
 
   const InputFileFactory& file_factory_;
   const Options options_;
@@ -1634,6 +1647,9 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
   auto object_file = GetObjectFile(filename);
   std::string build_id = object_file->GetBuildId();
 
+  // Automatically try to load dSYM file for Mach-O binaries
+  TryAutoLoadDsym(filename, build_id);
+
   if (is_base) {
     base_files_.push_back({filename, build_id});
   } else {
@@ -1661,6 +1677,137 @@ void Bloaty::AddSourceMapFilename(const std::string& filename) {
   std::string sourcemap_build_id = filename.substr(0, delimiter);
   std::string sourcemap_filename = filename.substr(delimiter + 1);
   sourcemap_files_[sourcemap_build_id] = sourcemap_filename;
+}
+
+bool Bloaty::TryGetBuildId(const std::string& filename, std::string* build_id) {
+  try {
+    auto object_file = GetObjectFile(filename);
+    *build_id = object_file->GetBuildId();
+    return true;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+bool Bloaty::TryValidateAndAddDsym(const std::string& dsym_path,
+                                   const std::string& main_binary_path,
+                                   bool strict_validation) {
+  std::string main_build_id, dsym_build_id;
+
+  if (!TryGetBuildId(main_binary_path, &main_build_id) ||
+      !TryGetBuildId(dsym_path, &dsym_build_id)) {
+    if (strict_validation) {
+      THROWF("Cannot read build ID from files: main=$0, dsym=$1",
+             main_binary_path, dsym_path);
+    }
+    return false;
+  }
+
+  if (main_build_id != dsym_build_id) {
+    if (strict_validation) {
+      THROWF("dSYM file $0 has mismatched build ID (expected $1, got $2)",
+             dsym_path,
+             absl::BytesToHexString(main_build_id),
+             absl::BytesToHexString(dsym_build_id));
+    } else {
+      WARN("dSYM file $0 has mismatched build ID (expected $1, got $2) - skipping",
+           dsym_path,
+           absl::BytesToHexString(main_build_id),
+           absl::BytesToHexString(dsym_build_id));
+    }
+    return false;
+  }
+
+  AddDebugFilename(dsym_path);
+  return true;
+}
+
+std::filesystem::path Bloaty::ConstructDsymPath(const std::filesystem::path& binary_path) {
+  std::filesystem::path binary_file(binary_path);
+  std::string binary_name = binary_file.filename().string();
+  std::filesystem::path binary_dir = binary_file.parent_path();
+
+  std::filesystem::path dsym_bundle = binary_dir / (binary_name + ".dSYM");
+  return dsym_bundle / "Contents" / "Resources" / "DWARF" / binary_name;
+}
+
+std::filesystem::path Bloaty::GetDsymInternalPath(const std::filesystem::path& dsym_bundle,
+                                                  const std::string& binary_name) {
+  return dsym_bundle / "Contents" / "Resources" / "DWARF" / binary_name;
+}
+
+// Loads dSYM files explicitly specified by the user using the --dsym flag.
+//
+// This function processes dSYM bundle paths with strict validation:
+// - Warns if no dSYM files match the input binaries
+// - Throws if the dSYM bundle path doesn't exist or isn't a directory
+// - Throws if dSYM files are invalid or unreadable
+// - Throws if buildids don't match between binary and dSYM
+//
+// The strict behaviour is intentional: when users explicitly specify --dsym,
+// they expect it to work and want to know immediately if there are problems.
+void Bloaty::AddDsymFilename(const Options& options,
+                             const std::string& filename) {
+  if (!std::filesystem::exists(filename)) {
+    THROWF("couldn't open '$0'", filename.c_str());
+  }
+
+  std::filesystem::path dsym_bundle(filename);
+  // Only support dSYM bundles
+  if (std::filesystem::is_directory(dsym_bundle)) {
+    bool found_any = false;
+    for (const auto& binary_filename : options.filename()) {
+      std::filesystem::path binary_name = std::filesystem::path(binary_filename).filename();
+      std::filesystem::path dsym_file = GetDsymInternalPath(dsym_bundle, binary_name.string());
+
+      if (std::filesystem::exists(dsym_file)) {
+        if (TryValidateAndAddDsym(dsym_file.string(), binary_filename,
+                                  /*strict_validation=*/true)) {
+          found_any = true;
+        }
+      }
+    }
+    if (!found_any) {
+      WARN("dSYM bundle '$0' contains no debug files matching input binaries",
+           filename);
+    }
+  } else {
+    THROWF("'$0' is not a dSYM bundle directory", filename);
+  }
+}
+
+// Automatically discovers and loads dSYM files using macOS conventions.
+//
+// This function attempts to find dSYM bundles using the standard macOS layout:
+// <binary_dir>/<binary_name>.dSYM/Contents/Resources/DWARF/<binary_name>
+//
+// Key behavioural differences from AddDsymFilename():
+// - Never throws exceptions or breaks analysis if discovery fails
+// - Ignores invalid/corrupted dSYM files
+// - Warns on buildid mismatches but continues without the dSYM
+//
+// The permissive behaviour is intentional because auto-loading is speculative and
+// shouldn't break analysis of the main binary. Users didn't explicitly
+// request the dSYM so failures should be silent.
+void Bloaty::TryAutoLoadDsym(const std::string& binary_path,
+                             const std::string& build_id) {
+  if (build_id.empty()) {
+    return;
+  }
+
+  std::filesystem::path dsym_file = ConstructDsymPath(binary_path);
+
+  if (std::filesystem::exists(dsym_file)) {
+    // Use non-strict validation because auto-loading is speculative
+    // GetObjectFile() will throw if the file isn't a valid Mach-O and
+    // we want auto-loading to silently fail rather than break analysis.
+    if (TryValidateAndAddDsym(dsym_file.string(), binary_path,
+                             /*strict_validation=*/false)) {
+      if (verbose_level > 1) {
+        printf("Found matching dSYM file: %s\n", dsym_file.string().c_str());
+      }
+    }
+  }
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
@@ -2030,6 +2177,7 @@ Options:
   -c FILE            Load configuration from <file>.
   -d SOURCE,SOURCE   Comma-separated list of sources to scan.
   --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  --dsym=FILE        Use this dSYM file or bundle (Mach-O only).
   --source-map=ID=FILE
                      Use this source map file for the binary. The ID can be
                      the build ID (or Wasm sourceMappingURL) or the file path
@@ -2224,6 +2372,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseOption("--debug-file", &option)) {
       options->add_debug_filename(std::string(option));
+    } else if (args.TryParseOption("--dsym", &option)) {
+      options->add_dsym_path(std::string(option));
     } else if (args.TryParseUint64Option("--debug-fileoff", &uint64_option)) {
       if (options->has_debug_fileoff()) {
         THROW("currently we only support a single debug fileoff");
@@ -2349,6 +2499,8 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
     THROW("max_rows_per_level must be at least 1");
   }
 
+  verbose_level = options.verbose_level();
+
   for (auto& filename : options.filename()) {
     bloaty.AddFilename(filename, false);
   }
@@ -2359,6 +2511,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   for (auto& debug_filename : options.debug_filename()) {
     bloaty.AddDebugFilename(debug_filename);
+  }
+
+  for (const auto& dsym_path : options.dsym_path()) {
+    bloaty.AddDsymFilename(options, dsym_path);
   }
 
   for (auto& sourcemap : options.source_map()) {
@@ -2379,8 +2535,6 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
       THROW("invalid regex for source_filter");
     }
   }
-
-  verbose_level = options.verbose_level();
 
   if (options.data_source_size() > 0) {
     bloaty.ScanAndRollup(options, output);
