@@ -185,6 +185,8 @@ void ReadRangeList(const CU& cu, uint64_t low_pc, string_view name,
       return;
     } else if (start == max_address) {
       low_pc = end;
+    } else if (end < start) {
+      WARN("DWARF end < start for $0: $1 < $2", name_str, end, start);
     } else {
       uint64_t size = end - start;
       sink->AddVMRangeIgnoreDuplicate("dwarf_rangelist", low_pc + start, size,
@@ -391,6 +393,11 @@ uint64_t TryReadPcPair(const dwarf::CU& cu, const GeneralDIE& die,
   addr = *die.low_pc;
 
   if (die.high_pc_addr) {
+    if (*die.high_pc_addr < addr) {
+      WARN("DWARF high_pc < low_pc for $0: $1 < $2", cu.unit_name(),
+           *die.high_pc_addr, addr);
+      return 0;
+    }
     size = *die.high_pc_addr - addr;
   } else if (die.high_pc_size) {
     size = *die.high_pc_size;
