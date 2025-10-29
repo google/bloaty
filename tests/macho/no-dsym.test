@@ -1,0 +1,247 @@
+# Test that bloaty handles missing dSYM gracefully
+#
+# When a dSYM bundle doesn't exist, bloaty should continue without error.
+#
+# The YAML below was generated from tests/testdata/macho/test_dsym.c.
+#
+# On macOS:
+#   clang -g -O2 -o test_binary tests/testdata/macho/test_dsym.c
+#   strip -S test_binary
+#   obj2yaml test_binary > binary.yaml
+
+# RUN: %yaml2obj %s -o %t.binary
+# RUN: %bloaty %t.binary -d segments --domain=vm | %FileCheck %s
+
+# Should still work, just without compile unit info
+# CHECK: VM SIZE
+# CHECK: __LINKEDIT
+# CHECK: __TEXT
+
+## Minimal Mach-O executable
+--- !mach-o
+FileHeader:
+  magic:           0xFEEDFACF
+  cputype:         0x100000C
+  cpusubtype:      0x0
+  filetype:        0x2
+  ncmds:           15
+  sizeofcmds:      760
+  flags:           0x200085
+  reserved:        0x0
+LoadCommands:
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __PAGEZERO
+    vmaddr:          0
+    vmsize:          4294967296
+    fileoff:         0
+    filesize:        0
+    maxprot:         0
+    initprot:        0
+    nsects:          0
+    flags:           0
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         232
+    segname:         __TEXT
+    vmaddr:          4294967296
+    vmsize:          16384
+    fileoff:         0
+    filesize:        16384
+    maxprot:         5
+    initprot:        5
+    nsects:          2
+    flags:           0
+    Sections:
+      - sectname:        __text
+        segname:         __TEXT
+        addr:            0x100000348
+        size:            72
+        offset:          0x348
+        align:           2
+        reloff:          0x0
+        nreloc:          0
+        flags:           0x80000400
+        reserved1:       0x0
+        reserved2:       0x0
+        reserved3:       0x0
+        content:         00781F53C0035FD6F44FBEA9FD7B01A9FD43009160008052FAFFFF97F30300AA40008052F7FFFF970804130B13390011E00313AAF3FFFF976002000BFD7B41A9F44FC2A8C0035FD6
+      - sectname:        __unwind_info
+        segname:         __TEXT
+        addr:            0x100000390
+        size:            96
+        offset:          0x390
+        align:           2
+        reloff:          0x0
+        nreloc:          0
+        flags:           0x0
+        reserved1:       0x0
+        reserved2:       0x0
+        reserved3:       0x0
+        content:         010000001C000000000000001C000000000000001C00000002000000480300004000000040000000900300000000000040000000000000000000000000000000030000000C000200140002000000000008000001000000020100000400000000
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __LINKEDIT
+    vmaddr:          4294983680
+    vmsize:          16384
+    fileoff:         16384
+    filesize:        488
+    maxprot:         1
+    initprot:        1
+    nsects:          0
+    flags:           0
+  - cmd:             LC_DYLD_INFO_ONLY
+    cmdsize:         48
+    rebase_off:      0
+    rebase_size:     0
+    bind_off:        0
+    bind_size:       0
+    weak_bind_off:   0
+    weak_bind_size:  0
+    lazy_bind_off:   0
+    lazy_bind_size:  0
+    export_off:      16384
+    export_size:     72
+  - cmd:             LC_SYMTAB
+    cmdsize:         24
+    symoff:          16464
+    nsyms:           4
+    stroff:          16528
+    strsize:         64
+  - cmd:             LC_DYSYMTAB
+    cmdsize:         80
+    ilocalsym:       0
+    nlocalsym:       0
+    iextdefsym:      0
+    nextdefsym:      3
+    iundefsym:       3
+    nundefsym:       1
+    tocoff:          0
+    ntoc:            0
+    modtaboff:       0
+    nmodtab:         0
+    extrefsymoff:    0
+    nextrefsyms:     0
+    indirectsymoff:  0
+    nindirectsyms:   0
+    extreloff:       0
+    nextrel:         0
+    locreloff:       0
+    nlocrel:         0
+  - cmd:             LC_LOAD_DYLINKER
+    cmdsize:         32
+    name:            12
+    Content:         '/usr/lib/dyld'
+    ZeroPadBytes:    7
+  - cmd:             LC_UUID
+    cmdsize:         24
+    uuid:            DBCBC096-0980-3DA0-AC54-F36396C8B8F3
+  - cmd:             LC_BUILD_VERSION
+    cmdsize:         32
+    platform:        1
+    minos:           720896
+    sdk:             1703936
+    ntools:          1
+    Tools:
+      - tool:            3
+        version:         80020480
+  - cmd:             LC_SOURCE_VERSION
+    cmdsize:         16
+    version:         0
+  - cmd:             LC_MAIN
+    cmdsize:         24
+    entryoff:        848
+    stacksize:       0
+  - cmd:             LC_LOAD_DYLIB
+    cmdsize:         56
+    dylib:
+      name:            24
+      timestamp:       2
+      current_version: 88866816
+      compatibility_version: 65536
+    Content:         '/usr/lib/libSystem.B.dylib'
+    ZeroPadBytes:    6
+  - cmd:             LC_FUNCTION_STARTS
+    cmdsize:         16
+    dataoff:         16456
+    datasize:        8
+  - cmd:             LC_DATA_IN_CODE
+    cmdsize:         16
+    dataoff:         16464
+    datasize:        0
+  - cmd:             LC_CODE_SIGNATURE
+    cmdsize:         16
+    dataoff:         16592
+    datasize:        280
+LinkEditData:
+  ExportTrie:
+    TerminalSize:    0
+    NodeOffset:      0
+    Name:            ''
+    Flags:           0x0
+    Address:         0x0
+    Other:           0x0
+    ImportName:      ''
+    Children:
+      - TerminalSize:    0
+        NodeOffset:      23
+        Name:            _
+        Flags:           0x0
+        Address:         0x0
+        Other:           0x0
+        ImportName:      ''
+        Children:
+          - TerminalSize:    2
+            NodeOffset:      9
+            Name:            _mh_execute_header
+            Flags:           0x0
+            Address:         0x0
+            Other:           0x0
+            ImportName:      ''
+          - TerminalSize:    3
+            NodeOffset:      13
+            Name:            external_call
+            Flags:           0x0
+            Address:         0x348
+            Other:           0x0
+            ImportName:      ''
+          - TerminalSize:    3
+            NodeOffset:      18
+            Name:            main
+            Flags:           0x0
+            Address:         0x350
+            Other:           0x0
+            ImportName:      ''
+  NameList:
+    - n_strx:          4
+      n_type:          0xF
+      n_sect:          1
+      n_desc:          16
+      n_value:         4294967296
+    - n_strx:          24
+      n_type:          0xF
+      n_sect:          1
+      n_desc:          0
+      n_value:         4294968136
+    - n_strx:          39
+      n_type:          0xF
+      n_sect:          1
+      n_desc:          0
+      n_value:         4294968144
+    - n_strx:          45
+      n_type:          0x1
+      n_sect:          0
+      n_desc:          256
+      n_value:         0
+  StringTable:
+    - ''
+    - ''
+    - ''
+    - ''
+    - __mh_execute_header
+    - _external_call
+    - _main
+    - dyld_stub_binder
+    - ''
+    - ''
+  FunctionStarts:  [ 0x348, 0x350 ]
+...

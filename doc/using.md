@@ -327,6 +327,28 @@ can create with `dsymutil`:
 ```
 $ dsymutil bloaty
 $ strip bloaty  (optional)
+$ ./bloaty -d symbols bloaty  # Auto-discovers bloaty.dSYM
+```
+
+Bloaty will automatically discover and load debug symbols from
+`bloaty.dSYM/Contents/Resources/DWARF/bloaty` when analyzing `bloaty`.
+
+If you used `dsymutil -o` to write the dSYM to a different directory,
+you can explicitly specify its location:
+
+```
+$ dsymutil bloaty -o /path/to/symbols/bloaty.dSYM
+$ ./bloaty -d symbols --dsym=/path/to/symbols/bloaty.dSYM bloaty
+```
+
+**Note:** The `--dsym` option is also useful for debugging issues with auto-loading dSYMs.
+When you explicitly specify `--dsym`, Bloaty will throw informative error messages
+if the dSYM file is invalid or has a mismatched build ID, rather than silently
+ignoring the file as it does during auto-discovery.
+
+For cross-platform compatibility, `--debug-file` still works:
+
+```
 $ ./bloaty -d symbols --debug-file=bloaty.dSYM/Contents/Resources/DWARF/bloaty bloaty
 ```
 
