@@ -288,6 +288,21 @@ void ParseSegment(LoadCommand cmd, RangeSink* sink) {
   }
 }
 
+static bool IsObjectFile(string_view data) {
+  string_view header_data = data;
+  auto header = GetStructPointerAndAdvance<mach_header>(&header_data);
+  return header->filetype == MH_OBJECT;
+}
+
+static void CheckNotObject(const char* source, RangeSink* sink) {
+  if (IsObjectFile(sink->input_file().data())) {
+    THROWF(
+        "can't use data source '$0' on object files (only binaries and shared "
+        "libraries)",
+        source);
+  }
+}
+
 static void ParseDyldInfo(const LoadCommand& cmd, RangeSink* sink) {
   auto info = GetStructPointer<dyld_info_command>(cmd.command_data);
 
@@ -576,6 +591,7 @@ class MachOObjectFile : public ObjectFile {
           ParseSymbols(debug_file().file_data().data(), nullptr, sink);
           break;
         case DataSource::kCompileUnits: {
+          CheckNotObject("compileunits", sink);
           SymbolTable symtab;
           DualMap symbol_map;
           NameMunger empty_munger;
