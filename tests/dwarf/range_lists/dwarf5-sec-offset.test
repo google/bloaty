@@ -1,0 +1,79 @@
+# Test DWARF 5 range lists with DW_FORM_sec_offset
+#
+# This tests that bloaty correctly handles DWARF 5 range lists when
+# DW_AT_ranges uses DW_FORM_sec_offset (direct offset) instead of
+# DW_FORM_rnglistx (indexed form).
+#
+# Without support for DW_AT_ranges in DW_FORM_sec_offset form, this would
+# cause premature EOF or overflow errors.
+
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty %t.obj -d compileunits --domain=vm | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_EXEC
+  Machine:         EM_X86_64
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    VAddr:           0x1000
+    Align:           0x1000
+    FirstSec:        .text
+    LastSec:         .text
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x1000
+    AddressAlign:    0x10
+    Content:         '90909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090'
+DWARF:
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_addr
+            - Attribute:       DW_AT_ranges
+              Form:            DW_FORM_sec_offset
+  debug_str:
+    - 'test.c'
+  debug_info:
+    - Version:         5
+      UnitType:        0x01 # DW_UT_compile
+      AbbrevTableID:   0
+      AbbrOffset:      0x0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:
+            - Value:           0x0         # DW_AT_name -> "test.c"
+            - Value:           0x1000      # DW_AT_low_pc (base address for ranges)
+            - Value:           0x10        # DW_AT_ranges -> offset 0x10 in debug_rnglists (where range list starts)
+        - AbbrCode:        0x0           # Terminate DIE list
+  debug_rnglists:
+    - Lists:
+        - Entries:
+            - Operator: DW_RLE_base_address
+              Values:   [ 0x1000 ]
+            - Operator: DW_RLE_offset_pair
+              Values:   [ 0x0, 0x10 ]
+            - Operator: DW_RLE_start_length
+              Values:   [ 0x1050, 0x20 ]
+            - Operator: DW_RLE_end_of_list
+...
+
+# With support for DW_AT_ranges in DW_FORM_sec_offset form, bloaty should read
+# the range list from debug_rnglists and attribute the ranges to test.c.
+# Without this support, the ranges are not processed and we get only the
+# generic [section .text] instead.
+
+# CHECK: test.c

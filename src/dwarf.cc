@@ -455,7 +455,7 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
   }
 
   // Sometimes a location is given as an offset into debug_loc.
-  if (die.location_uint64) {
+  if (die.location_uint64 && cu.unit_sizes().dwarf_version() < 5) {
     uint64_t location = *die.location_uint64;;
     if (location < cu.dwarf().debug_loc.size()) {
       std::string_view loc_range = cu.dwarf().debug_loc.substr(location);
@@ -467,19 +467,28 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
               "\n",
               location);
     }
-  }
-
-  // DWARF 5 range list is the same information as "ranges" but in a different
-  // format.
-  if (die.rnglistx) {
-    uint64_t range_list = *die.rnglistx;
-    size_t offset_size = cu.unit_sizes().dwarf64() ? 8 : 4;
-    string_view offset_data =
-        StrictSubstr(cu.dwarf().debug_rnglists,
-                     cu.range_lists_base() + (range_list * offset_size));
-    uint64_t offset = cu.unit_sizes().ReadDWARFOffset(&offset_data);
-    string_view data = StrictSubstr(
-        cu.dwarf().debug_rnglists, cu.range_lists_base() + offset);
+  } else if (cu.unit_sizes().dwarf_version() >= 5) {
+    // DWARF 5 range list is the same information as "ranges" but in a different
+    // format.
+    std::string_view data;
+    if (die.rnglistx) {
+      // Handle DW_FORM_rnglistx (indexed form)
+      uint64_t range_list = *die.rnglistx;
+      size_t offset_size = cu.unit_sizes().dwarf64() ? 8 : 4;
+      string_view offset_data =
+          StrictSubstr(cu.dwarf().debug_rnglists,
+                       cu.range_lists_base() + (range_list * offset_size));
+      uint64_t offset = cu.unit_sizes().ReadDWARFOffset(&offset_data);
+      data = StrictSubstr(
+          cu.dwarf().debug_rnglists, cu.range_lists_base() + offset);
+    } else if (die.ranges) {
+      // Handle DW_FORM_sec_offset (direct offset)
+      uint64_t ranges_offset = *die.ranges;
+      data = StrictSubstr(cu.dwarf().debug_rnglists, ranges_offset);
+    } else {
+      // No valid range list found, return early
+      return;
+    }
     const char* start = data.data();
     bool done = false;
     uint64_t base_address = cu.addr_base();
@@ -516,11 +525,24 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
                                           cu.unit_name());
           break;
         }
-        case DW_RLE_base_address:
-        case DW_RLE_start_end:
-        case DW_RLE_start_length:
-          THROW("NYI");
+        case DW_RLE_base_address: {
+          base_address = cu.unit_sizes().ReadAddress(&data);
           break;
+        }
+        case DW_RLE_start_end: {
+          uint64_t start = cu.unit_sizes().ReadAddress(&data);
+          uint64_t end = cu.unit_sizes().ReadAddress(&data);
+          sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, end - start,
+                                          cu.unit_name());
+          break;
+        }
+        case DW_RLE_start_length: {
+          uint64_t start = cu.unit_sizes().ReadAddress(&data);
+          uint64_t len = dwarf::ReadLEB128<uint64_t>(&data);
+          sink->AddVMRangeIgnoreDuplicate("dwarf_rangelst", start, len,
+                                          cu.unit_name());
+          break;
+        }
       }
     }
     string_view all(start, data.data() - start);
