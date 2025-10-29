@@ -213,7 +213,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
 
 void NameMunger::AddRegex(const std::string& regex,
                           const std::string& replacement) {
-  auto reg = absl::make_unique<ReImpl>(regex);
+  auto reg = std::make_unique<ReImpl>(regex);
   regexes_.push_back(std::make_pair(std::move(reg), replacement));
 }
 
@@ -1495,7 +1495,7 @@ class Bloaty {
                          const Options& options) {
     for (size_t i = 0; i < T; i++) {
       const DataSourceDefinition& source = sources[i];
-      auto configured_source = absl::make_unique<ConfiguredDataSource>(source);
+      auto configured_source = std::make_unique<ConfiguredDataSource>(source);
 
       if (configured_source->effective_source == DataSource::kSymbols) {
         configured_source->effective_source = EffectiveSymbolSource(options);
@@ -1637,7 +1637,7 @@ void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
   }
 
   all_known_sources_[source.name()] =
-      absl::make_unique<ConfiguredDataSource>(iter->second->definition);
+      std::make_unique<ConfiguredDataSource>(iter->second->definition);
   NameMunger* munger = all_known_sources_[source.name()]->munger.get();
   for (const auto& regex : source.rewrite()) {
     munger->AddRegex(regex.pattern(), regex.replacement());
@@ -1755,14 +1755,14 @@ void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
   std::vector<RangeSink*> filename_sink_ptrs;
 
   // Base map always goes first.
-  sinks.push_back(absl::make_unique<RangeSink>(
+  sinks.push_back(std::make_unique<RangeSink>(
       &file->file_data(), options_, DataSource::kSegments, nullptr, nullptr));
   NameMunger empty_munger;
   sinks.back()->AddOutput(maps.base_map(), &empty_munger);
   sink_ptrs.push_back(sinks.back().get());
 
   for (auto source : sources_) {
-    sinks.push_back(absl::make_unique<RangeSink>(
+    sinks.push_back(std::make_unique<RangeSink>(
         &file->file_data(), options_, source->effective_source, maps.base_map(),
         arena_.get()));
     sinks.back()->AddOutput(maps.AppendMap(), source->munger.get());
@@ -1859,7 +1859,7 @@ void Bloaty::ScanAndRollupFiles(const std::vector<std::string>& filenames,
 
   std::unique_ptr<ReImpl> regex = nullptr;
   if (options_.has_source_filter()) {
-    regex = absl::make_unique<ReImpl>(options_.source_filter());
+    regex = std::make_unique<ReImpl>(options_.source_filter());
   }
 
   for (int i = 0; i < num_threads; i++) {
