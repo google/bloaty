@@ -405,6 +405,12 @@ void ParseLoadCommand(const LoadCommand& cmd, RangeSink* sink) {
     case LC_LINKER_OPTIMIZATION_HINT:
       ParseLinkeditCommand("Optimization Hints", cmd, sink);
       break;
+    case LC_DYLD_CHAINED_FIXUPS:
+      ParseLinkeditCommand("Chained Fixups", cmd, sink);
+      break;
+    case LC_DYLD_EXPORTS_TRIE:
+      ParseLinkeditCommand("Exports Trie", cmd, sink);
+      break;
   }
 }
 
