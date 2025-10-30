@@ -60,7 +60,9 @@ typedef size_t z_size_t;
 #include "bloaty.pb.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/text_format.h"
+#include "llvm/Demangle/Demangle.h"
 #include "re.h"
+#include "swift/Demangling/Demangle.h"
 #include "util.h"
 
 using std::string_view;
@@ -162,9 +164,6 @@ static std::string CSVEscape(string_view str) {
   }
 }
 
-extern "C" char* __cxa_demangle(const char* mangled_name, char* buf, size_t* n,
-                                int* status);
-
 std::string ItaniumDemangle(string_view symbol, DataSource source) {
   if (source != DataSource::kShortSymbols &&
       source != DataSource::kFullSymbols) {
@@ -182,15 +181,41 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
     if (absl::debugging_internal::Demangle(demangle_from.data(), demangled,
                                            sizeof(demangled))) {
       return std::string(demangled);
+    } else if (char* ms = llvm::microsoftDemangle(
+                   demangle_from, NULL, NULL,
+                   llvm::MSDemangleFlags(llvm::MSDF_NoAccessSpecifier |
+                                         llvm::MSDF_NoCallingConvention |
+                                         llvm::MSDF_NoMemberType |
+                                         llvm::MSDF_NoReturnType))) {
+      std::string ret(ms);
+      free(ms);
+      return ret;
+    } else if (swift::Demangle::isSwiftSymbol(demangle_from)) {
+      auto Opts =
+          swift::Demangle::DemangleOptions::SimplifiedUIDemangleOptions();
+      std::string swift =
+          swift::Demangle::demangleSymbolAsString(demangle_from, Opts);
+      return swift;
     } else {
       return std::string(symbol);
     }
   } else if (source == DataSource::kFullSymbols) {
-    char* demangled = __cxa_demangle(demangle_from.data(), NULL, NULL, NULL);
-    if (demangled) {
-      std::string ret(demangled);
-      free(demangled);
+    if (char* itanium = llvm::itaniumDemangle(demangle_from)) {
+      std::string ret(itanium);
+      free(itanium);
       return ret;
+    } else if (char* ms = llvm::microsoftDemangle(demangle_from, NULL, NULL)) {
+      std::string ret(ms);
+      free(ms);
+      return ret;
+    } else if (char* rust = llvm::rustDemangle(demangle_from)) {
+      std::string ret(rust);
+      free(rust);
+      return ret;
+    } else if (swift::Demangle::isSwiftSymbol(demangle_from)) {
+      swift::Demangle::DemangleOptions options;
+      options.SynthesizeSugarOnTypes = true;
+      return swift::Demangle::demangleSymbolAsString(demangle_from, options);
     } else {
       return std::string(symbol);
     }
