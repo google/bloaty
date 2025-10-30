@@ -1,0 +1,50 @@
+# Test that bloaty can demangle Swift, Rust, Microsoft, and complex C++ symbols using demumble
+
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty %t.obj -d fullsymbols | %FileCheck %s --check-prefix=FULL
+# RUN: %bloaty %t.obj -d shortsymbols | %FileCheck %s --check-prefix=SHORT
+
+# FULL-DAG: test.hello() -> ()
+# FULL-DAG: foo::bar::<>
+# FULL-DAG: void __cdecl test(void)
+# FULL-DAG: __llvm_libc_21_0_0_git::cpp::enable_if<cpp::is_floating_point_v<_Float16> && FPBits<_Float16>::FRACTION_LEN < 64ul, _Float16>::type __llvm_libc_21_0_0_git::fputil::DyadicFloat<64ul>::generic_as<_Float16, true>() const
+
+# SHORT-DAG: hello()
+# SHORT-DAG: foo::bar::<>
+# SHORT-DAG: test(void)
+# SHORT-DAG: __llvm_libc_21_0_0_git::fputil::DyadicFloat<>::generic_as<>()
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x10
+    Content:         '90909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090'
+Symbols:
+  - Name:            _$s4test5helloyyF
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0
+    Size:            0x10
+  - Name:            _RINvC3foo3barE
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x10
+    Size:            0x10
+  - Name:            '?test@@YAXXZ'
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x20
+    Size:            0x10
+  - Name:            _ZNK22__llvm_libc_21_0_0_git6fputil11DyadicFloatILm64EE10generic_asIDF16_Lb1EEENS_3cpp9enable_ifIXaasr3cppE19is_floating_point_vIT_Eltsr6FPBitsIS6_EE12FRACTION_LENLm64EES6_E4typeEv
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x30
+    Size:            0x10
+...
