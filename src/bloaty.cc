@@ -2001,6 +2001,7 @@ Options:
   -w                 Wide output; don't truncate long labels.
   --help             Display this message and exit.
   --list-sources     Show a list of available sources and exit.
+  --version          Display version information and exit.
   --source-filter=PATTERN
                      Only show keys with names matching this pattern.
 
@@ -2010,6 +2011,7 @@ Options for debugging Bloaty:
   --debug-fileoff=OFF
                      Print extended debugging information for the given
                      VM address and/or file offset.
+  --raw-map          Dump the raw VM and file maps.
   -v                 Verbose output.  Dumps warnings encountered during
                      processing and full VM/file maps at the end.
                      Add more v's (-vv, -vvv) for even more.
