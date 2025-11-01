@@ -297,6 +297,8 @@ struct load_command {
 #define LC_VERSION_MIN_WATCHOS 0x30 /* build for Watch min OS version */
 #define LC_NOTE 0x31 /* arbitrary data included within a Mach-O file */
 #define LC_BUILD_VERSION 0x32 /* build for platform min OS version */
+#define LC_DYLD_EXPORTS_TRIE (0x33 | LC_REQ_DYLD) /* used with linkedit_data_command, payload is trie */
+#define LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
 
 /*
  * A variable length string in a load command is represented by an lc_str
