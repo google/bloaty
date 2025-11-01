@@ -32,6 +32,9 @@ message Options {
   // Build id to source map file names, delimited by '='.
   repeated string source_map = 15;
 
+  // Mach-O specific option to specify path to a dSYM file.
+  repeated string dsym_path = 16;
+
   // The data sources to scan in each file.  At least one data source must be
   // specified.  If more than one source is specified, the output is
   // hierarchical.
