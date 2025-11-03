@@ -15,6 +15,7 @@
 #ifndef BLOATY_TESTS_STRARR_H_
 #define BLOATY_TESTS_STRARR_H_
 
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
