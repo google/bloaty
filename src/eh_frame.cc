@@ -41,6 +41,13 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
         value = ReadFixed<uint32_t>(data);
       }
       break;
+    case DW_EH_PE_sabsptr:
+      if (is_64bit) {
+        value = ReadFixed<int64_t>(data);
+      } else {
+        value = ReadFixed<int32_t>(data);
+      }
+      break;
     case DW_EH_PE_uleb128:
       value = dwarf::ReadLEB128<uint64_t>(data);
       break;
