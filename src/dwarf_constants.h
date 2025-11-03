@@ -674,10 +674,15 @@ enum PointerEncoding {
   DW_EH_PE_udata2      = 0x02,
   DW_EH_PE_udata4      = 0x03,
   DW_EH_PE_udata8      = 0x04,
-  DW_EH_PE_sleb128     = 0x09,
-  DW_EH_PE_sdata2      = 0x0A,
-  DW_EH_PE_sdata4      = 0x0B,
-  DW_EH_PE_sdata8      = 0x0C,
+
+  // This acts as a flag.
+  DW_EH_PE_signed      = 0x08,
+
+  DW_EH_PE_sabsptr     = DW_EH_PE_absptr | DW_EH_PE_signed,
+  DW_EH_PE_sleb128     = DW_EH_PE_uleb128 | DW_EH_PE_signed,
+  DW_EH_PE_sdata2      = DW_EH_PE_udata2 | DW_EH_PE_signed,
+  DW_EH_PE_sdata4      = DW_EH_PE_udata4 | DW_EH_PE_signed,
+  DW_EH_PE_sdata8      = DW_EH_PE_udata8 | DW_EH_PE_signed,
   DW_EH_PE_FORMAT_MASK = 0x0f,
 
   DW_EH_PE_pcrel       = 0x10,
