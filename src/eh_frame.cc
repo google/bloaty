@@ -131,7 +131,7 @@ uint64_t ReadEncodedPointer(uint8_t encoding, bool is_64bit, string_view* data,
 //   https://github.com/llvm-mirror/libunwind/blob/master/src/DwarfParser.hpp
 // * libgcc
 //   https://github.com/gcc-mirror/gcc/blob/master/libgcc/unwind-dw2-fde.c
-void ReadEhFrame(string_view data, RangeSink* sink) {
+void ReadEhFrame(string_view data, RangeSink* sink, bool is_64bit) {
   string_view remaining = data;
 
   struct CIEInfo {
@@ -194,7 +194,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
           case 'P': {
             uint8_t encoding = ReadFixed<uint8_t>(&entry);
             cie_info.personality_function =
-                ReadEncodedPointer(encoding, true, &entry, nullptr, sink);
+                ReadEncodedPointer(encoding, is_64bit, &entry, nullptr, sink);
             break;
           }
           default:
@@ -208,14 +208,13 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
         THROW("Couldn't find CIE for FDE");
       }
       const CIEInfo& cie_info = iter->second;
-      // TODO(haberman): don't hard-code 64-bit.
-      uint64_t address = ReadEncodedPointer(cie_info.fde_encoding, true, &entry,
+      uint64_t address = ReadEncodedPointer(cie_info.fde_encoding, is_64bit, &entry,
                                             nullptr, sink);
       // TODO(haberman); Technically the FDE addresses could span a
       // function/compilation unit?  They can certainly span inlines.
       /*
       uint64_t length =
-        ReadEncodedPointer(cie_info.fde_encoding & 0xf, true, &entry, sink);
+        ReadEncodedPointer(cie_info.fde_encoding & 0xf, is_64bit, &entry, sink);
       (void)length;
 
       if (cie_info.has_augmentation_length) {
@@ -224,7 +223,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
       }
 
       uint64_t lsda =
-          ReadEncodedPointer(cie_info.lsda_encoding, true, &entry, sink);
+          ReadEncodedPointer(cie_info.lsda_encoding, is_64bit, &entry, sink);
       if (lsda) {
       }
       */
@@ -236,7 +235,7 @@ void ReadEhFrame(string_view data, RangeSink* sink) {
 
 // See documentation here:
 //   http://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html#EHFRAME
-void ReadEhFrameHdr(string_view data, RangeSink* sink) {
+void ReadEhFrameHdr(string_view data, RangeSink* sink, bool is_64bit) {
   const char* base = data.data();
   uint8_t version = ReadFixed<uint8_t>(&data);
   uint8_t eh_frame_ptr_enc = ReadFixed<uint8_t>(&data);
@@ -247,12 +246,11 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
     THROWF("Unknown eh_frame_hdr version: $0", version);
   }
 
-  // TODO(haberman): don't hard-code 64-bit.
   uint64_t eh_frame_ptr =
-      ReadEncodedPointer(eh_frame_ptr_enc, true, &data, base, sink);
+      ReadEncodedPointer(eh_frame_ptr_enc, is_64bit, &data, base, sink);
   (void)eh_frame_ptr;
   uint64_t fde_count =
-      ReadEncodedPointer(fde_count_enc, true, &data, base, sink);
+      ReadEncodedPointer(fde_count_enc, is_64bit, &data, base, sink);
 
   if (table_enc == DW_EH_PE_omit) {
     return;
@@ -261,8 +259,8 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
   for (uint64_t i = 0; i < fde_count; i++) {
     string_view entry_data = data;
     uint64_t initial_location =
-        ReadEncodedPointer(table_enc, true, &data, base, sink);
-    uint64_t fde_addr = ReadEncodedPointer(table_enc, true, &data, base, sink);
+        ReadEncodedPointer(table_enc, is_64bit, &data, base, sink);
+    uint64_t fde_addr = ReadEncodedPointer(table_enc, is_64bit, &data, base, sink);
     entry_data.remove_suffix(data.size());
     sink->AddFileRangeForVMAddr("dwarf_fde_table", initial_location,
                                 entry_data);
