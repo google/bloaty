@@ -645,6 +645,9 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
     GeneralDIE compileunit_die;
     DwoFilePointer dwo_info;
     auto* abbrev = die_reader.ReadCode(cu);
+    if (!abbrev) {
+      continue;
+    }
     die_reader.ReadAttributes(
         cu, abbrev,
         [&](uint16_t tag, dwarf::AttrValue value) {
