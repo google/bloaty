@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2016 Apple, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -42,22 +42,48 @@
  * and contains the constants for the possible values of these types.
  */
 #include <stdint.h>
-#include "third_party/darwin_xnu_macho/mach/machine.h"
+
+#if __has_include(<mach/machine.h>)
+#include <mach/machine.h>
+#endif
+
+#if __has_include(<architecture/byte_order.h>)
+#include <architecture/byte_order.h>
+#endif
 
 #define FAT_MAGIC	0xcafebabe
 #define FAT_CIGAM	0xbebafeca	/* NXSwapLong(FAT_MAGIC) */
 
 struct fat_header {
-	uint32_t	magic;		/* FAT_MAGIC */
+	uint32_t	magic;		/* FAT_MAGIC or FAT_MAGIC_64 */
 	uint32_t	nfat_arch;	/* number of structs that follow */
 };
 
 struct fat_arch {
-	cpu_type_t	cputype;	/* cpu specifier (int) */
-	cpu_subtype_t	cpusubtype;	/* machine specifier (int) */
+	int32_t		cputype;	/* cpu specifier (int) */
+	int32_t		cpusubtype;	/* machine specifier (int) */
 	uint32_t	offset;		/* file offset to this object file */
 	uint32_t	size;		/* size of this object file */
 	uint32_t	align;		/* alignment as a power of 2 */
+};
+
+/*
+ * The support for the 64-bit fat file format described here is a work in
+ * progress and not yet fully supported in all the Apple Developer Tools.
+ *
+ * When a slice is greater than 4mb or an offset to a slice is greater than 4mb
+ * then the 64-bit fat file format is used.
+ */
+#define FAT_MAGIC_64	0xcafebabf
+#define FAT_CIGAM_64	0xbfbafeca	/* NXSwapLong(FAT_MAGIC_64) */
+
+struct fat_arch_64 {
+	int32_t		cputype;	/* cpu specifier (int) */
+	int32_t		cpusubtype;	/* machine specifier (int) */
+	uint64_t	offset;		/* file offset to this object file */
+	uint64_t	size;		/* size of this object file */
+	uint32_t	align;		/* alignment as a power of 2 */
+	uint32_t	reserved;	/* reserved */
 };
 
 #endif /* _MACH_O_FAT_H_ */
