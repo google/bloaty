@@ -25,11 +25,11 @@ constexpr uint16_t dos_magic = 0x5A4D;  // MZ
 
 // From LIEF/include/LIEF/PE/Structures.hpp.in
 //! Sizes in bytes of various things in the COFF format.
-constexpr size_t kHeader16Size = 20;
-constexpr size_t kHeader32Size = 56;
+[[maybe_unused]] constexpr size_t kHeader16Size = 20;
+[[maybe_unused]] constexpr size_t kHeader32Size = 56;
 constexpr size_t kNameSize = 8;
 constexpr size_t kSymbol16Size = 18;
-constexpr size_t kSymbol32Size = 20;
+[[maybe_unused]] constexpr size_t kSymbol32Size = 20;
 constexpr size_t kSectionSize = 40;
 constexpr size_t kRelocationSize = 10;
 constexpr size_t kBaseRelocationBlockSize = 8;
