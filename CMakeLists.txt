@@ -93,6 +93,8 @@ if(BLOATY_ENABLE_RE2)
   add_definitions(-DUSE_RE2)
 endif()
 
+include(CheckCXXCompilerFlag)
+
 # Set MSVC runtime before including thirdparty libraries
 if(MSVC)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.15)
@@ -147,6 +149,21 @@ if(UNIX OR MINGW)
     set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "enable shared libs for proto2" FORCE)
     add_subdirectory(third_party/protobuf)
     include_directories(SYSTEM third_party/protobuf/src)
+
+    # Work around gcc warning in protobuf's message_lite.cc
+    # See https://github.com/protocolbuffers/protobuf/issues/6419
+    CHECK_CXX_COMPILER_FLAG("-Wno-stringop-overflow" COMPILER_SUPPORTS_WNO_STRINGOP_OVERFLOW)
+    CHECK_CXX_COMPILER_FLAG("-Wno-stringop-overread" COMPILER_SUPPORTS_WNO_STRINGOP_OVERREAD)
+    if(COMPILER_SUPPORTS_WNO_STRINGOP_OVERFLOW)
+      target_compile_options(libprotobuf PRIVATE -Wno-stringop-overflow)
+      target_compile_options(libprotobuf-lite PRIVATE -Wno-stringop-overflow)
+      target_compile_options(libprotoc PRIVATE -Wno-stringop-overflow)
+    endif()
+    if(COMPILER_SUPPORTS_WNO_STRINGOP_OVERREAD)
+      target_compile_options(libprotobuf PRIVATE -Wno-stringop-overread)
+      target_compile_options(libprotobuf-lite PRIVATE -Wno-stringop-overread)
+      target_compile_options(libprotoc PRIVATE -Wno-stringop-overread)
+    endif()
   endif()
   if(NOT ZLIB_FOUND)
     init_submodule(third_party/zlib)
@@ -185,6 +202,21 @@ else()
     set_property(TARGET libprotobuf-lite PROPERTY CXX_STANDARD 20)
     set_property(TARGET libprotoc PROPERTY CXX_STANDARD 20)
     set_property(TARGET protoc PROPERTY CXX_STANDARD 20)
+  endif()
+
+  # Work around gcc warning in protobuf's message_lite.cc
+  # See https://github.com/protocolbuffers/protobuf/issues/6419
+  CHECK_CXX_COMPILER_FLAG("-Wno-stringop-overflow" COMPILER_SUPPORTS_WNO_STRINGOP_OVERFLOW)
+  CHECK_CXX_COMPILER_FLAG("-Wno-stringop-overread" COMPILER_SUPPORTS_WNO_STRINGOP_OVERREAD)
+  if(COMPILER_SUPPORTS_WNO_STRINGOP_OVERFLOW)
+    target_compile_options(libprotobuf PRIVATE -Wno-stringop-overflow)
+    target_compile_options(libprotobuf-lite PRIVATE -Wno-stringop-overflow)
+    target_compile_options(libprotoc PRIVATE -Wno-stringop-overflow)
+  endif()
+  if(COMPILER_SUPPORTS_WNO_STRINGOP_OVERREAD)
+    target_compile_options(libprotobuf PRIVATE -Wno-stringop-overread)
+    target_compile_options(libprotobuf-lite PRIVATE -Wno-stringop-overread)
+    target_compile_options(libprotoc PRIVATE -Wno-stringop-overread)
   endif()
 
   init_submodule(third_party/zlib)
@@ -245,7 +277,6 @@ elseif(UNIX)
 endif()
 
 # When using Ninja, compiler output won't be colorized without this.
-include(CheckCXXCompilerFlag)
 CHECK_CXX_COMPILER_FLAG(-fdiagnostics-color=always SUPPORTS_COLOR_ALWAYS)
 if(SUPPORTS_COLOR_ALWAYS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")

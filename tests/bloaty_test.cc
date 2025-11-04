@@ -249,7 +249,7 @@ TEST_F(BloatyTest, SimpleBinary) {
 TEST_F(BloatyTest, InputFiles) {
   std::string file1 = "05-binary.bin";
   std::string file2 = "07-binary-stripped.bin";
-  uint64_t size1, size2;
+  uint64_t size1 = 0, size2 = 0;
   ASSERT_TRUE(GetFileSize(file1, &size1));
   ASSERT_TRUE(GetFileSize(file2, &size2));
   RunBloaty({"bloaty", file1, file2, "-d", "inputfiles"});

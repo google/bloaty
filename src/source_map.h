@@ -37,7 +37,7 @@ class SourceMapObjectFile : public ObjectFile {
     return build_id_;
   }
 
-  void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
+  void ProcessFile(const std::vector<RangeSink*>& /*sinks*/) const override {
     WARN("General processing not supported for source map files");
   }
 
