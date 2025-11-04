@@ -223,6 +223,40 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
             }
             break;
           }
+          case DW_LNCT_MD5: {
+            switch (form) {
+              case DW_FORM_data16:
+                SkipBytes(16, &data);  // MD5 is 16 bytes
+                break;
+              default:
+                THROW("unhandled form for MD5");
+            }
+            break;
+          }
+          case DW_LNCT_timestamp:
+          case DW_LNCT_size: {
+            // Skip optional timestamp and size fields - bloaty doesn't need them
+            switch (form) {
+              case DW_FORM_udata:
+                ReadLEB128<uint64_t>(&data);
+                break;
+              case DW_FORM_data1:
+                ReadFixed<uint8_t>(&data);
+                break;
+              case DW_FORM_data2:
+                ReadFixed<uint16_t>(&data);
+                break;
+              case DW_FORM_data4:
+                ReadFixed<uint32_t>(&data);
+                break;
+              case DW_FORM_data8:
+                ReadFixed<uint64_t>(&data);
+                break;
+              default:
+                THROW("unhandled form for timestamp/size");
+            }
+            break;
+          }
           default: {
             THROW("unhandled type for file format");
           }
