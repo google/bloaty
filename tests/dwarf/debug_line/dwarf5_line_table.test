@@ -1,0 +1,29 @@
+# Test that we correctly parse DWARF5 .debug_line format.
+#
+# DWARF5 changed the directory and file table format from simple null-terminated
+# strings to structured entries with content type descriptors (DW_LNCT_*) and forms.
+#
+# This test uses a pre-compiled ELF binary because yaml2obj doesn't support
+# DWARF5's structured line table format (it only supports DWARF4 format).
+#
+# Binary compilation (on Linux, in a clean directory):
+#   mkdir -p /tmp/src && cd /tmp/src
+#   clang -gdwarf-5 dwarf5_simple.c -o dwarf5_simple_exe
+#
+# See tests/testdata/dwarf5/README.md for details.
+#
+# The binary tests:
+# - DWARF5 line table header with address_size and segment_selector_size
+# - Structured directory table with DW_LNCT_path
+# - Structured file table with DW_LNCT_path, DW_LNCT_directory_index, and DW_LNCT_MD5
+# - Line program parsing with DWARF5 semantics
+
+# RUN: %bloaty %S/../../testdata/dwarf5/dwarf5_simple_exe -d inlines --raw-map --domain=vm | %FileCheck %s
+
+# Verify we can parse DWARF5 line tables and extract line info
+# The test binary has add() and main() functions
+# CHECK: VM MAP:
+# CHECK: {{[0-9a-f]+}}-{{[0-9a-f]+}} {{.*}} /tmp/src/dwarf5_simple.c:1
+# CHECK: {{[0-9a-f]+}}-{{[0-9a-f]+}} {{.*}} /tmp/src/dwarf5_simple.c:2
+# CHECK: {{[0-9a-f]+}}-{{[0-9a-f]+}} {{.*}} /tmp/src/dwarf5_simple.c:5
+# CHECK: {{[0-9a-f]+}}-{{[0-9a-f]+}} {{.*}} /tmp/src/dwarf5_simple.c:6
