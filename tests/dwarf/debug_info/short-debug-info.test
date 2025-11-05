@@ -1,0 +1,25 @@
+# Tests that bloaty handles a short DWARF compilation unit gracefully
+# instead of crashing with a segmentation fault.
+# The .debug_info section contains only a CU header (11 bytes) and no DIEs.
+# ReadTopLevelDIE attempts to read the first code, fails, and returns null.
+
+# RUN: %yaml2obj %s -o %t.o
+# RUN: not %bloaty %t.o -d compileunits 2>&1 | %FileCheck %s
+
+# CHECK: bloaty: short DWARF compilation unit
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_EXEC
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .debug_info
+    Type:            SHT_PROGBITS
+    # Length=7 (4 bytes), Version=4 (2 bytes), AbbrevOffset=0 (4 bytes), AddrSize=8 (1 byte)
+    # Total 11 bytes. ReadHeader succeeds, but ReadCode fails immediately.
+    Content:         '0700000004000000000008'
+  - Name:            .debug_abbrev
+    Type:            SHT_PROGBITS
+    Content:         '00'
