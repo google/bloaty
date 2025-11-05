@@ -1,0 +1,72 @@
+# Tests that we can correctly parse DWARF 5 DW_UT_split_type units.
+# These units have an extra TypeOffset field in the header compared to DW_UT_split_compile.
+
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty %t.obj -d compileunits --raw-map --domain=vm | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+ProgramHeaders:
+  - Type:            PT_LOAD
+    Flags:           [ PF_X, PF_R ]
+    FirstSec:        .text
+    LastSec:         .text
+    VAddr:           0x0
+    Align:           0x1000
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Size:            0x10
+    Address:         0x0
+    AddressAlign:    0x10
+  - Name:            .debug_info
+    Type:            SHT_PROGBITS
+    # Manually constructed .debug_info section because yaml2obj doesn't support TypeOffset.
+    # Unit 1: DW_UT_split_type
+    #   Length: 0x19 (25 bytes) -> 19000000
+    #   Version: 5 -> 0500
+    #   Unit Type: DW_UT_split_type (0x06) -> 06
+    #   Address Size: 8 -> 08
+    #   Abbrev Offset: 0 -> 00000000
+    #   Type Signature: 0xdeadbeefdeadbeef -> efbeaddeefbeadde
+    #   Type Offset: 0x25 -> 25000000
+    #   DIE 1: Abbrev 1 (DW_TAG_type_unit), Name offset 0 ("MyType") -> 0100000000
+    # Unit 2: DW_UT_compile
+    #   Length: 0x19 (25 bytes) -> 19000000
+    #   Version: 5 -> 0500
+    #   Unit Type: DW_UT_compile (0x01) -> 01
+    #   Address Size: 8 -> 08
+    #   Abbrev Offset: 0 -> 00000000
+    #   DIE 2: Abbrev 2 (DW_TAG_compile_unit), Name offset 7 ("MyCU"), LowPC 0, HighPC 0x10 -> 0207000000000000000000000010000000
+    Content:         '190000000500060800000000efbeaddeefbeadde2500000001000000001900000005000108000000000207000000000000000000000010000000'
+DWARF:
+  debug_str:
+    - MyType
+    - MyCU
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_type_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+        - Code:            0x2
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_name
+              Form:            DW_FORM_strp
+            - Attribute:       DW_AT_low_pc
+              Form:            DW_FORM_addr
+            - Attribute:       DW_AT_high_pc
+              Form:            DW_FORM_data4
+
+# CHECK: VM MAP:
+# CHECK: 0-10              16             MyCU
