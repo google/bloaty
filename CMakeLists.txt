@@ -131,6 +131,12 @@ if(UNIX OR MINGW)
     endif()
   endif()
   if(CAPSTONE_FOUND)
+    # Work around pkg-config files that incorrectly point to include/capstone
+    # instead of include e.g. homebrew's capstone package
+    get_filename_component(CAPSTONE_DIR_NAME "${CAPSTONE_INCLUDE_DIRS}" NAME)
+    if(CAPSTONE_DIR_NAME STREQUAL "capstone")
+      get_filename_component(CAPSTONE_INCLUDE_DIRS "${CAPSTONE_INCLUDE_DIRS}" DIRECTORY)
+    endif()
     include_directories(${CAPSTONE_INCLUDE_DIRS})
   else()
     init_submodule(third_party/capstone)
