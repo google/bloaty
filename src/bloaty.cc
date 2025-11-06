@@ -2170,6 +2170,11 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       if (!google::protobuf::TextFormat::Merge(&stream, options)) {
         THROWF("error parsing configuration out of file $0", option);
       }
+      // max_rows_per_level: 0 means "show all rows" (same as -n 0)
+      if (options->has_max_rows_per_level() &&
+          options->max_rows_per_level() == 0) {
+        options->set_max_rows_per_level(INT64_MAX);
+      }
     } else if (args.TryParseOption("-d", &option)) {
       std::vector<std::string> names = absl::StrSplit(option, ',');
       for (const auto& name : names) {
