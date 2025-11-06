@@ -55,6 +55,13 @@ TEST_F(BloatyTest, SimpleObjectFile) {
   EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 1);
 
+  // Test that max_rows_per_level: 0 in config works the same as -n 0
+  RunBloaty({"bloaty", "-c", "../max_rows_zero.bloaty", file});
+  EXPECT_GT(top_row_->size.vm, 64);
+  EXPECT_LT(top_row_->size.vm, 300);
+  EXPECT_EQ(top_row_->size.file, size);
+  EXPECT_GT(top_row_->sorted_children.size(), 1);
+
   // Same with segments (we fake segments on .o files).
   RunBloaty({"bloaty", "-d", "segments", file});
   EXPECT_GT(top_row_->size.vm, 64);
