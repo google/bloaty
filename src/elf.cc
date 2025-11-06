@@ -1335,7 +1335,7 @@ class ElfObjectFile : public ObjectFile {
           break;
         }
         case DataSource::kInlines: {
-          CheckNotObject("lineinfo", sink);
+          CheckNotObject("inlines", sink);
           dwarf::File dwarf;
           ReadDWARFSections(debug_file().file_data(), &dwarf, sink);
           ReadDWARFInlines(dwarf, sink, true);
