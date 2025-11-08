@@ -314,8 +314,8 @@ inline void ReadDWARFCompileUnits(const dwarf::File& file, const DualMap& map,
 }
 void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
                       bool include_line);
-void ReadEhFrame(std::string_view contents, RangeSink* sink);
-void ReadEhFrameHdr(std::string_view contents, RangeSink* sink);
+void ReadEhFrame(std::string_view contents, RangeSink* sink, bool is_64bit);
+void ReadEhFrameHdr(std::string_view contents, RangeSink* sink, bool is_64bit);
 
 // Demangle C++ symbols according to the Itanium ABI.  The |source| argument
 // controls what demangling mode we are using.

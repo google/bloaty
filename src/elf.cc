@@ -1022,9 +1022,9 @@ static void ReadELFTables(const InputFile& file, RangeSink* sink) {
                  // fde entries from there). But these section names should be
                  // standard enough that this approach works also.
                  if (section.GetName() == ".eh_frame") {
-                   ReadEhFrame(section.contents(), sink);
+                   ReadEhFrame(section.contents(), sink, elf.is_64bit());
                  } else if (section.GetName() == ".eh_frame_hdr") {
-                   ReadEhFrameHdr(section.contents(), sink);
+                   ReadEhFrameHdr(section.contents(), sink, elf.is_64bit());
                  }
                }
              });
