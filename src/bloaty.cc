@@ -29,6 +29,7 @@ typedef size_t z_size_t;
 
 #include <atomic>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -1526,6 +1527,9 @@ class Bloaty {
   void AddFilename(const std::string& filename, bool base_file);
   void AddDebugFilename(const std::string& filename);
   void AddSourceMapFilename(const std::string& filename);
+  void AddDsymFilename(const Options& options, const std::string& filename);
+  void TryAutoLoadDsym(const std::string& binary_path,
+                       const std::string& build_id);
 
   size_t GetSourceCount() const { return sources_.size(); }
 
@@ -1634,6 +1638,9 @@ void Bloaty::AddFilename(const std::string& filename, bool is_base) {
   auto object_file = GetObjectFile(filename);
   std::string build_id = object_file->GetBuildId();
 
+  // Automatically try to load dSYM file for Mach-O binaries
+  TryAutoLoadDsym(filename, build_id);
+
   if (is_base) {
     base_files_.push_back({filename, build_id});
   } else {
@@ -1661,6 +1668,82 @@ void Bloaty::AddSourceMapFilename(const std::string& filename) {
   std::string sourcemap_build_id = filename.substr(0, delimiter);
   std::string sourcemap_filename = filename.substr(delimiter + 1);
   sourcemap_files_[sourcemap_build_id] = sourcemap_filename;
+}
+
+void Bloaty::AddDsymFilename(const Options& options,
+                             const std::string& filename) {
+  if (!std::filesystem::exists(filename)) {
+    THROWF("couldn't open '$0'", filename.c_str());
+  }
+
+  // Treat as a dSYM companion file
+  if (std::filesystem::is_regular_file(filename)) {
+    AddDebugFilename(filename);
+    return;
+  }
+
+  std::filesystem::path dsym_filepath(filename);
+  // Treat as a dSYM bundle
+  if (std::filesystem::is_directory(dsym_filepath)) {
+    dsym_filepath += "/Contents/Resources/DWARF/";
+    bool found_any = false;
+    for (const auto& binary_filename : options.filename()) {
+      std::filesystem::path dsym_filename(
+          dsym_filepath / std::filesystem::path(binary_filename).filename());
+      if (std::filesystem::exists(dsym_filename)) {
+        AddDebugFilename(dsym_filename.string());
+        found_any = true;
+      }
+    }
+    if (!found_any) {
+      WARN("dSYM bundle '$0' contains no debug files matching input binaries",
+           filename);
+    }
+  }
+}
+
+// Automatically discover and load dSYM file for a Mach-O binary
+void Bloaty::TryAutoLoadDsym(const std::string& binary_path,
+                             const std::string& build_id) {
+  if (build_id.empty()) {
+    return;
+  }
+
+  std::filesystem::path binary_file(binary_path);
+  std::string binary_name = binary_file.filename().string();
+  std::filesystem::path binary_dir = binary_file.parent_path();
+
+  // Look for dSYM bundle: <binary>.dSYM/Contents/Resources/DWARF/<binary>
+  std::filesystem::path dsym_bundle = binary_dir / (binary_name + ".dSYM");
+  std::filesystem::path dsym_file =
+      dsym_bundle / "Contents" / "Resources" / "DWARF" / binary_name;
+
+  if (std::filesystem::exists(dsym_file)) {
+    // Verify that the dSYM file has the same build ID as the main binary
+    // We use a try/catch here because auto-discovery is speculative: the
+    // .dSYM directory might exist but contain an invalid binary.
+    // GetObjectFile() will throw if the file isn't a valid Mach-O and
+    // we want auto-discovery to silently fail rather than break analysis.
+    try {
+      auto dsym_object_file = GetObjectFile(dsym_file.string());
+      std::string dsym_build_id = dsym_object_file->GetBuildId();
+
+      if (dsym_build_id == build_id) {
+        if (verbose_level > 1) {
+          printf("Found matching dSYM file: %s\n", dsym_file.string().c_str());
+        }
+        AddDebugFilename(dsym_file.string());
+      } else {
+        WARN(
+            "dSYM file $0 has mismatched build ID (expected $1, got $2) - "
+            "skipping",
+            dsym_file.string(), absl::BytesToHexString(build_id),
+            absl::BytesToHexString(dsym_build_id));
+      }
+    } catch (const std::exception& e) {
+      // Silently ignore - the dSYM file exists but isn't readable/valid.
+    }
+  }
 }
 
 void Bloaty::DefineCustomDataSource(const CustomDataSource& source) {
@@ -2030,6 +2113,7 @@ Options:
   -c FILE            Load configuration from <file>.
   -d SOURCE,SOURCE   Comma-separated list of sources to scan.
   --debug-file=FILE  Use this file for debug symbols and/or symbol table.
+  --dsym=FILE        Use this dSYM file or bundle (Mach-O only).
   --source-map=ID=FILE
                      Use this source map file for the binary. The ID can be
                      the build ID (or Wasm sourceMappingURL) or the file path
@@ -2224,6 +2308,8 @@ bool DoParseOptions(bool skip_unknown, int* argc, char** argv[],
       }
     } else if (args.TryParseOption("--debug-file", &option)) {
       options->add_debug_filename(std::string(option));
+    } else if (args.TryParseOption("--dsym", &option)) {
+      options->add_dsym_path(std::string(option));
     } else if (args.TryParseUint64Option("--debug-fileoff", &uint64_option)) {
       if (options->has_debug_fileoff()) {
         THROW("currently we only support a single debug fileoff");
@@ -2349,6 +2435,8 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
     THROW("max_rows_per_level must be at least 1");
   }
 
+  verbose_level = options.verbose_level();
+
   for (auto& filename : options.filename()) {
     bloaty.AddFilename(filename, false);
   }
@@ -2359,6 +2447,10 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
 
   for (auto& debug_filename : options.debug_filename()) {
     bloaty.AddDebugFilename(debug_filename);
+  }
+
+  for (const auto& dsym_path : options.dsym_path()) {
+    bloaty.AddDsymFilename(options, dsym_path);
   }
 
   for (auto& sourcemap : options.source_map()) {
@@ -2379,8 +2471,6 @@ void BloatyDoMain(const Options& options, const InputFileFactory& file_factory,
       THROW("invalid regex for source_filter");
     }
   }
-
-  verbose_level = options.verbose_level();
 
   if (options.data_source_size() > 0) {
     bloaty.ScanAndRollup(options, output);
