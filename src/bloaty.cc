@@ -1434,7 +1434,7 @@ std::string_view RangeSink::ZlibDecompress(std::string_view data,
 std::string_view RangeSink::ZstdDecompress(std::string_view data,
                                             uint64_t uncompressed_size) {
   if (!arena_) {
-    THROW("This range sink isn't prepared to zlib decompress.");
+    THROW("This range sink isn't prepared to zstd decompress.");
   }
   uint64_t mb = 1 << 20;
   // Limit for uncompressed size is 30x the compressed size + 128MB.
