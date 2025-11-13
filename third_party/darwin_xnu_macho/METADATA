@@ -1,23 +1,38 @@
 name: "Darwin XNU Mach-O headers"
 description:
-    "A few header files from the Darwin XNU project. These define the Mach-O format."
+    "Header files from Apple's cctools and Darwin XNU projects."
+    "Mach-O file format definitions from the cctools project."
+    "Mach kernel type definitions from the XNU project."
     "They only contain struct and constant definitions (no code)."
 
 third_party {
   url {
-    type: HOMEPAGE
-    value: "https://opensource.apple.com/source/xnu/"
-  }
-  url {
     type: GIT
-    value: "https://github.com/apple/darwin-xnu"
+    value: "https://github.com/apple-oss-distributions/xnu"
   }
-  version: "0a798f6738bc1db01281fc08ae024145e84df927"
+  version: "f6217f891ac0bb64f3d375211650a4c1ff8ca1ea"
   last_upgrade_date {
-    year: 2017
+    year: 2025
     month: 11
-    day: 11
+    day: 13
   }
   local_modifications:
-      "Removed some includes and definitions not related to the Mach-O file format."
+      "Mach kernel type headers (machine.h, vm_prot.h) from XNU osfmk/mach/"
+      "Added __has_include() guards and fallback typedefs for cross-platform compatibility."
+}
+
+third_party {
+  url {
+    type: GIT
+    value: "https://github.com/apple-oss-distributions/cctools"
+  }
+  version: "920a2b45080fb9badf31bf675f03b19973f0dd4f"
+  last_upgrade_date {
+    year: 2025
+    month: 11
+    day: 13
+  }
+  local_modifications:
+      "Mach-O file format headers (fat.h, loader.h, nlist.h, reloc.h) from cctools include/mach-o/"
+      "Modified loader.h to use bundled vm_prot.h instead of system header for cross-platform compatibility."
 }

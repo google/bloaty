@@ -32,13 +32,26 @@
  * <mach/machine.h> is needed here for the cpu_type_t and cpu_subtype_t types
  * and contains the constants for the possible values of these types.
  */
-#include "third_party/darwin_xnu_macho/mach/machine.h"
+#if __has_include(<mach/machine.h>)
+#include <mach/machine.h>
+#endif
 
 /*
  * <mach/vm_prot.h> is needed here for the vm_prot_t type and contains the 
  * constants that are or'ed together for the possible values of this type.
  */
-#include "third_party/darwin_xnu_macho/mach/vm_prot.h"
+#include "../mach/vm_prot.h"
+
+/*
+ * <machine/thread_status.h> is expected to define the flavors of the thread
+ * states and the structures of those flavors for each machine.
+ */
+#if __has_include(<mach/machine/thread_status.h>)
+#include <mach/machine/thread_status.h>
+#endif
+#if __has_include(<architecture/byte_order.h>)
+#include <architecture/byte_order.h>
+#endif
 
 /*
  * The 32-bit mach header appears at the very beginning of the object file for
@@ -46,8 +59,8 @@
  */
 struct mach_header {
 	uint32_t	magic;		/* mach magic number identifier */
-	cpu_type_t	cputype;	/* cpu specifier */
-	cpu_subtype_t	cpusubtype;	/* machine specifier */
+	int32_t		cputype;	/* cpu specifier */
+	int32_t		cpusubtype;	/* machine specifier */
 	uint32_t	filetype;	/* type of file */
 	uint32_t	ncmds;		/* number of load commands */
 	uint32_t	sizeofcmds;	/* the size of all the load commands */
@@ -64,8 +77,8 @@ struct mach_header {
  */
 struct mach_header_64 {
 	uint32_t	magic;		/* mach magic number identifier */
-	cpu_type_t	cputype;	/* cpu specifier */
-	cpu_subtype_t	cpusubtype;	/* machine specifier */
+	int32_t		cputype;	/* cpu specifier */
+	int32_t		cpusubtype;	/* machine specifier */
 	uint32_t	filetype;	/* type of file */
 	uint32_t	ncmds;		/* number of load commands */
 	uint32_t	sizeofcmds;	/* the size of all the load commands */
@@ -108,11 +121,17 @@ struct mach_header_64 {
 #define	MH_DYLIB	0x6		/* dynamically bound shared library */
 #define	MH_DYLINKER	0x7		/* dynamic link editor */
 #define	MH_BUNDLE	0x8		/* dynamically bound bundle file */
-#define	MH_DYLIB_STUB	0x9		/* shared library stub for static */
-					/*  linking only, no section contents */
-#define	MH_DSYM		0xa		/* companion file with only debug */
-					/*  sections */
+#define	MH_DYLIB_STUB	0x9		/* shared library stub for static
+					   linking only, no section contents */
+#define	MH_DSYM		0xa		/* companion file with only debug
+					   sections */
 #define	MH_KEXT_BUNDLE	0xb		/* x86_64 kexts */
+#define MH_FILESET	0xc		/* a file composed of other Mach-Os to
+					   be run in the same userspace sharing
+					   a single linkedit. */
+#define	MH_GPU_EXECUTE	0xd		/* gpu program */
+#define	MH_GPU_DYLIB	0xe		/* gpu support functions */
+
 
 /* Constants for the flags field of the mach_header */
 #define	MH_NOUNDEFS	0x1		/* the object file has no undefined
@@ -202,6 +221,27 @@ struct mach_header_64 {
 
 #define MH_APP_EXTENSION_SAFE 0x02000000 /* The code was linked for use in an
 					    application extension. */
+
+#define	MH_NLIST_OUTOFSYNC_WITH_DYLDINFO 0x04000000 /* The external symbols
+					   listed in the nlist symbol table do
+					   not include all the symbols listed in
+					   the dyld info. */
+
+#define	MH_SIM_SUPPORT 0x08000000	/* Allow LC_MIN_VERSION_MACOS and
+					   LC_BUILD_VERSION load commands with
+					   the platforms macOS, macCatalyst,
+					   iOSSimulator, tvOSSimulator and
+					   watchOSSimulator. */
+
+#define	MH_IMPLICIT_PAGEZERO 0x10000000	/* main executable has no __PAGEZERO
+					   segment.  Instead, loader (xnu)
+					   will load program high and block
+					   out all memory below it. */
+
+#define MH_DYLIB_IN_CACHE 0x80000000	/* Only for use on dylibs. When this bit
+					   is set, the dylib is part of the dyld
+					   shared cache, rather than loose in
+					   the filesystem. */
 
 /*
  * The load commands directly follow the mach_header.  The total size of all
@@ -297,6 +337,15 @@ struct load_command {
 #define LC_VERSION_MIN_WATCHOS 0x30 /* build for Watch min OS version */
 #define LC_NOTE 0x31 /* arbitrary data included within a Mach-O file */
 #define LC_BUILD_VERSION 0x32 /* build for platform min OS version */
+#define LC_DYLD_EXPORTS_TRIE (0x33 | LC_REQ_DYLD) /* used with linkedit_data_command, payload is trie */
+#define LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
+#define LC_FILESET_ENTRY (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
+#define LC_ATOM_INFO 0x36 /* used with linkedit_data_command */
+#define LC_FUNCTION_VARIANTS 0x37 /* used with linkedit_data_command */
+#define LC_FUNCTION_VARIANT_FIXUPS 0x38 /* used with linkedit_data_command */
+#define LC_TARGET_TRIPLE 0x39 /* target triple used to compile */
+
+
 
 /*
  * A variable length string in a load command is represented by an lc_str
@@ -333,8 +382,8 @@ struct segment_command { /* for 32-bit architectures */
 	uint32_t	vmsize;		/* memory size of this segment */
 	uint32_t	fileoff;	/* file offset of this segment */
 	uint32_t	filesize;	/* amount to map from the file */
-	vm_prot_t	maxprot;	/* maximum VM protection */
-	vm_prot_t	initprot;	/* initial VM protection */
+	int32_t		maxprot;	/* maximum VM protection */
+	int32_t		initprot;	/* initial VM protection */
 	uint32_t	nsects;		/* number of sections in segment */
 	uint32_t	flags;		/* flags */
 };
@@ -353,8 +402,8 @@ struct segment_command_64 { /* for 64-bit architectures */
 	uint64_t	vmsize;		/* memory size of this segment */
 	uint64_t	fileoff;	/* file offset of this segment */
 	uint64_t	filesize;	/* amount to map from the file */
-	vm_prot_t	maxprot;	/* maximum VM protection */
-	vm_prot_t	initprot;	/* initial VM protection */
+	int32_t		maxprot;	/* maximum VM protection */
+	int32_t		initprot;	/* initial VM protection */
 	uint32_t	nsects;		/* number of sections in segment */
 	uint32_t	flags;		/* flags */
 };
@@ -374,6 +423,9 @@ struct segment_command_64 { /* for 64-bit architectures */
 				       first page of the segment is not
 				       protected.  All other pages of the
 				       segment are protected. */
+#define SG_READ_ONLY    0x10 /* This segment is made read-only after fixups */
+
+
 
 /*
  * A segment is made up of zero or more sections.  Non-MH_OBJECT files have
@@ -499,6 +551,8 @@ struct section_64 { /* for 64-bit architectures */
 #define S_THREAD_LOCAL_INIT_FUNCTION_POINTERS    0x15  /* functions to call
 							  to initialize TLV
 							  values */
+#define S_INIT_FUNC_OFFSETS                      0x16  /* 32-bit offsets to
+							  initializers */
 
 /*
  * Constants for the section attributes part of the flags field of a section
@@ -624,7 +678,7 @@ struct fvmlib_command {
 };
 
 /*
- * Dynamicly linked shared libraries are identified by two things.  The
+ * Dynamically linked shared libraries are identified by two things.  The
  * pathname (the name of the library as found for execution), and the
  * compatibility version number.  The pathname must match and the compatibility
  * number in the user of the library must be greater than or equal to the
@@ -652,6 +706,30 @@ struct dylib_command {
 	uint32_t	cmdsize;	/* includes pathname string */
 	struct dylib	dylib;		/* the library identification */
 };
+
+
+/*
+ * An alternate encoding for: LC_LOAD_DYLIB.
+ * The flags field contains independent flags DYLIB_USE_*
+ * First supported in macOS 15, iOS 18.
+ */
+struct dylib_use_command {
+    uint32_t    cmd;                     /* LC_LOAD_DYLIB or LC_LOAD_WEAK_DYLIB */
+    uint32_t    cmdsize;                 /* overall size, including path */
+    uint32_t    nameoff;                 /* == 28, dylibs's path offset */
+    uint32_t    marker;                  /* == DYLIB_USE_MARKER */
+    uint32_t    current_version;         /* dylib's current version number */
+    uint32_t    compat_version;          /* dylib's compatibility version number */
+    uint32_t    flags;                   /* DYLIB_USE_... flags */
+};
+#define DYLIB_USE_WEAK_LINK	0x01
+#define DYLIB_USE_REEXPORT	0x02
+#define DYLIB_USE_UPWARD	0x04
+#define DYLIB_USE_DELAYED_INIT	0x08
+
+#define DYLIB_USE_MARKER	0x1a741800
+
+
 
 /*
  * A dynamically linked shared library may be a subframework of an umbrella
@@ -760,14 +838,14 @@ struct dylinker_command {
  * Thread commands contain machine-specific data structures suitable for
  * use in the thread state primitives.  The machine specific data structures
  * follow the struct thread_command as follows.
- * Each flavor of machine specific data structure is preceded by an unsigned
- * long constant for the flavor of that data structure, an uint32_t
- * that is the count of longs of the size of the state data structure and then
+ * Each flavor of machine specific data structure is preceded by an uint32_t
+ * constant for the flavor of that data structure, an uint32_t that is the
+ * count of uint32_t's of the size of the state data structure and then
  * the state data structure follows.  This triple may be repeated for many
  * flavors.  The constants for the flavors, counts and state data structure
  * definitions are expected to be in the header file <machine/thread_status.h>.
  * These machine specific data structures sizes must be multiples of
- * 4 bytes  The cmdsize reflects the total size of the thread_command
+ * 4 bytes.  The cmdsize reflects the total size of the thread_command
  * and all of the sizes of the constants for the flavors, counts and state
  * data structures.
  *
@@ -781,7 +859,7 @@ struct thread_command {
 	uint32_t	cmd;		/* LC_THREAD or  LC_UNIXTHREAD */
 	uint32_t	cmdsize;	/* total size of this command */
 	/* uint32_t flavor		   flavor of thread state */
-	/* uint32_t count		   count of longs in thread state */
+	/* uint32_t count		   count of uint32_t's in thread state */
 	/* struct XXX_thread_state state   thread state for this flavor */
 	/* ... */
 };
@@ -1151,14 +1229,27 @@ struct rpath_command {
 };
 
 /*
+ * The target_triple_command contains a string which specifies the
+ * target triple (e.g. "arm64e-apple-macosx15.0.0") used to compile the code.
+ */
+struct target_triple_command {
+    uint32_t	 cmd;		/* LC_TARGET_TRIPLE */
+    uint32_t	 cmdsize;	/* including string */
+    union lc_str triple;	/* target triple string */
+};
+
+/*
  * The linkedit_data_command contains the offsets and sizes of a blob
  * of data in the __LINKEDIT segment.  
  */
 struct linkedit_data_command {
     uint32_t	cmd;		/* LC_CODE_SIGNATURE, LC_SEGMENT_SPLIT_INFO,
-                                   LC_FUNCTION_STARTS, LC_DATA_IN_CODE,
-				   LC_DYLIB_CODE_SIGN_DRS or
-				   LC_LINKER_OPTIMIZATION_HINT. */
+				   LC_FUNCTION_STARTS, LC_DATA_IN_CODE,
+				   LC_DYLIB_CODE_SIGN_DRS, LC_ATOM_INFO,
+				   LC_LINKER_OPTIMIZATION_HINT,
+				   LC_DYLD_EXPORTS_TRIE,
+				   LC_FUNCTION_VARIANTS, LC_FUNCTION_VARIANT_FIXUPS, or
+				   LC_DYLD_CHAINED_FIXUPS. */
     uint32_t	cmdsize;	/* sizeof(struct linkedit_data_command) */
     uint32_t	dataoff;	/* file offset of data in __LINKEDIT segment */
     uint32_t	datasize;	/* file size of data in __LINKEDIT segment  */
@@ -1207,14 +1298,14 @@ struct version_min_command {
 };
 
 /*
- * The build_version_command contains the min OS version on which this
+ * The build_version_command contains the min OS version on which this 
  * binary was built to run for its platform.  The list of known platforms and
  * tool values following it.
  */
 struct build_version_command {
     uint32_t	cmd;		/* LC_BUILD_VERSION */
     uint32_t	cmdsize;	/* sizeof(struct build_version_command) plus */
-                                /* ntools * sizeof(struct build_tool_version) */
+				/* ntools * sizeof(struct build_tool_version) */
     uint32_t	platform;	/* platform */
     uint32_t	minos;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
     uint32_t	sdk;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
@@ -1227,15 +1318,53 @@ struct build_tool_version {
 };
 
 /* Known values for the platform field above. */
+#define PLATFORM_UNKNOWN 0
+#define PLATFORM_ANY 0xFFFFFFFF
 #define PLATFORM_MACOS 1
 #define PLATFORM_IOS 2
 #define PLATFORM_TVOS 3
 #define PLATFORM_WATCHOS 4
+#define PLATFORM_BRIDGEOS 5
+#define PLATFORM_MACCATALYST 6
+#define PLATFORM_IOSSIMULATOR 7
+#define PLATFORM_TVOSSIMULATOR 8
+#define PLATFORM_WATCHOSSIMULATOR 9
+#define PLATFORM_DRIVERKIT 10
+#define PLATFORM_VISIONOS 11
+#define PLATFORM_VISIONOSSIMULATOR 12
+
+#define PLATFORM_FIRMWARE 13
+#define PLATFORM_SEPOS 14
+
+#define PLATFORM_MACOS_EXCLAVECORE 15
+#define PLATFORM_MACOS_EXCLAVEKIT 16
+#define PLATFORM_IOS_EXCLAVECORE 17
+#define PLATFORM_IOS_EXCLAVEKIT 18
+#define PLATFORM_TVOS_EXCLAVECORE 19
+#define PLATFORM_TVOS_EXCLAVEKIT 20
+#define PLATFORM_WATCHOS_EXCLAVECORE 21
+#define PLATFORM_WATCHOS_EXCLAVEKIT 22
+#define PLATFORM_VISIONOS_EXCLAVECORE 23
+#define PLATFORM_VISIONOS_EXCLAVEKIT 24
+
+
+
 
 /* Known values for the tool field above. */
 #define TOOL_CLANG 1
 #define TOOL_SWIFT 2
 #define TOOL_LD	3
+#define TOOL_LLD 4
+
+/* values for gpu tools (1024 to 1048) */
+#define TOOL_METAL                 1024
+#define TOOL_AIRLLD                1025
+#define TOOL_AIRNT                 1026
+#define TOOL_AIRNT_PLUGIN          1027
+#define TOOL_AIRPACK               1028
+#define TOOL_GPUARCHIVER           1031
+#define TOOL_METAL_FRAMEWORK       1032
+
 
 /*
  * The dyld_info_command contains the file offsets and sizes of 
@@ -1323,18 +1452,18 @@ struct dyld_info_command {
      * the exported symbol information for the string so far.
      * If there is no exported symbol, the node starts with a zero byte. 
      * If there is exported info, it follows the length.  
-	 *
-	 * First is a uleb128 containing flags. Normally, it is followed by
+     *
+     * First is a uleb128 containing flags. Normally, it is followed by
      * a uleb128 encoded offset which is location of the content named
      * by the symbol from the mach_header for the image.  If the flags
      * is EXPORT_SYMBOL_FLAGS_REEXPORT, then following the flags is
      * a uleb128 encoded library ordinal, then a zero terminated
      * UTF8 string.  If the string is zero length, then the symbol
      * is re-export from the specified dylib with the same name.
-	 * If the flags is EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER, then following
-	 * the flags is two uleb128s: the stub offset and the resolver offset.
-	 * The stub is used by non-lazy pointers.  The resolver is used
-	 * by lazy pointers and must be called to get the actual address to use.
+     * If the flags is EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER, then following
+     * the flags is two uleb128s: the stub offset and the resolver offset.
+     * The stub is used by non-lazy pointers.  The resolver is used
+     * by lazy pointers and must be called to get the actual address to use.
      *
      * After the optional exported symbol information is a byte of
      * how many edges (0-255) that this node has leaving it, 
@@ -1378,6 +1507,7 @@ struct dyld_info_command {
 #define BIND_SPECIAL_DYLIB_SELF					 0
 #define BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE			-1
 #define BIND_SPECIAL_DYLIB_FLAT_LOOKUP				-2
+#define BIND_SPECIAL_DYLIB_WEAK_LOOKUP				-3
 
 #define BIND_SYMBOL_FLAGS_WEAK_IMPORT				0x1
 #define BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION			0x8
@@ -1397,6 +1527,9 @@ struct dyld_info_command {
 #define BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB			0xA0
 #define BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED			0xB0
 #define BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB		0xC0
+#define	BIND_OPCODE_THREADED					0xD0
+#define	BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB 0x00
+#define	BIND_SUBOPCODE_THREADED_APPLY				 0x01
 
 
 /*
@@ -1406,9 +1539,12 @@ struct dyld_info_command {
 #define EXPORT_SYMBOL_FLAGS_KIND_MASK				0x03
 #define EXPORT_SYMBOL_FLAGS_KIND_REGULAR			0x00
 #define EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL			0x01
+#define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE			0x02
 #define EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION			0x04
 #define EXPORT_SYMBOL_FLAGS_REEXPORT				0x08
 #define EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER			0x10
+#define EXPORT_SYMBOL_FLAGS_STATIC_RESOLVER			0x20
+
 
 /*
  * The linker_option_command contains linker options embedded in object files.
@@ -1527,5 +1663,28 @@ struct note_command {
     uint64_t	offset;		/* file offset of this data */
     uint64_t	size;		/* length of data region */
 };
+
+/*
+ * LC_FILESET_ENTRY commands describe constituent Mach-O files that are part
+ * of a fileset. In one implementation, entries are dylibs with individual
+ * mach headers and repositionable text and data segments. Each entry is
+ * further described by its own mach header.
+ */
+struct fileset_entry_command {
+    uint32_t     cmd;        /* LC_FILESET_ENTRY */
+    uint32_t     cmdsize;    /* includes entry_id string */
+    uint64_t     vmaddr;     /* memory address of the entry */
+    uint64_t     fileoff;    /* file offset of the entry */
+    union lc_str entry_id;   /* contained entry id */
+    uint32_t     reserved;   /* reserved */
+};
+
+/*
+ * These deprecated values may still be used within Apple but are mechanically
+ * removed from public API. The mechanical process may produce unusual results.
+ */
+#if (!defined(PLATFORM_IOSMAC))
+#define PLATFORM_IOSMAC PLATFORM_MACCATALYST
+#endif
 
 #endif /* _MACHO_LOADER_H_ */

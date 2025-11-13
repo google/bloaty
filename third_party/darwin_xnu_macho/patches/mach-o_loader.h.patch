@@ -1,0 +1,13 @@
+--- loader.h.orig	2025-11-05 14:28:11
++++ loader.h	2025-11-05 14:16:53
+@@ -40,9 +40,7 @@
+  * <mach/vm_prot.h> is needed here for the vm_prot_t type and contains the 
+  * constants that are or'ed together for the possible values of this type.
+  */
+-#if __has_include(<mach/vm_prot.h>)
+-#include <mach/vm_prot.h>
+-#endif
++#include "../mach/vm_prot.h"
+ 
+ /*
+  * <machine/thread_status.h> is expected to define the flavors of the thread

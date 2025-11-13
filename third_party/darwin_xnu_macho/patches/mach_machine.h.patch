@@ -1,0 +1,21 @@
+--- machine.h.orig	2025-11-05 14:28:10
++++ machine.h	2025-11-05 14:16:53
+@@ -64,9 +64,18 @@
+ #ifndef __ASSEMBLER__
+ 
+ #include <stdint.h>
++#if __has_include(<mach/machine/vm_types.h>)
+ #include <mach/machine/vm_types.h>
++#endif
++#if __has_include(<mach/boolean.h>)
+ #include <mach/boolean.h>
++#endif
+ 
++/* Fallback definitions when system headers aren't available */
++#ifndef _MACH_MACHINE_VM_TYPES_H_
++typedef int32_t         integer_t;
++#endif
++
+ typedef integer_t       cpu_type_t;
+ typedef integer_t       cpu_subtype_t;
+ typedef integer_t       cpu_threadtype_t;
