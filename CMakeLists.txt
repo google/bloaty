@@ -293,7 +293,7 @@ if(MSVC)
   set(CMAKE_CXX_FLAGS "/EHsc /wd4018 /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX")
 else()
   set(CMAKE_CXX_FLAGS "-W -Wall -Wno-sign-compare")
-  set(CMAKE_CXX_FLAGS_DEBUG "-g1")
+  set(CMAKE_CXX_FLAGS_DEBUG "-g")
   set(CMAKE_CXX_FLAGS_RELEASE "-O2")
   set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1")
   set_source_files_properties(third_party/demumble/third_party/llvm/lib/Demangle/MicrosoftDemangle.cpp
