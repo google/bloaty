@@ -247,6 +247,10 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink) {
   uint64_t fde_count =
       ReadEncodedPointer(fde_count_enc, true, &data, base, sink);
 
+  if (table_enc == DW_EH_PE_omit) {
+    return;
+  }
+
   for (uint64_t i = 0; i < fde_count; i++) {
     string_view entry_data = data;
     uint64_t initial_location =
