@@ -1,0 +1,24 @@
+# Test that bloaty handles DW_EH_PE_omit in .eh_frame_hdr table_enc correctly
+# when fde_count is large. This prevents an infinite loop.
+# RUN: %yaml2obj %s -o %t.o
+# RUN: %bloaty %t.o -d symbols | %FileCheck %s
+
+# CHECK: TOTAL
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .eh_frame_hdr
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC ]
+    # version=1
+    # eh_frame_ptr_enc=DW_EH_PE_udata4(0x03)
+    # fde_count_enc=DW_EH_PE_udata4(0x03)
+    # table_enc=DW_EH_PE_omit(0xff)
+    # eh_frame_ptr=0x00000000 (4 bytes)
+    # fde_count=0x7fffffff (4 bytes, large value)
+    Content:         '010303ff00000000fffffff7'
