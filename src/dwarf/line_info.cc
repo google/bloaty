@@ -83,7 +83,9 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   if (sizes_.dwarf_version() >= 5) {
     auto encoded_addr_size = ReadFixed<uint8_t>(&data);
     auto encoded_selector_size = ReadFixed<uint8_t>(&data);
-    assert(encoded_addr_size == address_size);
+    if (encoded_addr_size != address_size) {
+      THROW("DWARF line info address size mismatch");
+    }
     (void)encoded_selector_size;
   }
 
