@@ -1,0 +1,19 @@
+# RUN: %yaml2obj %s -o %t.wasm
+# RUN: %bloaty -d symbols %t.wasm | %FileCheck %s
+
+# CHECK: _TMXfZD
+
+--- !WASM
+FileHeader:
+  Version: 0x1
+Sections:
+  - Type: CODE
+    Functions:
+      - Index: 0
+        Locals: []
+        Body: 0B
+  - Type: CUSTOM
+    Name: name
+    FunctionNames:
+      - Index: 0
+        Name: "_TMXfZD\0"

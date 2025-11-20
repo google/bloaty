@@ -289,6 +289,33 @@ include_directories("${CMAKE_CURRENT_BINARY_DIR}/src")
 include_directories(third_party/demumble/third_party/llvm/include)
 include_directories(third_party/demumble/third_party/swift/include)
 
+
+# Demumble has an open issue build as a library.
+# See https://github.com/nico/demumble/issues/39
+set(DEMUMBLE_SOURCES
+    third_party/demumble/third_party/llvm/lib/Demangle/Demangle.cpp
+    third_party/demumble/third_party/llvm/lib/Demangle/DLangDemangle.cpp
+    third_party/demumble/third_party/llvm/lib/Demangle/ItaniumDemangle.cpp
+    third_party/demumble/third_party/llvm/lib/Demangle/MicrosoftDemangle.cpp
+    third_party/demumble/third_party/llvm/lib/Demangle/MicrosoftDemangleNodes.cpp
+    third_party/demumble/third_party/llvm/lib/Demangle/RustDemangle.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/Context.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/CrashReporter.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/Demangler.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/Errors.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/ManglingUtils.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/NodeDumper.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/NodePrinter.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/OldDemangler.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/OldRemangler.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/Punycode.cpp
+    third_party/demumble/third_party/swift/lib/Demangling/Remangler.cpp
+)
+
+set_source_files_properties(
+  ${DEMUMBLE_SOURCES}
+  PROPERTIES COMPILE_DEFINITIONS NDEBUG)
+
 # Baseline build flags.
 if(MSVC)
   set(CMAKE_CXX_FLAGS "/EHsc /wd4018 /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX")
@@ -389,26 +416,7 @@ add_library(libbloaty STATIC
     src/util.h
     src/webassembly.cc
 
-    # Demumble has an open issue build as a library.
-    # See https://github.com/nico/demumble/issues/39
-
-    third_party/demumble/third_party/llvm/lib/Demangle/Demangle.cpp
-    third_party/demumble/third_party/llvm/lib/Demangle/DLangDemangle.cpp
-    third_party/demumble/third_party/llvm/lib/Demangle/ItaniumDemangle.cpp
-    third_party/demumble/third_party/llvm/lib/Demangle/MicrosoftDemangle.cpp
-    third_party/demumble/third_party/llvm/lib/Demangle/MicrosoftDemangleNodes.cpp
-    third_party/demumble/third_party/llvm/lib/Demangle/RustDemangle.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/Context.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/CrashReporter.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/Demangler.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/Errors.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/ManglingUtils.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/NodeDumper.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/NodePrinter.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/OldDemangler.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/OldRemangler.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/Punycode.cpp
-    third_party/demumble/third_party/swift/lib/Demangling/Remangler.cpp
+    ${DEMUMBLE_SOURCES}
     )
 set_property(TARGET libbloaty PROPERTY FOLDER "bloaty")
 
