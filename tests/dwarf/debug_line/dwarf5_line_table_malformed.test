@@ -1,0 +1,44 @@
+# RUN: %yaml2obj %s -o %t.o
+# RUN: not %bloaty %t.o -d inlines 2>&1 | %FileCheck %s
+
+# CHECK: bloaty: DWARF line info address size mismatch
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS64
+  Data:    ELFDATA2LSB
+  Type:    ET_EXEC
+  Machine: EM_X86_64
+Sections:
+  - Name:    .debug_abbrev
+    Type:    SHT_PROGBITS
+    Content: 0111001017000000 # Code 1, Tag 17 (compile_unit), Children 0, Attr 16 (stmt_list), Form 23 (sec_offset), End
+  - Name:    .debug_info
+    Type:    SHT_PROGBITS
+    # DWARF Compile Unit Header:
+    #   Length:         0x0D (13 bytes) - Total size of CU content
+    #   Version:        5
+    #   Unit Type:      1 (DW_UT_compile)
+    #   Address Size:   8
+    #   Abbrev Offset:  0
+    # CU Content:
+    #   Abbrev Code:    1 (from .debug_abbrev)
+    #   DW_AT_stmt_list: 0 (offset into .debug_line)
+    Content: 0D00000005000108000000000100000000
+  - Name:    .debug_line
+    Type:    SHT_PROGBITS
+    # DWARF 5 Line Table Header:
+    #   Length:               34 (0x22)
+    #   Version:              5
+    #   Address Size:         0 (MISMATCH! .debug_info has 8)
+    #   Seg Selector Size:    0
+    #   Header Length:        8
+    #   Min Instr Len:        1
+    #   Max Ops Per Instr:    1
+    #   Default Is Stmt:      1
+    #   Line Base:            -5 (0xFB)
+    #   Line Range:           14 (0x0E)
+    #   Opcode Base:          13 (0x0D)
+    #   Std Opcode Lengths:   [0,1,1,1,1,0,0,0,0,1,0,1]
+    # A minimal line program follows the header.
+    Content: 220000000500000008000000010101FB0E0D0001010101000000000100000102010000000000
