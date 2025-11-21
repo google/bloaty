@@ -1,0 +1,53 @@
+# RUN: %yaml2obj %s -o %t.o
+# RUN: %bloaty -d symbols %t.o | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS32
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_386
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x1000
+    Size:            0x100
+  - Name:            .eh_frame
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC ]
+    AddressAlign:    4
+    # CIE Details:
+    # 10000000   # Length (16 bytes)
+    # 00000000   # CIE ID (0)
+    # 01         # Version (1)
+    # 7A5200     # Augmentation String: "zR"
+    # 01         # Code Alignment Factor (1)
+    # 7C         # Data Alignment Factor (-4)
+    # 08         # Return Address Register (8)
+    # 01         # Augmentation Data Length (1)
+    # 08         # Augmentation Data (FDE Encoding: DW_EH_PE_signed = 0x08)
+    # 000000     # Padding (DW_CFA_nop)
+    # FDE Details:
+    # 0C000000   # Length (12 bytes)
+    # 18000000   # CIE Pointer (offset 24 backwards from here -> points to CIE at 0)
+    # 00100000   # PC Begin (0x1000, encoded as DW_EH_PE_signed 32-bit)
+    # 00010000   # PC Range (0x100, assuming same encoding)
+    Content: 1000000000000000017A5200017C0801080000000C000000180000000010000000010000
+
+Symbols:
+  - Name:            foo
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x1000
+    Size:            0x100
+
+# CHECK:      FILE SIZE        VM SIZE
+# CHECK-NEXT: --------------  --------------
+# CHECK-NEXT:  41.7%     277  87.7%     256    foo
+# CHECK-NEXT:  36.1%     240   0.0%       0    [ELF Section Headers]
+# CHECK-NEXT:   7.8%      52   0.0%       0    [ELF Header]
+# CHECK-NEXT:   6.5%      43   0.0%       0    [section .shstrtab]
+# CHECK-NEXT:   5.4%      36  12.3%      36    [section .eh_frame]
+# CHECK-NEXT:   2.4%      16   0.0%       0    [section .symtab]
+# CHECK-NEXT: 100.0%     664 100.0%     292    TOTAL
