@@ -1,0 +1,43 @@
+# Test that we handle DW_FORM_implicit_const by throwing an error instead of crashing.
+#
+# DW_FORM_implicit_const is not yet supported by Bloaty, but it should not crash.
+
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: not %bloaty %t.obj -d compileunits 2>&1 | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_EXEC
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x1000
+    AddressAlign:    0x10
+    Size:            0x10
+DWARF:
+  debug_abbrev:
+    - ID:              0
+      Table:
+        - Code:            0x1
+          Tag:             DW_TAG_compile_unit
+          Children:        DW_CHILDREN_no
+          Attributes:
+            - Attribute:       DW_AT_GNU_dwo_id
+              Form:            DW_FORM_implicit_const
+              Value:           0x1234
+  debug_info:
+    - Version:         5
+      UnitType:        0x01 # DW_UT_compile
+      AbbrevTableID:   0
+      AddrSize:        8
+      Entries:
+        - AbbrCode:        0x1
+          Values:          []
+        - AbbrCode:        0x0
+...
+
+# CHECK: DW_FORM_implicit_const is not supported

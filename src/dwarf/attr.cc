@@ -54,8 +54,9 @@ uint64_t AttrValue::GetUint(const CU& cu) const {
     assert(type_ == Type::kUint);
     // DW_FORM_implicit_const value is stored in AbbrevTable, but
     // we don't keep it in AttrValue (discarded in AbbrevTable::ReadAbbrevs()).
-    // Assertion makes sure that nobody is trying to read a fake value.
-    assert(form_ != DW_FORM_implicit_const);
+    if (form_ == DW_FORM_implicit_const) {
+      THROW("DW_FORM_implicit_const is not supported");
+    }
     return uint_;
   }
 }
