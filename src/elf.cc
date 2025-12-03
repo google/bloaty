@@ -377,7 +377,7 @@ string_view ElfFile::Section::GetName() const {
 string_view ElfFile::Section::ReadString(Elf64_Word index) const {
   assert(header().sh_type == SHT_STRTAB);
 
-  if (index == SHN_UNDEF || index >= contents_.size()) {
+  if (index >= contents_.size()) {
     THROWF("can't read index $0 from strtab, total size is $1", index,
            contents_.size());
   }
@@ -972,8 +972,7 @@ static void ReadELFSymbolTableEntries(const ElfFile& elf,
     section.ReadSymbol(i, &sym, &sym_range);
 
     if (ELF64_ST_TYPE(sym.st_info) == STT_SECTION ||
-        sym.st_shndx == STN_UNDEF ||
-        sym.st_name == SHN_UNDEF) {
+        sym.st_shndx == STN_UNDEF) {
       continue;
     }
 
