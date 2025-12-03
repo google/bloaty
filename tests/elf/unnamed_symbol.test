@@ -1,0 +1,32 @@
+# Test that bloaty handles symbols with no name (st_name == 0) by creating a
+# synthetic name.
+
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty %t.obj -d symbols | %FileCheck %s
+
+# CHECK: named_symbol
+# CHECK: [Anonymous symbol #1]
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x10
+    Content:         '9090909090909090909090909090909090909090909090909090909090909090'
+Symbols:
+  - StName:          0
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0
+    Size:            0x10
+  - Name:            named_symbol
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x10
+    Size:            0x10
