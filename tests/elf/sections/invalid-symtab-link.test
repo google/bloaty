@@ -1,0 +1,29 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: %bloaty %t.obj -d symbols | %FileCheck %s
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Content:         '90'
+  - Name:            .not_a_strtab
+    Type:            SHT_PROGBITS
+    Content:         '00'
+  - Name:            .symtab
+    Type:            SHT_SYMTAB
+    Link:            .not_a_strtab
+    EntSize:         24
+Symbols:
+  - Name:            foobar
+    Section:         .text
+    Binding:         STB_GLOBAL
+    Size:            1
+
+# CHECK: [Anonymous symbol #1]
+# CHECK: TOTAL

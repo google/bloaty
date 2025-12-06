@@ -260,7 +260,57 @@ class NameMunger {
   std::vector<std::pair<std::unique_ptr<ReImpl>, std::string>> regexes_;
 };
 
-typedef std::map<std::string_view, std::pair<uint64_t, uint64_t>> SymbolTable;
+/// SymbolTable holds the symbol table for an object file.
+/// It maps symbol names to their address and size.
+///
+/// This structure is used in src/elf.cc to accumulate symbols from the ELF
+/// symbol table, which are then used to look up symbols during disassembly.
+class SymbolTable {
+ public:
+  /// Inserts a symbol into the table.
+  /// The name must be guaranteed to outlive the SymbolTable (e.g. it points
+  /// into the memory-mapped file).
+  /// @return The string_view of the inserted name.
+  std::string_view insert(std::string_view name,
+                          std::pair<uint64_t, uint64_t> val) {
+    table.insert(std::make_pair(name, val));
+    return name;
+  }
+
+  /// Inserts a symbol into the table.
+  /// The name is moved into the SymbolTable and owned by it.
+  /// @return The string_view of the inserted name (which points to the owned
+  /// string).
+  std::string_view insert(std::string&& name,
+                          std::pair<uint64_t, uint64_t> val) {
+    owned_strings.push_back(std::move(name));
+    std::string_view sv = owned_strings.back();
+    table.insert(std::make_pair(sv, val));
+    return sv;
+  }
+
+  /// Inserts a symbol into the table.
+  /// The name must be guaranteed to outlive the SymbolTable.
+  void insert(std::pair<std::string_view, std::pair<uint64_t, uint64_t>> val) {
+    table.insert(val);
+  }
+
+  auto find(std::string_view name) const { return table.find(name); }
+  auto begin() const { return table.begin(); }
+  auto end() const { return table.end(); }
+  auto find(std::string_view name) { return table.find(name); }
+  auto begin() { return table.begin(); }
+  auto end() { return table.end(); }
+
+ private:
+  /// Map of symbol name to (address, size) pair.
+  std::map<std::string_view, std::pair<uint64_t, uint64_t>> table;
+
+  /// Strings that are owned by this SymbolTable.
+  /// This is used for synthetic symbols that don't exist in the file (e.g.
+  /// generated during PLT analysis) and thus need storage.
+  std::list<std::string> owned_strings;
+};
 
 // Represents an object/executable file in a format like ELF, Mach-O, PE, etc.
 // To support a new file type, implement this interface.

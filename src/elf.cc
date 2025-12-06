@@ -880,8 +880,9 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
           // table can be found.
           ElfFile::Section strtab_section;
           elf.ReadSection(section.header().sh_link, &strtab_section);
-          if (strtab_section.header().sh_type != SHT_STRTAB) {
-            THROW("symtab section pointed to non-strtab section");
+          const bool has_strtab = strtab_section.header().sh_type == SHT_STRTAB;
+          if (!has_strtab) {
+            WARN("symtab section pointed to non-strtab section");
           }
 
           for (Elf64_Word i = 1; i < symbol_count; i++) {
@@ -902,7 +903,18 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               continue;
             }
 
-            string_view name = strtab_section.ReadString(sym.st_name);
+            std::string name_storage;
+            string_view name;
+            if (has_strtab) {
+              name = strtab_section.ReadString(sym.st_name);
+            }
+
+            // Synthesize a name for anonymous symbols.
+            if (name.empty()) {
+              name_storage = absl::StrCat("[Anonymous symbol #", i, "]");
+              name = name_storage;
+            }
+
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
             if (sink && !(capstone_available && disassemble)) {
@@ -911,9 +923,14 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
                   ItaniumDemangle(name, sink->data_source()));
             }
             if (table) {
-              table->insert(
-                  std::make_pair(name, std::make_pair(full_addr, sym.st_size)));
+              if (name_storage.empty()) {
+                table->insert(name, std::make_pair(full_addr, sym.st_size));
+              } else {
+                name = table->insert(std::move(name_storage),
+                                     std::make_pair(full_addr, sym.st_size));
+              }
             }
+
             if (capstone_available && disassemble &&
                 ELF64_ST_TYPE(sym.st_info) == STT_FUNC) {
               if (verbose_level > 1) {
@@ -944,8 +961,9 @@ static void ReadELFSymbolTableEntries(const ElfFile& elf,
   // table can be found.
   ElfFile::Section strtab_section;
   elf.ReadSection(section.header().sh_link, &strtab_section);
-  if (strtab_section.header().sh_type != SHT_STRTAB) {
-    THROW("symtab section pointed to non-strtab section");
+  const bool has_strtab = strtab_section.header().sh_type == SHT_STRTAB;
+  if (!has_strtab) {
+    WARN("symtab section pointed to non-strtab section");
   }
 
   for (Elf64_Word i = 1; i < symbol_count; i++) {
@@ -959,12 +977,18 @@ static void ReadELFSymbolTableEntries(const ElfFile& elf,
       continue;
     }
 
-    string_view name = strtab_section.ReadString(sym.st_name);
+    string_view name;
+    if (has_strtab) {
+      name = strtab_section.ReadString(sym.st_name);
+    }
     uint64_t full_addr =
         ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
-    // Capture the trailing NULL.
-    name = string_view(name.data(), name.size() + 1);
-    sink->AddFileRangeForVMAddr("elf_symtab_name", full_addr, name);
+
+    if (!name.empty()) {
+      // Capture the trailing NULL.
+      name = string_view(name.data(), name.size() + 1);
+      sink->AddFileRangeForVMAddr("elf_symtab_name", full_addr, name);
+    }
     sink->AddFileRangeForVMAddr("elf_symtab_sym", full_addr, sym_range);
   }
 }
