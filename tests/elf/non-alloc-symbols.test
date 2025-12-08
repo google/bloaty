@@ -1,0 +1,60 @@
+# Test that symbols in non-allocatable sections (missing SHF_ALLOC) are ignored
+# by the "symbols" data source.
+#
+# This reproduces an issue where non-allocatable sections (like debug info or
+# documentation) could be assigned address 0 by the linker, causing them to
+# potentially overlap with valid allocatable sections at address 0 (or simply
+# appear in the VM map when they shouldn't).
+
+# RUN: %yaml2obj %s -o %t.o
+# RUN: %bloaty %t.o -d symbols --raw-map | %FileCheck %s
+
+# CHECK: FILE MAP:
+# CHECK: KeepMe
+# CHECK: DropMe
+
+# CHECK: VM MAP:
+# The "KeepMe" symbol in the allocatable .text section should appear.
+# CHECK: KeepMe
+
+# The "DropMe" symbol in the non-allocatable .info section should NOT appear.
+# CHECK-NOT: DropMe
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_EXEC
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address:         0x0
+    Size:            0x1
+  - Name:            .info
+    Type:            SHT_PROGBITS
+    # Missing SHF_ALLOC flag.
+    # Address 0x0 overlaps with .text, but since it's not allocatable,
+    # its symbols should be ignored in the VM view.
+    Address:         0x0
+    Size:            0x1
+Symbols:
+  - Name:            DropMe
+    Type:            STT_OBJECT
+    Section:         .info
+    Value:           0x0
+    Size:            0x1
+  - Name:            KeepMe
+    Type:            STT_FUNC
+    Section:         .text
+    Value:           0x0
+    Size:            0x1
+ProgramHeaders:
+  - Type: PT_LOAD
+    Flags: [ PF_R, PF_X ]
+    VAddr: 0x0
+    PAddr: 0x0
+    FirstSec: .text
+    LastSec: .text
+...
