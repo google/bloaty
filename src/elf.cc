@@ -915,6 +915,18 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               name = name_storage;
             }
 
+            if (sym.st_shndx < SHN_LORESERVE) {
+              ElfFile::Section symbol_section;
+              elf.ReadSection(sym.st_shndx, &symbol_section);
+              if (!(symbol_section.header().sh_flags & SHF_ALLOC)) {
+                uint64_t offset =
+                    symbol_section.header().sh_offset +
+                    (sym.st_value - symbol_section.header().sh_addr);
+                sink->AddFileRange("elf_symbols", name, offset, sym.st_size);
+                continue;
+              }
+            }
+
             uint64_t full_addr =
                 ToVMAddr(sym.st_value, index_base + sym.st_shndx, is_object);
             if (sink && !(capstone_available && disassemble)) {
