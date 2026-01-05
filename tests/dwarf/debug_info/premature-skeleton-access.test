@@ -1,0 +1,48 @@
+## Regression test for Issue #402.
+## Ensures that Bloaty doesn't crash when a top-level DIE attribute
+## requires access to the skeleton CU (via 'skeleton_' member) before
+## it was previously initialized.
+## This test uses DW_AT_GNU_dwo_id encoded with DW_FORM_addrx in the
+## compile_unit DIE. This triggers ReadIndirectAddress during ReadTopLevelDIE,
+## which dereferences skeleton_.
+## We also intentionally truncate the debug_info section to trigger
+## an error (confirming we got past the potential crash).
+
+# RUN: %yaml2obj %s -o %t.o
+# RUN: not %bloaty -d compileunits %t.o 2>&1 | %FileCheck %s
+
+# CHECK: bloaty: premature EOF reading variable-length DWARF data
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS64
+  Data:    ELFDATA2LSB
+  Type:    ET_EXEC
+  Machine: EM_X86_64
+Sections:
+  - Name:         .debug_abbrev
+    Type:         SHT_PROGBITS
+    # Abbrev 1: DW_TAG_compile_unit (0x11), DW_CHILDREN_no (0x00)
+    #   DW_AT_GNU_dwo_id (0x2131) DW_FORM_addrx (0x1b)
+    #   DW_AT_producer (0x25)     DW_FORM_block1 (0x0a)
+    #   End (0000)
+    # 0x2131 in ULEB128 is B1 42
+    # Terminate abbrev table with an extra 00.
+    Content:      '011100B1421B250A000000'
+  - Name:         .debug_info
+    Type:         SHT_PROGBITS
+    # DWARF 5 Header: Length(4), Ver(2), Type(1), Addr(1), AbbrevOff(4)
+    # Length = 12 (0x0C) -> header_rest(8) + body(4)
+    # Header: 0C000000 0500 01 08 00000000
+    # Body: Abbrev(1) + Addrx Index(0) + Block Len(255) + Block Data(1 byte)
+    # Body hex: 01 00 FF 00
+    Content:      '0C00000005000108000000000100FF00'
+  - Name:         .debug_addr
+    Type:         SHT_PROGBITS
+    # DWARF 5 .debug_addr header:
+    # Length(4) = 0x0C (12)
+    # Version(2) = 5
+    # AddrSize(1) = 8
+    # SegSelSize(1) = 0
+    # Address(8) = 0x00...
+    Content:      '0C000000050008000000000000000000'
