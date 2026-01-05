@@ -128,6 +128,7 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
                     InfoReader::Section section, InfoReader& reader) {
   entire_unit_ = entire_unit;
   dwarf_ = &reader.dwarf_;
+  skeleton_ = this;
   dwo_id_ = 0;
   unit_sizes_.ReadDWARFVersion(&data);
 
@@ -186,8 +187,6 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
 
   if (reader.skeleton_ && reader.skeleton_->dwo_id_ == dwo_id_) {
     skeleton_ = reader.skeleton_;
-  } else {
-    skeleton_ = this;
   }
 }
 
