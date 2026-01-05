@@ -1,0 +1,37 @@
+# Test that bloaty handles 'G' and 'B' augmentation characters in .eh_frame CIEs.
+# RUN: %yaml2obj %s -o %t.o
+# RUN: %bloaty %t.o -d symbols | %FileCheck %s
+
+# CHECK: TOTAL
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .eh_frame
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC ]
+    AddressAlign:    0x0000000000000008
+    # CIE with augmentation "zG"
+    # Length: 0x0c (12 bytes)
+    # ID: 0x00000000
+    # Version: 0x01
+    # Augmentation: "zG\0" (0x7a 0x47 0x00)
+    # Code align: 1 (0x01)
+    # Data align: 1 (0x01)
+    # Return address reg: 1 (0x01)
+    # Augmentation length: 0 (0x00)
+    #
+    # CIE with augmentation "zB"
+    # Length: 0x0c (12 bytes)
+    # ID: 0x00000000
+    # Version: 0x01
+    # Augmentation: "zB\0" (0x7a 0x42 0x00)
+    # Code align: 1 (0x01)
+    # Data align: 1 (0x01)
+    # Return address reg: 1 (0x01)
+    # Augmentation length: 0 (0x00)
+    Content:         0c00000000000000017a4700010101000c00000000000000017a420001010100
