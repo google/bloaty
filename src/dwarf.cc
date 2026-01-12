@@ -667,7 +667,7 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
         });
 
     std::string dwo_path = ConstructDwoPath(dwo_info);
-    if (!dwo_path.empty()) {
+    if (!dwo_path.empty() && &cu == &cu.skeleton()) {
       auto file = MmapInputFileFactory().OpenFile(dwo_path);
       dwarf::File dwo_dwarf;
       cu.dwarf().open(*file, &dwo_dwarf, sink);
