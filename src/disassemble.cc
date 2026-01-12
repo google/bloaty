@@ -212,7 +212,7 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
         } else {
           op_str = "<" + std::to_string(iter->second);
         }
-      } else if (info.symbol_map.vm_map.TryGetLabel(target, &label)) {
+      } else if (info.symbol_map.vm_map.TryGetLabel(VMAddr(target), &label)) {
         op_str = label;
       }
     }

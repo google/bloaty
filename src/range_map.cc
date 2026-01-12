@@ -21,16 +21,17 @@ namespace bloaty {
 constexpr uint64_t RangeMap::kUnknownSize;
 
 template <class T>
-uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) const {
+VMAddr RangeMap::TranslateWithEntry(T iter, VMAddr addr) const {
   assert(EntryContains(iter, addr));
   assert(iter->second.HasTranslation());
-  return addr - iter->first + iter->second.other_start;
+  uint64_t offset = addr.address - iter->first.address;
+  return iter->second.other_start + offset;
 }
 
 template <class T>
-bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
-                                              uint64_t size, uint64_t* trimmed_addr,
-                                              uint64_t* translated_addr,
+bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, VMAddr addr,
+                                              uint64_t size, VMAddr* trimmed_addr,
+                                              VMAddr* translated_addr,
                                               uint64_t* trimmed_size) const {
   addr = std::max(addr, iter->first);
   *trimmed_addr = addr;
@@ -38,7 +39,7 @@ bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
   if (size == kUnknownSize) {
     *trimmed_size = kUnknownSize;
   } else {
-    uint64_t end = std::min(addr + size, iter->first + iter->second.size);
+    VMAddr end = std::min(addr + size, iter->first + iter->second.size);
     if (addr >= end) {
       *trimmed_size = 0;
       return false;
@@ -54,7 +55,7 @@ bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
   return true;
 }
 
-RangeMap::Map::const_iterator RangeMap::FindContaining(uint64_t addr) const {
+RangeMap::Map::const_iterator RangeMap::FindContaining(VMAddr addr) const {
   auto it = mappings_.upper_bound(addr);  // Entry directly after.
   if (it == mappings_.begin() || (--it, !EntryContains(it, addr))) {
     return mappings_.end();
@@ -63,7 +64,7 @@ RangeMap::Map::const_iterator RangeMap::FindContaining(uint64_t addr) const {
   }
 }
 
-RangeMap::Map::iterator RangeMap::FindContainingOrAfter(uint64_t addr) {
+RangeMap::Map::iterator RangeMap::FindContainingOrAfter(VMAddr addr) {
   auto after = mappings_.upper_bound(addr);
   auto it = after;
   if (it != mappings_.begin() && (--it, EntryContains(it, addr))) {
@@ -74,7 +75,7 @@ RangeMap::Map::iterator RangeMap::FindContainingOrAfter(uint64_t addr) {
 }
 
 RangeMap::Map::const_iterator RangeMap::FindContainingOrAfter(
-    uint64_t addr) const {
+    VMAddr addr) const {
   auto after = mappings_.upper_bound(addr);
   auto it = after;
   if (it != mappings_.begin() && (--it, EntryContains(it, addr))) {
@@ -84,17 +85,18 @@ RangeMap::Map::const_iterator RangeMap::FindContainingOrAfter(
   }
 }
 
-bool RangeMap::Translate(uint64_t addr, uint64_t* translated) const {
+bool RangeMap::Translate(VMAddr addr, uint64_t* translated) const {
   auto iter = FindContaining(addr);
   if (iter == mappings_.end() || !iter->second.HasTranslation()) {
     return false;
   } else {
-    *translated = TranslateWithEntry(iter, addr);
+    VMAddr translated_addr = TranslateWithEntry(iter, addr);
+    *translated = translated_addr.address;
     return true;
   }
 }
 
-bool RangeMap::TryGetLabel(uint64_t addr, std::string* label) const {
+bool RangeMap::TryGetLabel(VMAddr addr, std::string* label) const {
   auto iter = FindContaining(addr);
   if (iter == mappings_.end()) {
     return false;
@@ -104,9 +106,9 @@ bool RangeMap::TryGetLabel(uint64_t addr, std::string* label) const {
   }
 }
 
-bool RangeMap::TryGetLabelForRange(uint64_t addr, uint64_t size,
+bool RangeMap::TryGetLabelForRange(VMAddr addr, uint64_t size,
                                    std::string* label) const {
-  uint64_t end = addr + size;
+  VMAddr end = addr + size;
   if (end < addr) {
     return false;
   }
@@ -125,7 +127,7 @@ bool RangeMap::TryGetLabelForRange(uint64_t addr, uint64_t size,
   }
 }
 
-bool RangeMap::TryGetSize(uint64_t addr, uint64_t* size) const {
+bool RangeMap::TryGetSize(VMAddr addr, uint64_t* size) const {
   auto iter = mappings_.find(addr);
   if (iter == mappings_.end()) {
     return false;
@@ -143,31 +145,32 @@ std::string RangeMap::DebugString() const {
   return ret;
 }
 
-void RangeMap::AddRange(uint64_t addr, uint64_t size, const std::string& val) {
-  AddDualRange(addr, size, kNoTranslation, val);
+void RangeMap::AddRange(VMAddr addr, uint64_t size, const std::string& val) {
+  AddDualRange(addr, size, kNoTranslation(), val);
 }
 
 template <class T>
-void RangeMap::MaybeSetLabel(T iter, const std::string& label, uint64_t addr,
-                             uint64_t size) {
+void RangeMap::MaybeSetLabel(T iter, const std::string& label, VMAddr addr,
+                             VMAddr end) {
   assert(EntryContains(iter, addr));
+  uint64_t size = (end > addr) ? (end - addr) : kUnknownSize;
   if (iter->second.size == kUnknownSize && size != kUnknownSize) {
-    assert(addr + size >= addr);
-    assert(addr + size >= iter->first);
+    assert(end >= addr);
+    assert(end >= iter->first);
     assert(addr >= iter->first);
     if (addr == iter->first) {
       T next = std::next(iter);
-      uint64_t end = addr + size;
+      VMAddr actual_end = end;
       if (!IterIsEnd(next)) {
-        end = std::min(end, next->first);
+        actual_end = std::min(end, next->first);
       }
-      uint64_t new_size = end - iter->first;
+      uint64_t new_size = actual_end - iter->first;
       if (verbose_level > 2) {
         printf("  updating mapping (%s) with new size %" PRIx64 "\n",
-               EntryDebugString(addr, size, UINT64_MAX, label).c_str(),
+               EntryDebugString(addr, end - addr, kNoTranslation(), label).c_str(),
                new_size);
       }
-      // This new defined range encompassess all of the unknown-length range, so
+      // This new defined range encompasses all of the unknown-length range, so
       // just define the range to have our end.
       iter->second.size = new_size;
       CheckConsistency(iter);
@@ -178,11 +181,12 @@ void RangeMap::MaybeSetLabel(T iter, const std::string& label, uint64_t addr,
   }
 }
 
-void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
+void RangeMap::AddDualRange(VMAddr addr, uint64_t size, VMAddr otheraddr,
                             const std::string& label) {
   if (verbose_level > 2) {
-    printf("%p AddDualRange([%" PRIx64 ", %" PRIx64 "], %" PRIx64 ", %s)\n",
-           this, addr, size, otheraddr, label.c_str());
+    printf("%p AddDualRange([%d:%" PRIx64 ", %" PRIx64 "], [%d:%" PRIx64 "], %s)\n",
+           this, addr.segment, addr.address, size,
+           otheraddr.segment, otheraddr.address, label.c_str());
   }
 
   if (size == 0) return;
@@ -190,12 +194,12 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
   auto it = FindContainingOrAfter(addr);
 
   if (size == kUnknownSize) {
-    assert(otheraddr == kNoTranslation);
-    if (it != mappings_.end() && EntryContainsStrict(it, addr)) {
-      MaybeSetLabel(it, label, addr, kUnknownSize);
-    } else {
+    assert(otheraddr == kNoTranslation());
+    // Only create a new entry if one doesn't already exist at this address.
+    // If an entry exists, leave it unchanged
+    if (it == mappings_.end() || !EntryContainsStrict(it, addr)) {
       auto iter = mappings_.emplace_hint(
-          it, std::make_pair(addr, Entry(label, kUnknownSize, kNoTranslation)));
+          it, std::make_pair(addr, Entry(label, kUnknownSize, kNoTranslation())));
       if (verbose_level > 2) {
         printf("  added entry: %s\n", EntryDebugString(iter).c_str());
       }
@@ -203,8 +207,8 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
     return;
   }
 
-  const uint64_t base = addr;
-  uint64_t end = addr + size;
+  const VMAddr base = addr;
+  VMAddr end = addr + size;
   assert(end >= addr);
 
   while (1) {
@@ -212,7 +216,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
     // gap.
     while (addr < end && !IterIsEnd(it) && EntryContains(it, addr)) {
       assert(end >= addr);
-      MaybeSetLabel(it, label, addr, end - addr);
+      MaybeSetLabel(it, label, addr, end);
       addr = RangeEndUnknownLimit(it, addr);
       ++it;
     }
@@ -223,14 +227,15 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
 
     // We found a gap and need to create an entry.  Need to make sure the new
     // entry doesn't extend into a range that was previously defined.
-    uint64_t this_end = end;
+    VMAddr this_end = end;
     if (it != mappings_.end() && end > it->first) {
       assert(it->first >= addr);
       this_end = std::min(end, it->first);
     }
 
-    uint64_t other = (otheraddr == kNoTranslation) ? kNoTranslation
-                                                   : addr - base + otheraddr;
+    VMAddr other = (otheraddr == kNoTranslation())
+                        ? kNoTranslation()
+                        : otheraddr + (addr.address - base.address);
     assert(this_end >= addr);
     auto iter = mappings_.emplace_hint(
         it, std::make_pair(addr, Entry(label, this_end - addr, other)));
@@ -250,13 +255,13 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
 // span several section mappings.  If we really wanted to get particular here,
 // we could pass a parameter indicating whether such spanning is expected, and
 // warn if not.
-bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
+bool RangeMap::AddRangeWithTranslation(VMAddr addr, uint64_t size,
                                        const std::string& val,
                                        const RangeMap& translator,
                                        bool verbose,
                                        RangeMap* other) {
   auto it = translator.FindContaining(addr);
-  uint64_t end;
+  VMAddr end;
   if (size == kUnknownSize) {
     end = addr + 1;
   } else {
@@ -269,14 +274,14 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
   // cases this would be a bug (ie. symbols VM->file).  In other cases it's
   // totally normal (ie. archive members file->VM).
   while (!translator.IterIsEnd(it) && it->first < end) {
-    uint64_t translated_addr;
-    uint64_t trimmed_addr;
+    VMAddr translated_addr;
+    VMAddr trimmed_addr;
     uint64_t trimmed_size;
     if (translator.TranslateAndTrimRangeWithEntry(
             it, addr, size, &trimmed_addr, &translated_addr, &trimmed_size)) {
       if (verbose_level > 2 || verbose) {
-        printf("  -> translates to: [%" PRIx64 " %" PRIx64 "]\n", translated_addr,
-               trimmed_size);
+        printf("  -> translates to: [%d:%" PRIx64 " %" PRIx64 "]\n",
+               translated_addr.segment, translated_addr.address, trimmed_size);
       }
       other->AddRange(translated_addr, trimmed_size, val);
     }
@@ -304,9 +309,9 @@ void RangeMap::Compress() {
   }
 }
 
-bool RangeMap::CoversRange(uint64_t addr, uint64_t size) const {
+bool RangeMap::CoversRange(VMAddr addr, uint64_t size) const {
   auto it = FindContaining(addr);
-  uint64_t end = addr + size;
+  VMAddr end = addr + size;
   assert(end >= addr);
 
   while (true) {
@@ -320,9 +325,9 @@ bool RangeMap::CoversRange(uint64_t addr, uint64_t size) const {
   }
 }
 
-uint64_t RangeMap::GetMaxAddress() const {
+VMAddr RangeMap::GetMaxAddress() const {
   if (mappings_.empty()) {
-    return 0;
+    return VMAddr(0, 0);
   } else {
     auto& entry = *mappings_.rbegin();
     return entry.first + entry.second.size;
