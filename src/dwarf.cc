@@ -440,7 +440,7 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
       // Unfortunately the location doesn't include a size, so we look that part
       // up in the symbol map.
       uint64_t size;
-      if (symbol_map.vm_map.TryGetSize(addr, &size)) {
+      if (symbol_map.vm_map.TryGetSize(VMAddr(addr), &size)) {
         sink->AddVMRangeIgnoreDuplicate("dwarf_location", addr, size,
                                         cu.unit_name());
       } else {

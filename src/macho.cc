@@ -74,6 +74,7 @@ struct LoadCommand {
   uint32_t cmd;
   string_view command_data;
   string_view file_data;
+  int segment_id;  // Architecture index for universal binaries
 };
 
 template <class Struct>
@@ -84,7 +85,7 @@ bool Is64Bit<mach_header_64>() { return true; }
 
 template <class Struct, class Func>
 void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
-                          Func&& loadcmd_func) {
+                          int segment_id, Func&& loadcmd_func) {
   string_view header_data = macho_data;
   auto header = GetStructPointerAndAdvance<Struct>(&header_data);
   MaybeAddOverhead(overhead_sink,
@@ -107,6 +108,7 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
     data.cmd = command->cmd;
     data.command_data = StrictSubstr(header_data, 0, command->cmdsize);
     data.file_data = macho_data;
+    data.segment_id = segment_id;
     std::forward<Func>(loadcmd_func)(data);
 
     MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", data.command_data);
@@ -116,7 +118,7 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
 
 template <class Func>
 void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
-                      Func&& loadcmd_func) {
+                      int segment_id, Func&& loadcmd_func) {
   uint32_t magic = ReadMagic(macho_file);
   switch (magic) {
     case MH_MAGIC:
@@ -127,12 +129,12 @@ void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
       // Still, you can build 32-bit binaries as of this writing, and
       // there are existing 32-bit binaries floating around, so we might
       // as well support them.
-      ParseMachOHeaderImpl<mach_header>(macho_file, overhead_sink,
+      ParseMachOHeaderImpl<mach_header>(macho_file, overhead_sink, segment_id,
                                         std::forward<Func>(loadcmd_func));
       break;
     case MH_MAGIC_64:
       ParseMachOHeaderImpl<mach_header_64>(
-          macho_file, overhead_sink, std::forward<Func>(loadcmd_func));
+          macho_file, overhead_sink, segment_id, std::forward<Func>(loadcmd_func));
       break;
     case MH_CIGAM:
     case MH_CIGAM_64:
@@ -167,7 +169,8 @@ void ParseFatHeader(string_view fat_file, RangeSink* overhead_sink,
     auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
     string_view macho_data = StrictSubstr(
         fat_file, ByteSwap(arch->offset), ByteSwap(arch->size));
-    ParseMachOHeader(macho_data, overhead_sink,
+    // Pass architecture index as segment_id for multi-arch binaries
+    ParseMachOHeader(macho_data, overhead_sink, i,
                      std::forward<Func>(loadcmd_func));
   }
 }
@@ -181,7 +184,8 @@ void ForEachLoadCommand(string_view maybe_fat_file, RangeSink* overhead_sink,
     case MH_MAGIC_64:
     case MH_CIGAM:
     case MH_CIGAM_64:
-      ParseMachOHeader(maybe_fat_file, overhead_sink,
+      // Single-architecture binary uses segment_id = 0
+      ParseMachOHeader(maybe_fat_file, overhead_sink, 0,
                        std::forward<Func>(loadcmd_func));
       break;
     case FAT_CIGAM:
@@ -417,7 +421,10 @@ void ParseLoadCommand(const LoadCommand& cmd, RangeSink* sink) {
 void ParseLoadCommands(RangeSink* sink) {
   ForEachLoadCommand(
       sink->input_file().data(), sink,
-      [sink](const LoadCommand& cmd) { ParseLoadCommand(cmd, sink); });
+      [sink](const LoadCommand& cmd) {
+        sink->set_segment_id(cmd.segment_id);
+        ParseLoadCommand(cmd, sink);
+      });
 }
 
 template <class NList>

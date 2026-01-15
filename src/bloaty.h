@@ -114,7 +114,7 @@ class RangeSink {
 public:
   RangeSink(const InputFile *file, const Options &options,
             DataSource data_source, const DualMap *translator,
-            google::protobuf::Arena *arena);
+            google::protobuf::Arena *arena, int segment_id = 0);
   RangeSink(const RangeSink &) = delete;
   RangeSink &operator=(const RangeSink &) = delete;
   ~RangeSink();
@@ -126,6 +126,8 @@ public:
   DataSource data_source() const { return data_source_; }
   const InputFile &input_file() const { return *file_; }
   bool IsBaseMap() const { return translator_ == nullptr; }
+  int segment_id() const { return segment_id_; }
+  void set_segment_id(int segment_id) { segment_id_ = segment_id; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
@@ -238,6 +240,7 @@ public:
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
   google::protobuf::Arena *arena_;
+  int segment_id_;
 };
 
 // NameMunger //////////////////////////////////////////////////////////////////

@@ -1107,12 +1107,13 @@ std::unique_ptr<InputFile> MmapInputFileFactory::OpenFile(
 
 RangeSink::RangeSink(const InputFile* file, const Options& options,
                      DataSource data_source, const DualMap* translator,
-                     google::protobuf::Arena* arena)
+                     google::protobuf::Arena* arena, int segment_id)
     : file_(file),
       options_(options),
       data_source_(data_source),
       translator_(translator),
-      arena_(arena) {}
+      arena_(arena),
+      segment_id_(segment_id) {}
 
 RangeSink::~RangeSink() {}
 
@@ -1148,11 +1149,11 @@ bool RangeSink::IsVerboseForVMRange(uint64_t vmaddr, uint64_t vmsize) {
     RangeMap vm_map;
     RangeMap file_map;
     bool contains = false;
-    vm_map.AddRangeWithTranslation(vmaddr, vmsize, "", translator_->vm_map,
+    vm_map.AddRangeWithTranslation(VMAddr(segment_id_, vmaddr), vmsize, "", translator_->vm_map,
                                    false, &file_map);
     file_map.ForEachRange(
-        [this, &contains](uint64_t fileoff, uint64_t filesize) {
-          if (ContainsVerboseFileOffset(fileoff, filesize)) {
+        [this, &contains](VMAddr fileoff, uint64_t filesize) {
+          if (ContainsVerboseFileOffset(fileoff.address, filesize)) {
             contains = true;
           }
         });
@@ -1180,10 +1181,10 @@ bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
     RangeMap vm_map;
     RangeMap file_map;
     bool contains = false;
-    file_map.AddRangeWithTranslation(fileoff, filesize, "",
+    file_map.AddRangeWithTranslation(VMAddr(fileoff), filesize, "",
                                      translator_->file_map, false, &vm_map);
-    vm_map.ForEachRange([this, &contains](uint64_t vmaddr, uint64_t vmsize) {
-      if (ContainsVerboseVMAddr(vmaddr, vmsize)) {
+    vm_map.ForEachRange([this, &contains](VMAddr vmaddr, uint64_t vmsize) {
+      if (ContainsVerboseVMAddr(vmaddr.address, vmsize)) {
         contains = true;
       }
     });
@@ -1209,14 +1210,14 @@ void RangeSink::AddFileRange(const char* analyzer, string_view name,
     const std::string label = pair.second->Munge(name);
     if (translator_) {
       bool ok = pair.first->file_map.AddRangeWithTranslation(
-          fileoff, filesize, label, translator_->file_map, verbose,
+          VMAddr(fileoff), filesize, label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              fileoff, filesize, name);
       }
     } else {
-      pair.first->file_map.AddRange(fileoff, filesize, label);
+      pair.first->file_map.AddRange(VMAddr(fileoff), filesize, label);
     }
   }
 }
@@ -1234,9 +1235,9 @@ void RangeSink::AddFileRangeForVMAddr(const char* analyzer,
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label)) {
+    if (pair.first->vm_map.TryGetLabel(VMAddr(segment_id_, label_from_vmaddr), &label)) {
       bool ok = pair.first->file_map.AddRangeWithTranslation(
-          file_offset, file_range.size(), label, translator_->file_map, verbose,
+          VMAddr(file_offset), file_range.size(), label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
         WARN("File range ($0, $1) for label $2 extends beyond base map",
@@ -1264,9 +1265,9 @@ void RangeSink::AddFileRangeForFileRange(const char* analyzer,
   for (auto& pair : outputs_) {
     std::string label;
     if (pair.first->file_map.TryGetLabelForRange(
-            from_file_offset, from_file_range.size(), &label)) {
+            VMAddr(from_file_offset), from_file_range.size(), &label)) {
       bool ok = pair.first->file_map.AddRangeWithTranslation(
-          file_offset, file_range.size(), label, translator_->file_map, verbose,
+          VMAddr(file_offset), file_range.size(), label, translator_->file_map, verbose,
           &pair.first->vm_map);
       if (!ok) {
         WARN("File range ($0, $1) for label $2 extends beyond base map",
@@ -1284,17 +1285,17 @@ void RangeSink::AddVMRangeForVMAddr(const char* analyzer,
                                     uint64_t size) {
   bool verbose = IsVerboseForVMRange(addr, size);
   if (verbose) {
-    printf("[%s, %s] AddVMRangeForVMAddr(%" PRIx64 ", [%" PRIx64 ", %" PRIx64
-           "])\n",
-           GetDataSourceLabel(data_source_), analyzer, label_from_vmaddr, addr,
-           size);
+    printf("[%s, %s] AddVMRangeForVMAddr(seg=%d label_from=%" PRIx64 ", seg=%d addr=%" PRIx64 ", %" PRIx64
+           ")\n",
+           GetDataSourceLabel(data_source_), analyzer, segment_id_, label_from_vmaddr,
+           segment_id_, addr, size);
   }
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label)) {
+    if (pair.first->vm_map.TryGetLabel(VMAddr(segment_id_, label_from_vmaddr), &label)) {
       bool ok = pair.first->vm_map.AddRangeWithTranslation(
-          addr, size, label, translator_->vm_map, verbose,
+          VMAddr(segment_id_, addr), size, label, translator_->vm_map, verbose,
           &pair.first->file_map);
       if (!ok && verbose_level > 1) {
         WARN("VM range ($0, $1) for label $2 extends beyond base map", addr,
@@ -1310,15 +1311,15 @@ void RangeSink::AddVMRange(const char* analyzer, uint64_t vmaddr,
                            uint64_t vmsize, const std::string& name) {
   bool verbose = IsVerboseForVMRange(vmaddr, vmsize);
   if (verbose) {
-    printf("[%s, %s] AddVMRange(%.*s, %" PRIx64 ", %" PRIx64 ")\n",
+    printf("[%s, %s] AddVMRange(%.*s, seg=%d vmaddr=%" PRIx64 ", %" PRIx64 ")\n",
            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
-           name.data(), vmaddr, vmsize);
+           name.data(), segment_id_, vmaddr, vmsize);
   }
   assert(translator_);
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     bool ok = pair.first->vm_map.AddRangeWithTranslation(
-        vmaddr, vmsize, label, translator_->vm_map, verbose,
+        VMAddr(segment_id_, vmaddr), vmsize, label, translator_->vm_map, verbose,
         &pair.first->file_map);
     if (!ok) {
       WARN("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
@@ -1353,15 +1354,15 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
 
   if (IsVerboseForVMRange(vmaddr, vmsize) ||
       IsVerboseForFileRange(fileoff, filesize)) {
-    printf("[%s, %s] AddRange(%.*s, %" PRIx64 ", %" PRIx64 ", %" PRIx64
+    printf("[%s, %s] AddRange(%.*s, seg=%d vmaddr=%" PRIx64 ", %" PRIx64 ", %" PRIx64
            ", %" PRIx64 ")\n",
            GetDataSourceLabel(data_source_), analyzer, (int)name.size(),
-           name.data(), vmaddr, vmsize, fileoff, filesize);
+           name.data(), segment_id_, vmaddr, vmsize, fileoff, filesize);
   }
 
   if (translator_) {
-    if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
-        !translator_->file_map.CoversRange(fileoff, filesize)) {
+    if (!translator_->vm_map.CoversRange(VMAddr(segment_id_, vmaddr), vmsize) ||
+        !translator_->file_map.CoversRange(VMAddr(fileoff), filesize)) {
       WARN("AddRange($0, $1, $2, $3, $4) will be ignored, because it is not "
            "covered by base map.",
            name.data(), vmaddr, vmsize, fileoff, filesize);
@@ -1373,11 +1374,11 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
     const std::string label = pair.second->Munge(name);
     uint64_t common = std::min(vmsize, filesize);
 
-    pair.first->vm_map.AddDualRange(vmaddr, common, fileoff, label);
-    pair.first->file_map.AddDualRange(fileoff, common, vmaddr, label);
+    pair.first->vm_map.AddDualRange(VMAddr(segment_id_, vmaddr), common, VMAddr(fileoff), label);
+    pair.first->file_map.AddDualRange(VMAddr(fileoff), common, VMAddr(segment_id_, vmaddr), label);
 
-    pair.first->vm_map.AddRange(vmaddr + common, vmsize - common, label);
-    pair.first->file_map.AddRange(fileoff + common, filesize - common, label);
+    pair.first->vm_map.AddRange(VMAddr(segment_id_, vmaddr + common), vmsize - common, label);
+    pair.first->file_map.AddRange(VMAddr(fileoff + common), filesize - common, label);
   }
 }
 
@@ -1386,7 +1387,7 @@ uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
   uint64_t offset = ptr - file_->data().data();
   uint64_t translated;
   if (!FileContainsPointer(ptr) ||
-      !translator_->file_map.Translate(offset, &translated)) {
+      !translator_->file_map.Translate(VMAddr(0, offset), &translated)) {
     THROWF("Can't translate file offset ($0) to VM, contains: $1, map:\n$2",
            offset, FileContainsPointer(ptr),
            translator_->file_map.DebugString().c_str());
@@ -1397,7 +1398,7 @@ uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
 std::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   assert(translator_);
   uint64_t translated;
-  if (!translator_->vm_map.Translate(address, &translated) ||
+  if (!translator_->vm_map.Translate(VMAddr(segment_id_, address), &translated) ||
       translated > file_->data().size()) {
     THROWF("Can't translate VM pointer ($0) to file", address);
 
@@ -1868,26 +1869,36 @@ struct DualMaps {
       map->file_map.Compress();
     }
     RangeMap::ComputeRollup(VmMaps(), [=](const std::vector<std::string>& keys,
-                                          uint64_t addr, uint64_t end) {
+                                          VMAddr addr, VMAddr end) {
       return rollup->AddSizes(keys, end - addr, true);
     });
     RangeMap::ComputeRollup(
         FileMaps(),
-        [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+        [=](const std::vector<std::string>& keys, VMAddr addr, VMAddr end) {
           return rollup->AddSizes(keys, end - addr, false);
         });
   }
 
   void PrintMaps(const std::vector<const RangeMap*> maps) {
-    uint64_t last = 0;
-    uint64_t max = maps[0]->GetMaxAddress();
-    int hex_digits = max > 0 ? std::ceil(std::log2(max) / 4) : 0;
+    VMAddr last(0, 0);
+    int last_segment = -1;
+    VMAddr max = maps[0]->GetMaxAddress();
+    int hex_digits = max.address > 0 ? std::ceil(std::log2(max.address) / 4) : 0;
     RangeMap::ComputeRollup(maps, [&](const std::vector<std::string>& keys,
-                                      uint64_t addr, uint64_t end) {
-      if (addr > last) {
-        PrintMapRow("[-- Nothing mapped --]", last, addr, hex_digits);
+                                      VMAddr addr, VMAddr end) {
+      if (addr.segment != last_segment) {
+        if (last_segment != -1) {
+          printf("\n");
+        }
+        printf("SEGMENT %d:\n", addr.segment);
+        last = VMAddr(addr.segment, 0);
+        last_segment = addr.segment;
       }
-      PrintMapRow(KeysToString(keys), addr, end, hex_digits);
+
+      if (addr.address > last.address) {
+        PrintMapRow("[-- Nothing mapped --]", last.address, addr.address, hex_digits);
+      }
+      PrintMapRow(KeysToString(keys), addr.address, end.address, hex_digits);
       last = end;
     });
     printf("\n");
@@ -2004,14 +2015,14 @@ void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
   // kInputFile source: Copy the base map to the filename sink(s).
   for (auto sink : filename_sink_ptrs) {
     maps.base_map()->vm_map.ForEachRange(
-        [sink](uint64_t start, uint64_t length) {
-          sink->AddVMRange("inputfile_vmcopier", start, length,
+        [sink](VMAddr start, uint64_t length) {
+          sink->AddVMRange("inputfile_vmcopier", start.address, length,
                            sink->input_file().filename());
         });
     maps.base_map()->file_map.ForEachRange(
-        [sink](uint64_t start, uint64_t length) {
+        [sink](VMAddr start, uint64_t length) {
           sink->AddFileRange("inputfile_filecopier",
-                             sink->input_file().filename(), start, length);
+                             sink->input_file().filename(), start.address, length);
         });
   }
 
