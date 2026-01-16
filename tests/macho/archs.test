@@ -1,0 +1,263 @@
+# Test -d archs data source for mach-o universal binaries
+#
+# Tests that the 'archs' data source correctly reports architecture slices
+# in universal binaries and single-architecture binaries.
+
+## Test 1: Universal binary with two architectures (x86_64 and arm64)
+# RUN: %yaml2obj --docnum=1 %s -o %t.universal
+# RUN: %bloaty %t.universal -d archs --domain=file | %FileCheck --check-prefix=UNIVERSAL %s
+
+# UNIVERSAL: FILE SIZE
+# UNIVERSAL-DAG: x86_64
+# UNIVERSAL-DAG: arm64
+# UNIVERSAL-DAG: [Unmapped]
+
+## Test 2: Filter to x86_64 architecture only
+# RUN: %bloaty %t.universal -d archs,segments --source-filter=x86_64 --domain=file | %FileCheck --check-prefix=FILTER-X86 %s
+
+# FILTER-X86: FILE SIZE
+# FILTER-X86: x86_64
+# FILTER-X86: __TEXT
+# FILTER-X86: __LINKEDIT
+# FILTER-X86-NOT: arm64
+
+## Test 3: Filter to arm64 architecture only
+# RUN: %bloaty %t.universal -d archs,segments --source-filter=arm64 --domain=file | %FileCheck --check-prefix=FILTER-ARM %s
+
+# FILTER-ARM: FILE SIZE
+# FILTER-ARM: arm64
+# FILTER-ARM: __TEXT
+# FILTER-ARM: __LINKEDIT
+# FILTER-ARM-NOT: x86_64
+
+## Test 4: Single architecture binary
+# RUN: %yaml2obj --docnum=2 %s -o %t.single
+# RUN: %bloaty %t.single -d archs --domain=file | %FileCheck --check-prefix=SINGLE %s
+
+# SINGLE: FILE SIZE
+# SINGLE: x86_64
+# SINGLE-NOT: arm64
+
+## Universal binary with x86_64 and arm64 slices
+--- !fat-mach-o
+FatHeader:
+  magic:           0xCAFEBABE
+  nfat_arch:       2
+FatArchs:
+  - cputype:         0x1000007
+    cpusubtype:      0x3
+    offset:          0x1000
+    size:            4176
+    align:           12
+  - cputype:         0x100000C
+    cpusubtype:      0x0
+    offset:          0x2050
+    size:            8280
+    align:           12
+Slices:
+  - !mach-o
+    FileHeader:
+      magic:           0xFEEDFACF
+      cputype:         0x1000007
+      cpusubtype:      0x3
+      filetype:        0x2
+      ncmds:           3
+      sizeofcmds:      328
+      flags:           0x200085
+      reserved:        0x0
+    LoadCommands:
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __PAGEZERO
+        vmaddr:          0
+        vmsize:          4294967296
+        fileoff:         0
+        filesize:        0
+        maxprot:         0
+        initprot:        0
+        nsects:          0
+        flags:           0
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         152
+        segname:         __TEXT
+        vmaddr:          4294967296
+        vmsize:          4096
+        fileoff:         0
+        filesize:        4096
+        maxprot:         5
+        initprot:        5
+        nsects:          1
+        flags:           0
+        Sections:
+          - sectname:        __text
+            segname:         __TEXT
+            addr:            0x100000F80
+            size:            8
+            offset:          0xF80
+            align:           4
+            reloff:          0x0
+            nreloc:          0
+            flags:           0x80000400
+            reserved1:       0x0
+            reserved2:       0x0
+            reserved3:       0x0
+            content:         554889E531C05DC3
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __LINKEDIT
+        vmaddr:          4294971392
+        vmsize:          4096
+        fileoff:         4096
+        filesize:        80
+        maxprot:         1
+        initprot:        1
+        nsects:          0
+        flags:           0
+    LinkEditData:
+      NameList:
+        - n_strx:          1
+          n_type:          0xF
+          n_sect:          1
+          n_desc:          0
+          n_value:         4294971264
+      StringTable:
+        - ' '
+        - _main
+  - !mach-o
+    FileHeader:
+      magic:           0xFEEDFACF
+      cputype:         0x100000C
+      cpusubtype:      0x0
+      filetype:        0x2
+      ncmds:           3
+      sizeofcmds:      328
+      flags:           0x200085
+      reserved:        0x0
+    LoadCommands:
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __PAGEZERO
+        vmaddr:          0
+        vmsize:          4294967296
+        fileoff:         0
+        filesize:        0
+        maxprot:         0
+        initprot:        0
+        nsects:          0
+        flags:           0
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         152
+        segname:         __TEXT
+        vmaddr:          4294967296
+        vmsize:          8192
+        fileoff:         0
+        filesize:        8192
+        maxprot:         5
+        initprot:        5
+        nsects:          1
+        flags:           0
+        Sections:
+          - sectname:        __text
+            segname:         __TEXT
+            addr:            0x100001F80
+            size:            8
+            offset:          0x1F80
+            align:           2
+            reloff:          0x0
+            nreloc:          0
+            flags:           0x80000400
+            reserved1:       0x0
+            reserved2:       0x0
+            reserved3:       0x0
+            content:         00008052C0035FD6
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __LINKEDIT
+        vmaddr:          4294975488
+        vmsize:          4096
+        fileoff:         8192
+        filesize:        88
+        maxprot:         1
+        initprot:        1
+        nsects:          0
+        flags:           0
+    LinkEditData:
+      NameList:
+        - n_strx:          1
+          n_type:          0xF
+          n_sect:          1
+          n_desc:          0
+          n_value:         4294975360
+      StringTable:
+        - ' '
+        - _main
+
+## Single x86_64 Mach-O executable
+--- !mach-o
+FileHeader:
+  magic:           0xFEEDFACF
+  cputype:         0x1000007
+  cpusubtype:      0x3
+  filetype:        0x2
+  ncmds:           3
+  sizeofcmds:      328
+  flags:           0x200085
+  reserved:        0x0
+LoadCommands:
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __PAGEZERO
+    vmaddr:          0
+    vmsize:          4294967296
+    fileoff:         0
+    filesize:        0
+    maxprot:         0
+    initprot:        0
+    nsects:          0
+    flags:           0
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         152
+    segname:         __TEXT
+    vmaddr:          4294967296
+    vmsize:          4096
+    fileoff:         0
+    filesize:        4096
+    maxprot:         5
+    initprot:        5
+    nsects:          1
+    flags:           0
+    Sections:
+      - sectname:        __text
+        segname:         __TEXT
+        addr:            0x100000F80
+        size:            8
+        offset:          0xF80
+        align:           4
+        reloff:          0x0
+        nreloc:          0
+        flags:           0x80000400
+        reserved1:       0x0
+        reserved2:       0x0
+        reserved3:       0x0
+        content:         554889E531C05DC3
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __LINKEDIT
+    vmaddr:          4294971392
+    vmsize:          4096
+    fileoff:         4096
+    filesize:        80
+    maxprot:         1
+    initprot:        1
+    nsects:          0
+    flags:           0
+LinkEditData:
+  NameList:
+    - n_strx:          1
+      n_type:          0xF
+      n_sect:          1
+      n_desc:          0
+      n_value:         4294971264
+  StringTable:
+    - ' '
+    - _main

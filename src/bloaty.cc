@@ -85,6 +85,7 @@ struct DataSourceDefinition {
 
 constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
+    {DataSource::kArchs, "archs", "architecture slices in universal binaries"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
     {DataSource::kInputFiles, "inputfiles",

@@ -58,6 +58,7 @@ enum class DataSource {
   kRawRanges,
   kSections,
   kSegments,
+  kArchs,
 
   // We always set this to one of the concrete symbol types below before
   // setting it on a sink.
