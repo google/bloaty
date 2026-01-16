@@ -21,6 +21,7 @@
 #include <string_view>
 
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/substitute.h"
 #include "third_party/darwin_xnu_macho/mach-o/loader.h"
 #include "third_party/darwin_xnu_macho/mach-o/fat.h"
@@ -66,6 +67,57 @@ const T* GetStructPointerAndAdvance(string_view* data) {
 void MaybeAddOverhead(RangeSink* sink, const char* label, string_view data) {
   if (sink) {
     sink->AddFileRange("macho_overhead", label, data);
+  }
+}
+
+// ARM64E capability field constants
+static constexpr uint32_t ARM64E_SUBTYPE_MASK = 0x00FFFFFF;  // Low 24 bits: subtype proper
+
+static bool IsArm64eSubtype(uint32_t cpusubtype) {
+  uint32_t subtype_proper = cpusubtype & ARM64E_SUBTYPE_MASK;
+  return subtype_proper == CPU_SUBTYPE_ARM64E;
+}
+
+std::string CpuTypeToString(uint32_t cputype, uint32_t cpusubtype) {
+  switch (cputype) {
+    case CPU_TYPE_X86_64:
+      switch (cpusubtype) {
+        case CPU_SUBTYPE_X86_64_H:
+          return "x86_64h";
+        default:
+          return "x86_64";
+      }
+    case CPU_TYPE_ARM64:
+      if (IsArm64eSubtype(cpusubtype)) {
+        return "arm64e";
+      }
+      switch (cpusubtype) {
+        case CPU_SUBTYPE_ARM64_V8:
+          return "arm64v8";
+        default:
+          return "arm64";
+      }
+    case CPU_TYPE_X86:
+      return "i386";
+    case CPU_TYPE_ARM:
+      switch (cpusubtype) {
+        case CPU_SUBTYPE_ARM_V6:
+          return "armv6";
+        case CPU_SUBTYPE_ARM_V7:
+          return "armv7";
+        case CPU_SUBTYPE_ARM_V7F:
+          return "armv7f";
+        case CPU_SUBTYPE_ARM_V7S:
+          return "armv7s";
+        case CPU_SUBTYPE_ARM_V7K:
+          return "armv7k";
+        case CPU_SUBTYPE_ARM_V8:
+          return "armv8";
+        default:
+          return "arm";
+      }
+    default:
+      return absl::StrFormat("cpu_%d", cputype);
   }
 }
 
@@ -619,11 +671,43 @@ class MachOObjectFile : public ObjectFile {
           ReadDWARFInlines(dwarf, sink, true);
           break;
         }
+        case DataSource::kArchs: {
+          ProcessArchitectures(sink);
+          break;
+        }
         case DataSource::kArchiveMembers:
         default:
           THROW("Mach-O doesn't support this data source");
       }
       AddMachOFallback(sink);
+    }
+  }
+
+  void ProcessArchitectures(RangeSink* sink) const {
+    uint32_t magic = ReadMagic(file_data().data());
+
+    if (magic == FAT_CIGAM) {
+      string_view header_data = file_data().data();
+      auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+      uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+
+      for (uint32_t i = 0; i < nfat_arch; i++) {
+        auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+        uint32_t cputype = ByteSwap(arch->cputype);
+        uint32_t cpusubtype = ByteSwap(arch->cpusubtype);
+        uint32_t offset = ByteSwap(arch->offset);
+        uint32_t size = ByteSwap(arch->size);
+
+        std::string arch_name = CpuTypeToString(cputype, cpusubtype);
+        string_view slice_data = StrictSubstr(file_data().data(), offset, size);
+
+        sink->AddFileRange("archs", arch_name, slice_data);
+      }
+    } else {
+      auto header = GetStructPointer<mach_header>(file_data().data());
+      std::string arch_name = CpuTypeToString(header->cputype, header->cpusubtype);
+
+      sink->AddFileRange("archs", arch_name, file_data().data());
     }
   }
 
