@@ -1401,6 +1401,8 @@ class ElfObjectFile : public ObjectFile {
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }
+        case DataSource::kArchs:
+          THROW("ELF files do not support 'archs' data source");
         default:
           THROW("unknown data source");
       }
