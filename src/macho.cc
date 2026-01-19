@@ -95,11 +95,15 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
   for (uint32_t i = 0; i < ncmds; i++) {
     auto command = GetStructPointer<load_command>(header_data);
 
-    // We test for this because otherwise a large ncmds can make bloaty hang for
-    // a while, even on a small file.  Hopefully there are no real cases where a
-    // zero-size loadcmd exists.
+    // Validate load command size to prevent hangs or buffer overruns
     if (command->cmdsize == 0) {
       THROW("Mach-O load command had zero size.");
+    }
+    if (command->cmdsize < sizeof(load_command)) {
+      THROW("Mach-O load command size smaller than minimum.");
+    }
+    if (command->cmdsize > header_data.size()) {
+      THROW("Mach-O load command size exceeds remaining header data.");
     }
 
     LoadCommand data;
@@ -163,6 +167,12 @@ void ParseFatHeader(string_view fat_file, RangeSink* overhead_sink,
                    fat_file.substr(0, sizeof(fat_header)));
   assert(ByteSwap(header->magic) == FAT_MAGIC);
   uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+
+  // Validate that nfat_arch count doesn't exceed header size
+  if (nfat_arch > header_data.size() / sizeof(fat_arch)) {
+    THROW("invalid nfat_arch count in universal binary header");
+  }
+
   for (uint32_t i = 0; i < nfat_arch; i++) {
     auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
     string_view macho_data = StrictSubstr(
@@ -203,6 +213,12 @@ void AddSegmentAsFallback(string_view command_data, string_view file_data,
   string_view segname = ArrayToStr(segment->segname, 16);
 
   uint32_t nsects = segment->nsects;
+
+  // Validate that nsects count doesn't exceed command data size
+  if (nsects > command_data.size() / sizeof(Section)) {
+    THROW("invalid section count in segment");
+  }
+
   for (uint32_t j = 0; j < nsects; j++) {
     auto section = GetStructPointerAndAdvance<Section>(&command_data);
 
@@ -257,6 +273,12 @@ void ParseSegment(LoadCommand cmd, RangeSink* sink) {
     }
   } else if (sink->data_source() == DataSource::kSections) {
     uint32_t nsects = segment->nsects;
+
+    // Validate that nsects count doesn't exceed command data size
+    if (nsects > cmd.command_data.size() / sizeof(Section)) {
+      THROW("invalid section count in segment");
+    }
+
     for (uint32_t j = 0; j < nsects; j++) {
       auto section = GetStructPointerAndAdvance<Section>(&cmd.command_data);
 
@@ -425,12 +447,17 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
                                  RangeSink* sink) {
   auto symtab_cmd = GetStructPointer<symtab_command>(cmd.command_data);
 
+  // Validate that nsyms count doesn't cause overflow or exceed file size
+  uint32_t nsyms = symtab_cmd->nsyms;
+  if (nsyms > cmd.file_data.size() / sizeof(NList)) {
+    THROW("invalid symbol count in symbol table");
+  }
+
   string_view symtab = StrictSubstr(cmd.file_data, symtab_cmd->symoff,
-                                    symtab_cmd->nsyms * sizeof(NList));
+                                    nsyms * sizeof(NList));
   string_view strtab =
       StrictSubstr(cmd.file_data, symtab_cmd->stroff, symtab_cmd->strsize);
 
-  uint32_t nsyms = symtab_cmd->nsyms;
   for (uint32_t i = 0; i < nsyms; i++) {
     auto sym = GetStructPointerAndAdvance<NList>(&symtab);
     string_view sym_range(reinterpret_cast<const char*>(sym), sizeof(NList));
@@ -507,6 +534,12 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
   }
 
   uint32_t nsects = segment->nsects;
+
+  // Validate that nsects count doesn't exceed command data size
+  if (nsects > cmd.command_data.size() / sizeof(Section)) {
+    THROW("invalid section count in segment");
+  }
+
   for (uint32_t j = 0; j < nsects; j++) {
     auto section = GetStructPointerAndAdvance<Section>(&cmd.command_data);
     string_view sectname = ArrayToStr(section->sectname, 16);
