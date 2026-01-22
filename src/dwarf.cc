@@ -668,6 +668,12 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
 
     std::string dwo_path = ConstructDwoPath(dwo_info);
     if (!dwo_path.empty()) {
+      // Check if DWO file exists before trying to open it
+      if (!std::filesystem::exists(dwo_path)) {
+        fprintf(stderr, "Warning: DWO file not found: %s\n", dwo_path.c_str());
+        continue;
+      }
+
       auto file = MmapInputFileFactory().OpenFile(dwo_path);
       dwarf::File dwo_dwarf;
       cu.dwarf().open(*file, &dwo_dwarf, sink);
