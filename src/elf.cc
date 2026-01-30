@@ -24,6 +24,8 @@
 #include "bloaty.h"
 #include "util.h"
 
+#include "arfile.h"
+
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -49,14 +51,6 @@ struct NullFunc {
   template <class T>
   T operator()(T val) { return val; }
 };
-
-size_t StringViewToSize(string_view str) {
-  size_t ret;
-  if (!absl::SimpleAtoi(str, &ret)) {
-    THROWF("couldn't convert string '$0' to integer.", str);
-  }
-  return ret;
-}
 
 template <class T>
 void AdvancePastStruct(string_view* data) {
@@ -577,127 +571,6 @@ bool ElfFile::FindSectionByName(std::string_view name, Section* section) const {
   return false;
 }
 
-
-// ArFile //////////////////////////////////////////////////////////////////////
-
-// For parsing .a files (static libraries).
-//
-// The best documentation I've been able to find for this file format is
-// Wikipedia: https://en.wikipedia.org/wiki/Ar_(Unix)
-//
-// So far we only parse the System V / GNU variant.
-
-class ArFile {
- public:
-  ArFile(string_view data)
-      : magic_(StrictSubstr(data, 0, kMagicSize)),
-        contents_(data.substr(std::min<size_t>(data.size(), kMagicSize))) {}
-
-  bool IsOpen() const { return magic() == string_view(kMagic); }
-
-  string_view magic() const { return magic_; }
-  string_view contents() const { return contents_; }
-
-  struct MemberFile {
-    enum {
-      kSymbolTable,        // Stores a symbol table.
-      kLongFilenameTable,  // Stores long filenames, users should ignore.
-      kNormal,             // Regular data file.
-    } file_type;
-    string_view filename;  // Only when file_type == kNormal
-    size_t size;
-    string_view header;
-    string_view contents;
-  };
-
-  class MemberReader {
-   public:
-    MemberReader(const ArFile& ar) : remaining_(ar.contents()) {}
-    bool ReadMember(MemberFile* file);
-    bool IsEof() const { return remaining_.size() == 0; }
-
-   private:
-    string_view Consume(size_t n) {
-      n = (n % 2 == 0 ? n : n + 1);
-      if (remaining_.size() < n) {
-        THROW("premature end of file");
-      }
-      string_view ret = remaining_.substr(0, n);
-      remaining_.remove_prefix(n);
-      return ret;
-    }
-
-    string_view long_filenames_;
-    string_view remaining_;
-  };
-
- private:
-  const string_view magic_;
-  const string_view contents_;
-
-  static constexpr const char* kMagic = "!<arch>\n";
-  static constexpr int kMagicSize = 8;
-};
-
-bool ArFile::MemberReader::ReadMember(MemberFile* file) {
-  struct Header {
-    char file_id[16];
-    char modified_timestamp[12];
-    char owner_id[6];
-    char group_id[6];
-    char mode[8];
-    char size[10];
-    char end[2];
-  };
-
-  if (remaining_.size() == 0) {
-    return false;
-  } else if (remaining_.size() < sizeof(Header)) {
-    THROW("Premature EOF in AR data");
-  }
-
-  const Header* header = reinterpret_cast<const Header*>(remaining_.data());
-  file->header = Consume(sizeof(Header));
-
-  string_view file_id(&header->file_id[0], sizeof(header->file_id));
-  string_view size_str(&header->size[0], sizeof(header->size));
-  file->size = StringViewToSize(size_str);
-  file->contents = Consume(file->size);
-  file->file_type = MemberFile::kNormal;
-
-  if (file_id[0] == '/') {
-    // Special filename, internal to the format.
-    if (file_id[1] == ' ') {
-      file->file_type = MemberFile::kSymbolTable;
-    } else if (file_id[1] == '/') {
-      file->file_type = MemberFile::kLongFilenameTable;
-      long_filenames_ = file->contents;
-    } else if (isdigit(file_id[1])) {
-      size_t offset = StringViewToSize(file_id.substr(1));
-      size_t end = long_filenames_.find('/', offset);
-
-      if (end == std::string::npos) {
-        THROW("Unterminated long filename");
-      }
-
-      file->filename = long_filenames_.substr(offset, end - offset);
-    } else {
-      THROW("Unexpected special filename in AR archive");
-    }
-  } else {
-    // Normal filename, slash-terminated.
-    size_t slash = file_id.find('/');
-
-    if (slash == std::string::npos) {
-      THROW("BSD-style AR not yet implemented");
-    }
-
-    file->filename = file_id.substr(0, slash);
-  }
-
-  return true;
-}
-
 void MaybeAddFileRange(const char* analyzer, RangeSink* sink, string_view label,
                        string_view range) {
   if (sink) {
@@ -769,11 +642,6 @@ static uint64_t ToVMAddr(uint64_t addr, uint64_t ndx, bool is_object) {
   } else {
     return addr;
   }
-}
-
-static bool IsArchiveFile(string_view data) {
-  ArFile ar(data);
-  return ar.IsOpen();
 }
 
 static bool IsObjectFile(string_view data) {
@@ -1481,8 +1349,19 @@ class ElfObjectFile : public ObjectFile {
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file) {
   ElfFile elf(file->data());
   ArFile ar(file->data());
-  if (elf.IsOpen() || ar.IsOpen()) {
+
+  if (elf.IsOpen()) {
     return std::unique_ptr<ObjectFile>(new ElfObjectFile(std::move(file)));
+  } else if (ar.IsOpen()) {
+    ArFile::MemberFile member;
+    ArFile::MemberReader reader(ar);
+
+    /* If the first archive member is GNU handle it as ELF */
+    if (reader.ReadMember(&member) && member.format == ArFile::MemberFile::GNU) {
+      return std::unique_ptr<ObjectFile>(new ElfObjectFile(std::move(file)));
+    } else {
+      return nullptr;
+    }
   } else {
     return nullptr;
   }
