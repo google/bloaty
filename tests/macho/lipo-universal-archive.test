@@ -1,0 +1,14 @@
+# Test that bloaty can parse universal archives created with lipo -create
+#
+# This test verifies that bloaty can handle the case where lipo -create is used
+# to combine two archives (one per architecture), creating a FAT binary where
+# each slice is an entire AR archive rather than a Mach-O file.
+#
+# This previously failed with "Corrupt Mach-O file" error before the fix.
+
+# RUN: %bloaty %p/../testdata/macho/lipo-universal.a -d armembers --domain=file | %FileCheck %s
+
+# CHECK: FILE SIZE
+# CHECK: test_x86_64.o [x86_64]
+# CHECK: test_arm64.o [arm64]
+# CHECK: TOTAL

@@ -21,9 +21,12 @@
 #include <string_view>
 
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/substitute.h"
-#include "third_party/darwin_xnu_macho/mach-o/loader.h"
+#include "arfile.h"
+#include "third_party/darwin_xnu_macho/mach/machine.h"
 #include "third_party/darwin_xnu_macho/mach-o/fat.h"
+#include "third_party/darwin_xnu_macho/mach-o/loader.h"
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
 #include "third_party/darwin_xnu_macho/mach-o/reloc.h"
 
@@ -69,11 +72,103 @@ void MaybeAddOverhead(RangeSink* sink, const char* label, string_view data) {
   }
 }
 
+// ARM64E capability field constants
+static constexpr uint32_t ARM64E_SUBTYPE_MASK = 0x00FFFFFF;  // Low 24 bits: subtype proper
+
+static bool IsArm64eSubtype(uint32_t cpusubtype) {
+  uint32_t subtype_proper = cpusubtype & ARM64E_SUBTYPE_MASK;
+  return subtype_proper == CPU_SUBTYPE_ARM64E;
+}
+
+std::string CpuTypeToString(uint32_t cputype, uint32_t cpusubtype) {
+  switch (cputype) {
+    case CPU_TYPE_X86_64:
+      switch (cpusubtype) {
+        case CPU_SUBTYPE_X86_64_H:
+          return "x86_64h";
+        default:
+          return "x86_64";
+      }
+    case CPU_TYPE_ARM64:
+      if (IsArm64eSubtype(cpusubtype)) {
+        return "arm64e";
+      }
+      switch (cpusubtype) {
+        case CPU_SUBTYPE_ARM64_V8:
+          return "arm64v8";
+        default:
+          return "arm64";
+      }
+    case CPU_TYPE_X86:
+      return "i386";
+    case CPU_TYPE_ARM:
+      switch (cpusubtype) {
+        case CPU_SUBTYPE_ARM_V6:
+          return "armv6";
+        case CPU_SUBTYPE_ARM_V7:
+          return "armv7";
+        case CPU_SUBTYPE_ARM_V7F:
+          return "armv7f";
+        case CPU_SUBTYPE_ARM_V7S:
+          return "armv7s";
+        case CPU_SUBTYPE_ARM_V7K:
+          return "armv7k";
+        case CPU_SUBTYPE_ARM_V8:
+          return "armv8";
+        default:
+          return "arm";
+      }
+    default:
+      return absl::StrFormat("cpu_%d", cputype);
+  }
+}
+
+void MaybeAddFileRange(const char* analyzer, RangeSink* sink, string_view label,
+                       string_view range) {
+  if (sink) {
+    sink->AddFileRange(analyzer, label, range);
+  }
+}
+
+static bool IsMachOContent(string_view data, std::string* error_msg = nullptr) {
+  if (data.size() < sizeof(uint32_t)) {
+    if (error_msg) *error_msg = "File too small for Mach-O header";
+    return false;
+  }
+
+  if (data.size() == 0 || std::all_of(data.begin(), data.begin() + std::min(data.size(), size_t(64)),
+                                      [](char c) { return c == 0; })) {
+    if (error_msg) *error_msg = "File appears to be empty or all zeros";
+    return false;
+  }
+
+  try {
+    uint32_t magic = macho::ReadMagic(data);
+    switch (magic) {
+      case MH_MAGIC:
+      case MH_MAGIC_64:
+      case MH_CIGAM:
+      case MH_CIGAM_64:
+        return true;
+      case FAT_MAGIC:
+      case FAT_CIGAM:
+        return true;
+      default:
+        if (error_msg) *error_msg = absl::StrFormat("Unknown magic: 0x%08x", magic);
+        return false;
+    }
+  } catch (const std::exception& e) {
+    if (error_msg) *error_msg = std::string("Parse error: ") + e.what();
+    return false;
+  }
+}
+
 struct LoadCommand {
   bool is64bit;
   uint32_t cmd;
   string_view command_data;
   string_view file_data;
+  string_view filename;
 };
 
 template <class Struct>
@@ -84,7 +179,7 @@ bool Is64Bit<mach_header_64>() { return true; }
 
 template <class Struct, class Func>
 void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
-                          Func&& loadcmd_func) {
+                          string_view filename, Func&& loadcmd_func) {
   string_view header_data = macho_data;
   auto header = GetStructPointerAndAdvance<Struct>(&header_data);
   MaybeAddOverhead(overhead_sink,
@@ -107,6 +202,7 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
     data.cmd = command->cmd;
     data.command_data = StrictSubstr(header_data, 0, command->cmdsize);
     data.file_data = macho_data;
+    data.filename = filename;
     std::forward<Func>(loadcmd_func)(data);
 
     MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", data.command_data);
@@ -116,7 +212,7 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
 
 template <class Func>
 void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
-                      Func&& loadcmd_func) {
+                      string_view filename, Func&& loadcmd_func) {
   uint32_t magic = ReadMagic(macho_file);
   switch (magic) {
     case MH_MAGIC:
@@ -128,11 +224,11 @@ void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
       // there are existing 32-bit binaries floating around, so we might
       // as well support them.
       ParseMachOHeaderImpl<mach_header>(macho_file, overhead_sink,
-                                        std::forward<Func>(loadcmd_func));
+                                        filename, std::forward<Func>(loadcmd_func));
       break;
     case MH_MAGIC_64:
       ParseMachOHeaderImpl<mach_header_64>(
-          macho_file, overhead_sink, std::forward<Func>(loadcmd_func));
+          macho_file, overhead_sink, filename, std::forward<Func>(loadcmd_func));
       break;
     case MH_CIGAM:
     case MH_CIGAM_64:
@@ -155,22 +251,111 @@ void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
 }
 
 template <class Func>
+void ParseArchiveMembers(string_view archive_data, RangeSink* overhead_sink,
+                         string_view arch_suffix, Func&& loadcmd_func) {
+  ArFile ar_file(archive_data);
+  if (!ar_file.IsOpen()) {
+    return;
+  }
+
+  ArFile::MemberFile member;
+  ArFile::MemberReader reader(ar_file);
+  MaybeAddFileRange("ar_archive", overhead_sink, "[AR Headers]", ar_file.magic());
+
+  while (reader.ReadMember(&member)) {
+    MaybeAddFileRange("ar_archive", overhead_sink, "[AR Headers]", member.header);
+
+    switch (member.file_type) {
+      case ArFile::MemberFile::kNormal: {
+        std::string error_msg;
+        if (IsMachOContent(member.contents, &error_msg)) {
+          try {
+            std::string member_name = arch_suffix.empty()
+                ? std::string(member.filename)
+                : absl::StrFormat("%s [%s]", member.filename, arch_suffix);
+
+            uint32_t magic = macho::ReadMagic(member.contents);
+            if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+              ParseFatHeader(member.contents, overhead_sink, member_name,
+                             std::forward<Func>(loadcmd_func));
+            } else {
+              ParseMachOHeader(member.contents, overhead_sink, member_name,
+                               std::forward<Func>(loadcmd_func));
+            }
+          } catch (const std::exception& e) {
+            WARN("Failed to parse archive member '$0': $1", member.filename, e.what());
+          }
+        } else {
+          std::string label = arch_suffix.empty()
+              ? absl::StrFormat("[AR Non-Mach-O: %s]", member.filename)
+              : absl::StrFormat("[AR Non-Mach-O: %s [%s]]", member.filename, arch_suffix);
+          MaybeAddFileRange("ar_archive", overhead_sink, label, member.contents);
+        }
+        break;
+      }
+      case ArFile::MemberFile::kSymbolTable:
+        MaybeAddFileRange("ar_archive", overhead_sink, "[AR Symbol Table]", member.contents);
+        break;
+      case ArFile::MemberFile::kLongFilenameTable:
+        MaybeAddFileRange("ar_archive", overhead_sink, "[AR Headers]", member.contents);
+        break;
+    }
+  }
+}
+
+template <class Func>
 void ParseFatHeader(string_view fat_file, RangeSink* overhead_sink,
-                    Func&& loadcmd_func) {
+                    string_view filename, Func&& loadcmd_func) {
   string_view header_data = fat_file;
   auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
   MaybeAddOverhead(overhead_sink, "[Mach-O Headers]",
                    fat_file.substr(0, sizeof(fat_header)));
-  assert(ByteSwap(header->magic) == FAT_MAGIC);
-  uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+
+  bool need_swap = (header->magic == FAT_CIGAM);
+  if (header->magic != FAT_MAGIC && header->magic != FAT_CIGAM) {
+    THROW("Invalid FAT magic");
+  }
+
+  uint32_t nfat_arch = need_swap ? ByteSwap(header->nfat_arch) : header->nfat_arch;
+
+  if (nfat_arch > header_data.size() / sizeof(fat_arch)) {
+    THROW("invalid nfat_arch count in universal binary header");
+  }
+
+  // Process all architectures in universal binaries.
+  // Use --source-filter to filter to a specific architecture.
+
   for (uint32_t i = 0; i < nfat_arch; i++) {
     auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
-    string_view macho_data = StrictSubstr(
-        fat_file, ByteSwap(arch->offset), ByteSwap(arch->size));
-    ParseMachOHeader(macho_data, overhead_sink,
-                     std::forward<Func>(loadcmd_func));
+
+    uint32_t offset = need_swap ? ByteSwap(arch->offset) : arch->offset;
+    uint32_t size = need_swap ? ByteSwap(arch->size) : arch->size;
+    uint32_t cputype = need_swap ? ByteSwap(arch->cputype) : arch->cputype;
+    uint32_t cpusubtype = need_swap ? ByteSwap(arch->cpusubtype) : arch->cpusubtype;
+
+    string_view arch_data = StrictSubstr(fat_file, offset, size);
+    std::string arch_name = CpuTypeToString(cputype, cpusubtype);
+
+    ArFile ar_file(arch_data);
+    if (ar_file.IsOpen()) {
+      ParseArchiveMembers(arch_data, overhead_sink, arch_name,
+                          std::forward<Func>(loadcmd_func));
+    } else {
+      // If this is an archive member, append architecture name
+      std::string arch_filename;
+      if (!filename.empty()) {
+        arch_filename = absl::StrFormat("%s [%s]", filename, arch_name);
+        ParseMachOHeader(arch_data, overhead_sink, arch_filename,
+                         std::forward<Func>(loadcmd_func));
+      } else {
+        ParseMachOHeader(arch_data, overhead_sink, "",
+                         std::forward<Func>(loadcmd_func));
+      }
+    }
   }
 }
+
+static bool g_warned_about_universal_in_archive = false;
 
 template <class Func>
 void ForEachLoadCommand(string_view maybe_fat_file, RangeSink* overhead_sink,
@@ -181,13 +366,99 @@ void ForEachLoadCommand(string_view maybe_fat_file, RangeSink* overhead_sink,
     case MH_MAGIC_64:
     case MH_CIGAM:
     case MH_CIGAM_64:
-      ParseMachOHeader(maybe_fat_file, overhead_sink,
+      ParseMachOHeader(maybe_fat_file, overhead_sink, "",
                        std::forward<Func>(loadcmd_func));
       break;
     case FAT_CIGAM:
-      ParseFatHeader(maybe_fat_file, overhead_sink,
+    case FAT_MAGIC:
+      ParseFatHeader(maybe_fat_file, overhead_sink, "",
                      std::forward<Func>(loadcmd_func));
       break;
+  }
+
+  ArFile ar_file(maybe_fat_file);
+
+  if (ar_file.IsOpen()) {
+    ArFile::MemberFile member;
+    ArFile::MemberReader reader(ar_file);
+    MaybeAddFileRange("ar_archive", overhead_sink, "[AR Headers]", ar_file.magic());
+
+    int processed_count = 0;
+    int skipped_count = 0;
+    bool has_universal_binaries = false;
+
+    while (reader.ReadMember(&member)) {
+      MaybeAddFileRange("ar_archive", overhead_sink, "[AR Headers]", member.header);
+
+      switch (member.file_type) {
+        case ArFile::MemberFile::kNormal: {
+          std::string error_msg;
+          if (IsMachOContent(member.contents, &error_msg)) {
+            try {
+              uint32_t magic = macho::ReadMagic(member.contents);
+              switch (magic) {
+                case MH_MAGIC:
+                case MH_MAGIC_64:
+                case MH_CIGAM:
+                case MH_CIGAM_64:
+                  ParseMachOHeader(member.contents, overhead_sink, member.filename,
+                           std::forward<Func>(loadcmd_func));
+                  processed_count++;
+                  break;
+                case FAT_MAGIC:
+                case FAT_CIGAM:
+                  has_universal_binaries = true;
+                  ParseFatHeader(member.contents, overhead_sink, member.filename,
+                         std::forward<Func>(loadcmd_func));
+                  processed_count++;
+                  break;
+                default:
+                  // This shouldn't happen with IsMachOContent check but be safe
+                  MaybeAddFileRange("ar_archive", overhead_sink,
+                                   absl::StrFormat("[AR Unknown Mach-O: %s]", member.filename),
+                                   member.contents);
+                  skipped_count++;
+              }
+            } catch (const std::exception& e) {
+              WARN("Failed to parse Mach-O member '$0': $1", member.filename, e.what());
+              MaybeAddFileRange("ar_archive", overhead_sink,
+                               absl::StrFormat("[AR Corrupt Mach-O: %s]", member.filename),
+                               member.contents);
+              skipped_count++;
+            }
+          } else {
+            MaybeAddFileRange("ar_archive", overhead_sink,
+                             absl::StrFormat("[AR Non-Mach-O: %s]", member.filename),
+                             member.contents);
+            skipped_count++;
+          }
+          break;
+        }
+        case ArFile::MemberFile::kSymbolTable:
+          MaybeAddFileRange("ar_archive", overhead_sink, "[AR Symbol Table]",
+                            member.contents);
+          break;
+        case ArFile::MemberFile::kLongFilenameTable:
+          MaybeAddFileRange("ar_archive", overhead_sink, "[AR Headers]",
+                            member.contents);
+          break;
+      }
+    }
+
+    if (verbose_level > 1 && (processed_count > 0 || skipped_count > 0)) {
+      printf("Archive processing complete: %d Mach-O members processed, %d skipped\n",
+             processed_count, skipped_count);
+    }
+
+    // Warn when processing universal binaries without --source-filter.
+    // Each architecture in a universal binary has its own independent VM address
+    // space, so summing VM sizes across different architectures is meaningless
+    // Use --domain=file for meaningful size comparisons, or --source-filter
+    // to filter to a single architecture.
+    if (has_universal_binaries && overhead_sink && !g_warned_about_universal_in_archive) {
+      fprintf(stderr, "Warning: Archive contains universal binaries. VM size totals across different architectures are not meaningful. Consider using --domain=file or --source-filter=<architecture> to filter to a specific architecture.\n");
+      g_warned_about_universal_in_archive = true;
+    }
   }
 }
 
@@ -281,6 +552,17 @@ void ParseSegment(LoadCommand cmd, RangeSink* sink) {
       } else {
         sink->AddRange("macho_section", label, section->addr, section->size,
                        StrictSubstr(cmd.file_data, section->offset, filesize));
+      }
+    }
+  } else if (sink->data_source() == DataSource::kArchiveMembers) {
+    if (!cmd.filename.empty()) {
+      if (unmapped) {
+        sink->AddFileRange(
+            "macho_armember", cmd.filename,
+            StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
+      } else {
+        sink->AddRange("macho_armember", cmd.filename, segment->vmaddr, segment->vmsize,
+                       StrictSubstr(cmd.file_data, segment->fileoff, segment->filesize));
       }
     }
   } else {
@@ -496,6 +778,18 @@ static void AddMachOFallback(RangeSink* sink) {
   sink->AddFileRange("macho_fallback", "[Unmapped]", sink->input_file().data());
 }
 
+static void AddMachOArchiveMemberFallback(RangeSink* sink) {
+  if (sink->data_source() == DataSource::kArchiveMembers) {
+    ForEachLoadCommand(
+        sink->input_file().data(), sink,
+        [sink](const LoadCommand& cmd) {
+          if (!cmd.filename.empty()) {
+            sink->AddFileRange("unmapped_armember", cmd.filename, cmd.file_data);
+          }
+        });
+  }
+}
+
 template <class Segment, class Section>
 void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
                                   RangeSink *sink) {
@@ -619,11 +913,46 @@ class MachOObjectFile : public ObjectFile {
           ReadDWARFInlines(dwarf, sink, true);
           break;
         }
+        case DataSource::kArchs: {
+          ProcessArchitectures(sink);
+          break;
+        }
         case DataSource::kArchiveMembers:
+          ParseLoadCommands(sink);
+          AddMachOArchiveMemberFallback(sink);
+          break;
         default:
           THROW("Mach-O doesn't support this data source");
       }
       AddMachOFallback(sink);
+    }
+  }
+
+  void ProcessArchitectures(RangeSink* sink) const {
+    uint32_t magic = ReadMagic(file_data().data());
+
+    if (magic == FAT_CIGAM) {
+      string_view header_data = file_data().data();
+      auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+      uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+
+      for (uint32_t i = 0; i < nfat_arch; i++) {
+        auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+        uint32_t cputype = ByteSwap(arch->cputype);
+        uint32_t cpusubtype = ByteSwap(arch->cpusubtype);
+        uint32_t offset = ByteSwap(arch->offset);
+        uint32_t size = ByteSwap(arch->size);
+
+        std::string arch_name = CpuTypeToString(cputype, cpusubtype);
+        string_view slice_data = StrictSubstr(file_data().data(), offset, size);
+
+        sink->AddFileRange("archs", arch_name, slice_data);
+      }
+    } else {
+      auto header = GetStructPointer<mach_header>(file_data().data());
+      std::string arch_name = CpuTypeToString(header->cputype, header->cpusubtype);
+
+      sink->AddFileRange("archs", arch_name, file_data().data());
     }
   }
 
@@ -640,12 +969,22 @@ class MachOObjectFile : public ObjectFile {
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
   uint32_t magic = macho::ReadMagic(file->data());
 
+  ArFile ar(file->data());
   // We only support little-endian host and little endian binaries (see
   // ParseMachOHeader() for more rationale).  Fat headers are always on disk as
   // big-endian.
-  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_CIGAM) {
+  if (magic == MH_MAGIC || magic == MH_MAGIC_64 || magic == FAT_MAGIC || magic == FAT_CIGAM) {
     return std::unique_ptr<ObjectFile>(
         new macho::MachOObjectFile(std::move(file)));
+  } else if (ar.IsOpen()) {
+    ArFile::MemberFile member;
+    ArFile::MemberReader reader(ar);
+    /* if the first archive member is Darwin handle it as macho */
+    if (reader.ReadMember(&member) && member.format == ArFile::MemberFile::Darwin) {
+      return std::unique_ptr<ObjectFile>(new macho::MachOObjectFile(std::move(file)));
+    } else {
+      return nullptr;
+    }
   }
 
   return nullptr;

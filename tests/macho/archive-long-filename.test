@@ -1,0 +1,10 @@
+# Test that bloaty can parse Mach-O archives with long filenames
+#
+# This test verifies that bloaty correctly handles Darwin-style long filenames
+# in archive members using the #1/N format, where N is the embedded filename length.
+
+# RUN: %bloaty %p/../testdata/macho/long-filename.a -d armembers --domain=vm | %FileCheck %s
+
+# CHECK: VM SIZE
+# CHECK: a_filename_that_is_longer_than_sixteen_chars.o
+# CHECK: TOTAL
