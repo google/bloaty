@@ -1,0 +1,22 @@
+# Test that --source-filter can filter architectures in archives containing universal binaries
+#
+# This test verifies that bloaty can filter to a specific architecture in archives
+# containing universal binaries using the --source-filter flag.
+#
+# Note: Without segment-aware VM addressing, use file domain for universal archives.
+
+# Test filtering to arm64 architecture
+# RUN: %bloaty %p/../testdata/macho/universal.a -d armembers --domain=file --source-filter=arm64 2>&1 | %FileCheck %s --check-prefix=ARM64
+
+# ARM64: FILE SIZE
+# ARM64: func_universal.o [arm64]
+# ARM64-NOT: func_universal.o [x86_64]
+# ARM64: TOTAL
+
+# Test filtering to x86_64 architecture
+# RUN: %bloaty %p/../testdata/macho/universal.a -d armembers --domain=file --source-filter=x86_64 2>&1 | %FileCheck %s --check-prefix=X86_64
+
+# X86_64: FILE SIZE
+# X86_64: func_universal.o [x86_64]
+# X86_64-NOT: func_universal.o [arm64]
+# X86_64: TOTAL

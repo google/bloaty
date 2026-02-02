@@ -1,0 +1,14 @@
+# Test that bloaty can parse Mach-O archives containing universal binaries
+#
+# This test verifies that bloaty can open and analyze archives containing
+# universal binaries (multiple architectures in one file).
+#
+# Note: Without segment-aware VM addressing, VM domain doesn't work correctly
+# for universal archives (architectures' address spaces collide). Use file domain.
+
+# RUN: %bloaty %p/../testdata/macho/universal.a -d armembers --domain=file | %FileCheck %s
+
+# CHECK: FILE SIZE
+# CHECK: func_universal.o [x86_64]
+# CHECK: func_universal.o [arm64]
+# CHECK: TOTAL

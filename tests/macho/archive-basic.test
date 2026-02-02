@@ -1,0 +1,7 @@
+# Test that bloaty can parse Mach-O archive files
+
+# RUN: %bloaty %p/../testdata/macho/simple.a -d sections --domain=vm | %FileCheck %s
+
+# CHECK: VM SIZE
+# CHECK: ,__text
+# CHECK: TOTAL

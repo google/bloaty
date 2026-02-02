@@ -393,6 +393,7 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/bloaty_package.bloaty
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 add_library(libbloaty STATIC
+    src/arfile.cc
     src/bloaty.cc
     src/bloaty.h
     src/disassemble.cc
