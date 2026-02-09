@@ -500,8 +500,8 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
     }
 
     if (table) {
-      table->insert(std::make_pair(
-          name, std::make_pair(sym->n_value, RangeSink::kUnknownSize)));
+      table->insert(
+          name, SymbolInfo(sym->n_value, RangeSink::kUnknownSize, sym->n_desc));
     }
 
     // Capture the trailing NULL.
@@ -612,6 +612,116 @@ static void ReadDebugSectionsFromMachO(const InputFile &file,
       });
 }
 
+struct TextSegmentInfo {
+  uint64_t vmaddr = 0;
+  uint64_t vmsize = 0;
+  uint64_t fileoff = 0;
+  uint64_t filesize = 0;
+  bool found = false;
+};
+
+struct TextSectionInfo {
+  uint64_t vmaddr = 0;
+  uint64_t vmsize = 0;
+  bool found = false;
+};
+
+template <typename SegmentCommand>
+static void ExtractTextSegmentInfo(const LoadCommand& cmd,
+                                   TextSegmentInfo& text_info) {
+  auto segment = GetStructPointer<SegmentCommand>(cmd.command_data);
+  string_view segname = ArrayToStr(segment->segname, 16);
+  if (segname == "__TEXT") {
+    text_info.vmaddr = segment->vmaddr;
+    text_info.vmsize = segment->vmsize;
+    text_info.fileoff = segment->fileoff;
+    text_info.filesize = segment->filesize;
+    text_info.found = true;
+  }
+}
+
+static TextSegmentInfo GetTextSegmentInfo(string_view data) {
+  TextSegmentInfo text_info;
+  ForEachLoadCommand(data, nullptr, [&text_info](const LoadCommand& cmd) {
+    if (text_info.found) return;  // Already found, skip others
+
+    if (cmd.cmd == LC_SEGMENT_64) {
+      ExtractTextSegmentInfo<segment_command_64>(cmd, text_info);
+    } else if (cmd.cmd == LC_SEGMENT) {
+      ExtractTextSegmentInfo<segment_command>(cmd, text_info);
+    }
+  });
+  return text_info;
+}
+
+template <typename SegmentCommand, typename SectionType>
+static void ExtractTextSectionInfo(const LoadCommand& cmd,
+                                   TextSectionInfo& text_section_info) {
+  auto segment = GetStructPointer<SegmentCommand>(cmd.command_data);
+  string_view segname = ArrayToStr(segment->segname, 16);
+  if (segname == "__TEXT") {
+    string_view command_data = cmd.command_data;
+    GetStructPointerAndAdvance<SegmentCommand>(&command_data);
+
+    uint32_t nsects = segment->nsects;
+    for (uint32_t j = 0; j < nsects; j++) {
+      auto section = GetStructPointerAndAdvance<SectionType>(&command_data);
+      string_view sectname = ArrayToStr(section->sectname, 16);
+      if (sectname == "__text") {
+        text_section_info.vmaddr = section->addr;
+        text_section_info.vmsize = section->size;
+        text_section_info.found = true;
+        return;
+      }
+    }
+  }
+}
+
+static TextSectionInfo GetTextSectionInfo(string_view data) {
+  TextSectionInfo text_section_info;
+  ForEachLoadCommand(data, nullptr,
+                     [&text_section_info](const LoadCommand& cmd) {
+                       if (text_section_info.found)
+                         return;  // Already found, skip others
+
+                       if (cmd.cmd == LC_SEGMENT_64) {
+                         ExtractTextSectionInfo<segment_command_64, section_64>(
+                             cmd, text_section_info);
+                       } else if (cmd.cmd == LC_SEGMENT) {
+                         ExtractTextSectionInfo<segment_command, section>(
+                             cmd, text_section_info);
+                       }
+                     });
+  return text_section_info;
+}
+
+struct CapstoneArchMode {
+  cs_arch arch;
+  cs_mode mode;
+};
+
+// Map Mach-O CPU types to Capstone architecture and mode constants
+static CapstoneArchMode MachOToCapstone(uint32_t cputype, uint32_t cpusubtype,
+                                        bool is_thumb) {
+  (void)cpusubtype;
+
+  switch (cputype) {
+    case CPU_TYPE_X86:
+      return {CS_ARCH_X86, CS_MODE_32};
+    case CPU_TYPE_X86_64:
+      return {CS_ARCH_X86, CS_MODE_64};
+    case CPU_TYPE_ARM:
+      if (is_thumb) {
+        return {CS_ARCH_ARM, static_cast<cs_mode>(CS_MODE_THUMB | CS_MODE_ARM)};
+      }
+      return {CS_ARCH_ARM, CS_MODE_ARM};
+    case CPU_TYPE_ARM64:
+      return {CS_ARCH_ARM64, CS_MODE_ARM};
+    default:
+      THROWF("Unknown Mach-O CPU type: $0", cputype);
+  }
+}
+
 class MachOObjectFile : public ObjectFile {
  public:
   MachOObjectFile(std::unique_ptr<InputFile> file_data)
@@ -711,11 +821,187 @@ class MachOObjectFile : public ObjectFile {
     }
   }
 
-  bool GetDisassemblyInfo(std::string_view /*symbol*/,
-                          DataSource /*symbol_source*/,
-                          DisassemblyInfo* /*info*/) const override {
-    WARN("Mach-O files do not support disassembly yet");
-    return false;
+  bool GetDisassemblyInfo(std::string_view symbol, DataSource symbol_source,
+                          const Options& options,
+                          DisassemblyInfo* info) const override {
+    string_view macho_data;
+    uint32_t cputype = 0;
+    uint32_t cpusubtype = 0;
+    uint64_t slice_offset = 0;
+    uint32_t magic = ReadMagic(file_data().data());
+
+    if (magic == FAT_CIGAM) {
+      if (!options.has_source_filter()) {
+        THROW(
+            "Disassembling universal binaries requires --source-filter to "
+            "select architecture");
+      }
+
+      std::unique_ptr<ReImpl> filter_regex =
+          absl::make_unique<ReImpl>(options.source_filter());
+
+      string_view header_data = file_data().data();
+      auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+      uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+
+      bool found = false;
+      for (uint32_t i = 0; i < nfat_arch; i++) {
+        auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+        cputype = ByteSwap(arch->cputype);
+        cpusubtype = ByteSwap(arch->cpusubtype);
+        std::string arch_name = CpuTypeToString(cputype, cpusubtype);
+
+        if (ReImpl::PartialMatch(arch_name, *filter_regex)) {
+          uint32_t offset = ByteSwap(arch->offset);
+          uint32_t size = ByteSwap(arch->size);
+          slice_offset = offset;
+          macho_data = StrictSubstr(file_data().data(), offset, size);
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        THROWF("No architecture matching filter '$0' found in universal binary",
+               options.source_filter());
+      }
+    } else {
+      macho_data = file_data().data();
+      auto header = GetStructPointer<mach_header>(macho_data);
+      cputype = header->cputype;
+      cpusubtype = header->cpusubtype;
+    }
+
+    DualMap base_map;
+    NameMunger empty_munger;
+    RangeSink base_sink(&file_data(), options, DataSource::kSegments, nullptr,
+                        nullptr);
+    base_sink.AddOutput(&base_map, &empty_munger);
+
+    ForEachLoadCommand(macho_data, nullptr,
+                       [&base_sink](const LoadCommand& cmd) {
+                         ParseLoadCommand(cmd, &base_sink);
+                       });
+
+    SymbolTable symtab;
+    RangeSink symbol_sink(&file_data(), options, symbol_source, &base_map,
+                          nullptr);
+    symbol_sink.AddOutput(&base_map, &empty_munger);
+    ParseSymbols(macho_data, &symtab, &symbol_sink);
+
+    auto it = symtab.find(symbol);
+    if (it == symtab.end()) {
+      return false;
+    }
+
+    uint64_t vmaddr = it->second.address;
+    uint64_t size = it->second.size;
+    uint16_t n_desc = it->second.n_desc;
+
+    // Handle kUnknownSize - find next symbol and clamp to section/segment
+    // bounds
+    if (size == RangeSink::kUnknownSize) {
+      TextSectionInfo text_section_info = GetTextSectionInfo(macho_data);
+      uint64_t text_section_end = UINT64_MAX;
+      if (text_section_info.found) {
+        text_section_end = text_section_info.vmaddr + text_section_info.vmsize;
+      }
+
+      // Find the next symbol after this one by address, but don't go beyond
+      // __text section
+      uint64_t next_addr = text_section_end;
+      for (const auto& sym_entry : symtab) {
+        uint64_t sym_addr = sym_entry.second.address;
+        if (sym_addr > vmaddr && sym_addr < next_addr) {
+          next_addr = sym_addr;
+        }
+      }
+
+      if (next_addr != UINT64_MAX) {
+        size = next_addr - vmaddr;
+      } else {
+        // Default to a reasonable size if we can't determine it.
+        size = 256;
+      }
+
+      if (text_section_info.found && vmaddr >= text_section_info.vmaddr &&
+          vmaddr < text_section_end) {
+        uint64_t max_size_in_section = text_section_end - vmaddr;
+        if (size > max_size_in_section) {
+          size = max_size_in_section;
+          if (verbose_level > 1) {
+            printf("Symbol %.*s size clamped to %" PRIu64
+                   " to stay within __text section\n",
+                   static_cast<int>(symbol.size()), symbol.data(), size);
+          }
+        }
+      }
+    }
+
+    uint64_t fileoff;
+    if (!base_map.vm_map.Translate(vmaddr, &fileoff)) {
+      THROWF("Could not translate VM address $0 to file offset", vmaddr);
+    }
+
+    TextSegmentInfo text_info = GetTextSegmentInfo(macho_data);
+    if (text_info.found) {
+      // Adjust file offsets by slice_offset for universal binaries.
+      // GetTextSegmentInfo returns slice relative offsets, but base_map.vm_map
+      // uses file relative offsets
+      text_info.fileoff += slice_offset;
+
+      uint64_t text_end_vm = text_info.vmaddr + text_info.vmsize;
+      uint64_t symbol_end_vm = vmaddr + size;
+
+      if (symbol_end_vm > text_end_vm) {
+        if (vmaddr >= text_end_vm) {
+          THROWF("Function $0 is outside __TEXT segment", symbol);
+        }
+        size = text_end_vm - vmaddr;
+        if (verbose_level > 1) {
+          printf("Warning: Function %.*s size limited to %" PRIu64
+                 " to stay within __TEXT segment\n",
+                 static_cast<int>(symbol.size()), symbol.data(), size);
+        }
+      }
+
+      uint64_t text_end_file = text_info.fileoff + text_info.filesize;
+      uint64_t symbol_end_file = fileoff + size;
+
+      if (symbol_end_file > text_end_file) {
+        if (fileoff >= text_end_file) {
+          THROWF("Function $0 file offset is outside __TEXT segment", symbol);
+        }
+        uint64_t file_clamped_size = text_end_file - fileoff;
+        if (file_clamped_size < size) {
+          size = file_clamped_size;
+          if (verbose_level > 1) {
+            printf("Warning: Function %.*s size limited to %" PRIu64
+                   " due to file bounds\n",
+                   static_cast<int>(symbol.size()), symbol.data(), size);
+          }
+        }
+      }
+    } else {
+      if (verbose_level > 1) {
+        printf("Warning: Could not find __TEXT segment for bounds checking\n");
+      }
+    }
+
+    if (fileoff + size > file_data().data().size()) {
+      size = file_data().data().size() - fileoff;
+    }
+
+    info->text = StrictSubstr(file_data().data(), fileoff, size);
+    info->start_address = vmaddr;
+
+    bool is_thumb = (cputype == CPU_TYPE_ARM) && (n_desc & N_ARM_THUMB_DEF);
+
+    CapstoneArchMode capstone = MachOToCapstone(cputype, cpusubtype, is_thumb);
+    info->arch = capstone.arch;
+    info->mode = capstone.mode;
+
+    return true;
   }
 };
 

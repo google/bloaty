@@ -1,0 +1,378 @@
+# Test --disassemble for Mach-O binaries
+#
+# Tests that disassembly works for single-arch and universal binaries,
+# and that --source-filter is required for universal binaries.
+
+## Test 1: Disassemble function in single-architecture x86_64 binary
+# RUN: %yaml2obj --docnum=1 %s -o %t.single-x86
+# RUN: %bloaty %t.single-x86 --disassemble=_main | %FileCheck --check-prefix=SINGLE-X86 %s
+
+# SINGLE-X86: push
+# SINGLE-X86-NEXT: mov
+# SINGLE-X86-NEXT: xor
+# SINGLE-X86-NEXT: pop
+# SINGLE-X86-NEXT: ret
+# SINGLE-X86-EMPTY:
+
+## Test 2: Disassemble function in single-architecture arm64 binary
+# RUN: %yaml2obj --docnum=2 %s -o %t.single-arm
+# RUN: %bloaty %t.single-arm --disassemble=_main | %FileCheck --check-prefix=SINGLE-ARM %s
+
+# SINGLE-ARM: mov
+# SINGLE-ARM-NEXT: ret
+# SINGLE-ARM-EMPTY:
+
+## Test 3: Universal binary requires --source-filter
+# RUN: %yaml2obj --docnum=3 %s -o %t.universal
+# RUN: not %bloaty %t.universal --disassemble=_main 2>&1 | %FileCheck --check-prefix=NO-FILTER %s
+
+# NO-FILTER: Disassembling universal binaries requires --source-filter to select architecture
+
+## Test 4: Disassemble x86_64 slice from universal binary
+# RUN: %bloaty %t.universal --disassemble=_main --source-filter=x86_64 | %FileCheck --check-prefix=UNIVERSAL-X86 %s
+
+# UNIVERSAL-X86: push
+# UNIVERSAL-X86-NEXT: mov
+# UNIVERSAL-X86-NEXT: xor
+# UNIVERSAL-X86-NEXT: pop
+# UNIVERSAL-X86-NEXT: ret
+# UNIVERSAL-X86-EMPTY:
+
+## Test 5: Disassemble arm64 slice from universal binary
+# RUN: %bloaty %t.universal --disassemble=_main --source-filter=arm64 | %FileCheck --check-prefix=UNIVERSAL-ARM %s
+
+# UNIVERSAL-ARM: mov
+# UNIVERSAL-ARM-NEXT: ret
+# UNIVERSAL-ARM-EMPTY:
+
+## Test 6: Error on non-existent function
+# RUN: not %bloaty %t.single-x86 --disassemble=_nonexistent 2>&1 | %FileCheck --check-prefix=NOT-FOUND %s
+
+# NOT-FOUND: Couldn't find function _nonexistent to disassemble
+
+## Test 7: Error on wrong architecture filter
+# RUN: not %bloaty %t.universal --disassemble=_main --source-filter=i386 2>&1 | %FileCheck --check-prefix=BAD-ARCH %s
+
+# BAD-ARCH: No architecture matching filter 'i386' found in universal binary
+
+## Single x86_64 Mach-O executable with _main function
+--- !mach-o
+FileHeader:
+  magic:           0xFEEDFACF
+  cputype:         0x1000007
+  cpusubtype:      0x3
+  filetype:        0x2
+  ncmds:           4
+  sizeofcmds:      352
+  flags:           0x200085
+  reserved:        0x0
+LoadCommands:
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __PAGEZERO
+    vmaddr:          0
+    vmsize:          4294967296
+    fileoff:         0
+    filesize:        0
+    maxprot:         0
+    initprot:        0
+    nsects:          0
+    flags:           0
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         152
+    segname:         __TEXT
+    vmaddr:          4294967296
+    vmsize:          4096
+    fileoff:         0
+    filesize:        4096
+    maxprot:         5
+    initprot:        5
+    nsects:          1
+    flags:           0
+    Sections:
+      - sectname:        __text
+        segname:         __TEXT
+        addr:            0x100000F80
+        size:            8
+        offset:          0xF80
+        align:           4
+        reloff:          0x0
+        nreloc:          0
+        flags:           0x80000400
+        reserved1:       0x0
+        reserved2:       0x0
+        reserved3:       0x0
+        content:         554889E531C05DC3
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __LINKEDIT
+    vmaddr:          4294971392
+    vmsize:          4096
+    fileoff:         4096
+    filesize:        80
+    maxprot:         1
+    initprot:        1
+    nsects:          0
+    flags:           0
+  - cmd:             LC_SYMTAB
+    cmdsize:         24
+    symoff:          4096
+    nsyms:           1
+    stroff:          4112
+    strsize:         9
+LinkEditData:
+  NameList:
+    - n_strx:          3
+      n_type:          0xF
+      n_sect:          1
+      n_desc:          0
+      n_value:         4294971264
+  StringTable:
+    - ' '
+    - ''
+    - _main
+
+## Single arm64 Mach-O executable with _main function
+--- !mach-o
+FileHeader:
+  magic:           0xFEEDFACF
+  cputype:         0x100000C
+  cpusubtype:      0x0
+  filetype:        0x2
+  ncmds:           4
+  sizeofcmds:      352
+  flags:           0x200085
+  reserved:        0x0
+LoadCommands:
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __PAGEZERO
+    vmaddr:          0
+    vmsize:          4294967296
+    fileoff:         0
+    filesize:        0
+    maxprot:         0
+    initprot:        0
+    nsects:          0
+    flags:           0
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         152
+    segname:         __TEXT
+    vmaddr:          4294967296
+    vmsize:          8192
+    fileoff:         0
+    filesize:        8192
+    maxprot:         5
+    initprot:        5
+    nsects:          1
+    flags:           0
+    Sections:
+      - sectname:        __text
+        segname:         __TEXT
+        addr:            0x100001F80
+        size:            8
+        offset:          0x1F80
+        align:           2
+        reloff:          0x0
+        nreloc:          0
+        flags:           0x80000400
+        reserved1:       0x0
+        reserved2:       0x0
+        reserved3:       0x0
+        content:         00008052C0035FD6
+  - cmd:             LC_SEGMENT_64
+    cmdsize:         72
+    segname:         __LINKEDIT
+    vmaddr:          4294975488
+    vmsize:          4096
+    fileoff:         8192
+    filesize:        88
+    maxprot:         1
+    initprot:        1
+    nsects:          0
+    flags:           0
+  - cmd:             LC_SYMTAB
+    cmdsize:         24
+    symoff:          8192
+    nsyms:           1
+    stroff:          8208
+    strsize:         9
+LinkEditData:
+  NameList:
+    - n_strx:          3
+      n_type:          0xF
+      n_sect:          1
+      n_desc:          0
+      n_value:         4294975360
+  StringTable:
+    - ' '
+    - ''
+    - _main
+
+## Universal binary with x86_64 and arm64 slices, each with _main function
+--- !fat-mach-o
+FatHeader:
+  magic:           0xCAFEBABE
+  nfat_arch:       2
+FatArchs:
+  - cputype:         0x1000007
+    cpusubtype:      0x3
+    offset:          0x1000
+    size:            4176
+    align:           12
+  - cputype:         0x100000C
+    cpusubtype:      0x0
+    offset:          0x3000
+    size:            8280
+    align:           12
+Slices:
+  - !mach-o
+    FileHeader:
+      magic:           0xFEEDFACF
+      cputype:         0x1000007
+      cpusubtype:      0x3
+      filetype:        0x2
+      ncmds:           4
+      sizeofcmds:      352
+      flags:           0x200085
+      reserved:        0x0
+    LoadCommands:
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __PAGEZERO
+        vmaddr:          0
+        vmsize:          4294967296
+        fileoff:         0
+        filesize:        0
+        maxprot:         0
+        initprot:        0
+        nsects:          0
+        flags:           0
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         152
+        segname:         __TEXT
+        vmaddr:          4294967296
+        vmsize:          4096
+        fileoff:         0
+        filesize:        4096
+        maxprot:         5
+        initprot:        5
+        nsects:          1
+        flags:           0
+        Sections:
+          - sectname:        __text
+            segname:         __TEXT
+            addr:            0x100000F80
+            size:            8
+            offset:          0xF80
+            align:           4
+            reloff:          0x0
+            nreloc:          0
+            flags:           0x80000400
+            reserved1:       0x0
+            reserved2:       0x0
+            reserved3:       0x0
+            content:         554889E531C05DC3
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __LINKEDIT
+        vmaddr:          4294971392
+        vmsize:          4096
+        fileoff:         4096
+        filesize:        80
+        maxprot:         1
+        initprot:        1
+        nsects:          0
+        flags:           0
+      - cmd:             LC_SYMTAB
+        cmdsize:         24
+        symoff:          4096
+        nsyms:           1
+        stroff:          4112
+        strsize:         9
+    LinkEditData:
+      NameList:
+        - n_strx:          3
+          n_type:          0xF
+          n_sect:          1
+          n_desc:          0
+          n_value:         4294971264
+      StringTable:
+        - ' '
+        - ''
+        - _main
+  - !mach-o
+    FileHeader:
+      magic:           0xFEEDFACF
+      cputype:         0x100000C
+      cpusubtype:      0x0
+      filetype:        0x2
+      ncmds:           4
+      sizeofcmds:      352
+      flags:           0x200085
+      reserved:        0x0
+    LoadCommands:
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __PAGEZERO
+        vmaddr:          0
+        vmsize:          4294967296
+        fileoff:         0
+        filesize:        0
+        maxprot:         0
+        initprot:        0
+        nsects:          0
+        flags:           0
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         152
+        segname:         __TEXT
+        vmaddr:          4294967296
+        vmsize:          8192
+        fileoff:         0
+        filesize:        8192
+        maxprot:         5
+        initprot:        5
+        nsects:          1
+        flags:           0
+        Sections:
+          - sectname:        __text
+            segname:         __TEXT
+            addr:            0x100001F80
+            size:            8
+            offset:          0x1F80
+            align:           2
+            reloff:          0x0
+            nreloc:          0
+            flags:           0x80000400
+            reserved1:       0x0
+            reserved2:       0x0
+            reserved3:       0x0
+            content:         00008052C0035FD6
+      - cmd:             LC_SEGMENT_64
+        cmdsize:         72
+        segname:         __LINKEDIT
+        vmaddr:          4294975488
+        vmsize:          4096
+        fileoff:         8192
+        filesize:        88
+        maxprot:         1
+        initprot:        1
+        nsects:          0
+        flags:           0
+      - cmd:             LC_SYMTAB
+        cmdsize:         24
+        symoff:          8192
+        nsyms:           1
+        stroff:          8208
+        strsize:         9
+    LinkEditData:
+      NameList:
+        - n_strx:          3
+          n_type:          0xF
+          n_sect:          1
+          n_desc:          0
+          n_value:         4294975360
+      StringTable:
+        - ' '
+        - ''
+        - _main

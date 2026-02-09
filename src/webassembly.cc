@@ -484,6 +484,7 @@ class WebAssemblyObjectFile : public ObjectFile {
 
   bool GetDisassemblyInfo(std::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
+                          const Options& /*options*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("WebAssembly files do not support disassembly yet");
     return false;

@@ -2158,7 +2158,7 @@ void Bloaty::DisassembleFunction(string_view function, const Options& options,
   for (const auto& file_info : input_files_) {
     auto file = GetObjectFile(file_info.filename_);
     if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
-                                 &info)) {
+                                 options, &info)) {
       output->SetDisassembly(::bloaty::DisassembleFunction(info));
       return;
     }

@@ -43,6 +43,7 @@ class SourceMapObjectFile : public ObjectFile {
 
   bool GetDisassemblyInfo(std::string_view /*symbol*/,
                           DataSource /*symbol_source*/,
+                          const Options& /*options*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("Disassembly not supported for source map files");
     return false;
