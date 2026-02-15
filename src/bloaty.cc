@@ -2146,7 +2146,8 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
           "$0   $1\n", absl::BytesToHexString(file_info.build_id_).c_str(),
           file_info.filename_.c_str());
     }
-    THROWF("Debug file(s) did not match any input file:\n$0\nInput Files:\n$1",
+    THROWF("Debug file(s) build ID did not match any input file build "
+           "ID:\n$0\nInput Files:\n$1",
            unused_debug.c_str(), input_files.c_str());
   }
 }
