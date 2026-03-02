@@ -1149,7 +1149,7 @@ bool RangeSink::IsVerboseForVMRange(uint64_t vmaddr, uint64_t vmsize) {
     RangeMap vm_map;
     RangeMap file_map;
     bool contains = false;
-    vm_map.AddRangeWithTranslation(vmaddr, vmsize, "", translator_->vm_map,
+    vm_map.AddRangeWithTranslation(vmaddr, vmsize, "", translator_->GetVMMap(arch_index_),
                                    false, &file_map);
     file_map.ForEachRange(
         [this, &contains](uint64_t fileoff, uint64_t filesize) {
@@ -1182,7 +1182,7 @@ bool RangeSink::IsVerboseForFileRange(uint64_t fileoff, uint64_t filesize) {
     RangeMap file_map;
     bool contains = false;
     file_map.AddRangeWithTranslation(fileoff, filesize, "",
-                                     translator_->file_map, false, &vm_map);
+                                     translator_->GetFileMap(), false, &vm_map);
     vm_map.ForEachRange([this, &contains](uint64_t vmaddr, uint64_t vmsize) {
       if (ContainsVerboseVMAddr(vmaddr, vmsize)) {
         contains = true;
@@ -1209,15 +1209,15 @@ void RangeSink::AddFileRange(const char* analyzer, string_view name,
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
     if (translator_) {
-      bool ok = pair.first->file_map.AddRangeWithTranslation(
-          fileoff, filesize, label, translator_->file_map, verbose,
-          &pair.first->vm_map);
+      bool ok = pair.first->GetFileMap().AddRangeWithTranslation(
+          fileoff, filesize, label, translator_->GetFileMap(), verbose,
+          &pair.first->GetVMMap(arch_index_));
       if (!ok) {
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              fileoff, filesize, name);
       }
     } else {
-      pair.first->file_map.AddRange(fileoff, filesize, label);
+      pair.first->GetFileMap().AddRange(fileoff, filesize, label);
     }
   }
 }
@@ -1235,10 +1235,10 @@ void RangeSink::AddFileRangeForVMAddr(const char* analyzer,
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label)) {
-      bool ok = pair.first->file_map.AddRangeWithTranslation(
-          file_offset, file_range.size(), label, translator_->file_map, verbose,
-          &pair.first->vm_map);
+    if (pair.first->GetVMMap(arch_index_).TryGetLabel(label_from_vmaddr, &label)) {
+      bool ok = pair.first->GetFileMap().AddRangeWithTranslation(
+          file_offset, file_range.size(), label, translator_->GetFileMap(), verbose,
+          &pair.first->GetVMMap(arch_index_));
       if (!ok) {
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              file_offset, file_range.size(), label);
@@ -1264,11 +1264,11 @@ void RangeSink::AddFileRangeForFileRange(const char* analyzer,
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    if (pair.first->file_map.TryGetLabelForRange(
+    if (pair.first->GetFileMap().TryGetLabelForRange(
             from_file_offset, from_file_range.size(), &label)) {
-      bool ok = pair.first->file_map.AddRangeWithTranslation(
-          file_offset, file_range.size(), label, translator_->file_map, verbose,
-          &pair.first->vm_map);
+      bool ok = pair.first->GetFileMap().AddRangeWithTranslation(
+          file_offset, file_range.size(), label, translator_->GetFileMap(), verbose,
+          &pair.first->GetVMMap(arch_index_));
       if (!ok) {
         WARN("File range ($0, $1) for label $2 extends beyond base map",
              file_offset, file_range.size(), label);
@@ -1293,10 +1293,10 @@ void RangeSink::AddVMRangeForVMAddr(const char* analyzer,
   assert(translator_);
   for (auto& pair : outputs_) {
     std::string label;
-    if (pair.first->vm_map.TryGetLabel(label_from_vmaddr, &label)) {
-      bool ok = pair.first->vm_map.AddRangeWithTranslation(
-          addr, size, label, translator_->vm_map, verbose,
-          &pair.first->file_map);
+    if (pair.first->GetVMMap(arch_index_).TryGetLabel(label_from_vmaddr, &label)) {
+      bool ok = pair.first->GetVMMap(arch_index_).AddRangeWithTranslation(
+          addr, size, label, translator_->GetVMMap(arch_index_), verbose,
+          &pair.first->GetFileMap());
       if (!ok && verbose_level > 1) {
         WARN("VM range ($0, $1) for label $2 extends beyond base map", addr,
              size, label);
@@ -1318,9 +1318,9 @@ void RangeSink::AddVMRange(const char* analyzer, uint64_t vmaddr,
   assert(translator_);
   for (auto& pair : outputs_) {
     const std::string label = pair.second->Munge(name);
-    bool ok = pair.first->vm_map.AddRangeWithTranslation(
-        vmaddr, vmsize, label, translator_->vm_map, verbose,
-        &pair.first->file_map);
+    bool ok = pair.first->GetVMMap(arch_index_).AddRangeWithTranslation(
+        vmaddr, vmsize, label, translator_->GetVMMap(arch_index_), verbose,
+        &pair.first->GetFileMap());
     if (!ok) {
       WARN("VM range ($0, $1) for label $2 extends beyond base map", vmaddr,
            vmsize, name);
@@ -1361,8 +1361,8 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
   }
 
   if (translator_) {
-    if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
-        !translator_->file_map.CoversRange(fileoff, filesize)) {
+    if (!translator_->GetVMMap(arch_index_).CoversRange(vmaddr, vmsize) ||
+        !translator_->GetFileMap().CoversRange(fileoff, filesize)) {
       WARN("AddRange($0, $1, $2, $3, $4) will be ignored, because it is not "
            "covered by base map.",
            name.data(), vmaddr, vmsize, fileoff, filesize);
@@ -1374,11 +1374,11 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
     const std::string label = pair.second->Munge(name);
     uint64_t common = std::min(vmsize, filesize);
 
-    pair.first->vm_map.AddDualRange(vmaddr, common, fileoff, label);
-    pair.first->file_map.AddDualRange(fileoff, common, vmaddr, label);
+    pair.first->GetVMMap(arch_index_).AddDualRange(vmaddr, common, fileoff, label);
+    pair.first->GetFileMap().AddDualRange(fileoff, common, vmaddr, label);
 
-    pair.first->vm_map.AddRange(vmaddr + common, vmsize - common, label);
-    pair.first->file_map.AddRange(fileoff + common, filesize - common, label);
+    pair.first->GetVMMap(arch_index_).AddRange(vmaddr + common, vmsize - common, label);
+    pair.first->GetFileMap().AddRange(fileoff + common, filesize - common, label);
   }
 }
 
@@ -1387,10 +1387,10 @@ uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
   uint64_t offset = ptr - file_->data().data();
   uint64_t translated;
   if (!FileContainsPointer(ptr) ||
-      !translator_->file_map.Translate(offset, &translated)) {
+      !translator_->GetFileMap().Translate(offset, &translated)) {
     THROWF("Can't translate file offset ($0) to VM, contains: $1, map:\n$2",
            offset, FileContainsPointer(ptr),
-           translator_->file_map.DebugString().c_str());
+           translator_->GetFileMap().DebugString().c_str());
   }
   return translated;
 }
@@ -1398,7 +1398,7 @@ uint64_t RangeSink::TranslateFileToVM(const char* ptr) {
 std::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   assert(translator_);
   uint64_t translated;
-  if (!translator_->vm_map.Translate(address, &translated) ||
+  if (!translator_->GetVMMap(arch_index_).Translate(address, &translated) ||
       translated > file_->data().size()) {
     THROWF("Can't translate VM pointer ($0) to file", address);
 
@@ -1864,14 +1864,33 @@ struct DualMaps {
   }
 
   void ComputeRollup(Rollup* rollup) {
+    // Collect all arch indices across all maps.
+    std::set<int> arch_indices;
     for (auto& map : maps_) {
-      map->vm_map.Compress();
-      map->file_map.Compress();
+      for (int id : map->VMArchIndices()) {
+        arch_indices.insert(id);
+      }
     }
-    RangeMap::ComputeRollup(VmMaps(), [=](const std::vector<std::string>& keys,
-                                          uint64_t addr, uint64_t end) {
-      return rollup->AddSizes(keys, end - addr, true);
-    });
+    // Compress and roll up each arch's VM maps separately.
+    for (int arch_id : arch_indices) {
+      std::vector<const RangeMap*> vm_maps;
+      for (auto& map : maps_) {
+        if (map->HasVMMap(arch_id)) {
+          map->GetVMMap(arch_id).Compress();
+          vm_maps.push_back(&map->GetVMMap(arch_id));
+        }
+      }
+      if (!vm_maps.empty()) {
+        RangeMap::ComputeRollup(vm_maps,
+            [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
+              return rollup->AddSizes(keys, end - addr, true);
+            });
+      }
+    }
+    // File maps are shared across all arches.
+    for (auto& map : maps_) {
+      map->GetFileMap().Compress();
+    }
     RangeMap::ComputeRollup(
         FileMaps(),
         [=](const std::vector<std::string>& keys, uint64_t addr, uint64_t end) {
@@ -1895,7 +1914,38 @@ struct DualMaps {
   }
 
   void PrintFileMaps() { PrintMaps(FileMaps()); }
-  void PrintVMMaps() { PrintMaps(VmMaps()); }
+
+  void PrintVMMaps() {
+    std::set<int> arch_indices;
+    for (auto& map : maps_) {
+      for (int id : map->VMArchIndices()) {
+        arch_indices.insert(id);
+      }
+    }
+    for (int arch_id : arch_indices) {
+      if (arch_indices.size() > 1) {
+        auto it = arch_names_.find(arch_id);
+        if (it != arch_names_.end()) {
+          printf("%s:\n", it->second.c_str());
+        } else {
+          printf("arch %d:\n", arch_id);
+        }
+      }
+      std::vector<const RangeMap*> vm_maps;
+      for (auto& map : maps_) {
+        if (map->HasVMMap(arch_id)) {
+          vm_maps.push_back(&map->GetVMMap(arch_id));
+        }
+      }
+      if (!vm_maps.empty()) {
+        PrintMaps(vm_maps);
+      }
+    }
+  }
+
+  void SetArchNames(std::map<int, std::string> names) {
+    arch_names_ = std::move(names);
+  }
 
   std::string KeysToString(const std::vector<std::string>& keys) {
     std::string ret;
@@ -1921,23 +1971,16 @@ struct DualMaps {
   DualMap* base_map() { return maps_[0].get(); }
 
  private:
-  std::vector<const RangeMap*> VmMaps() const {
-    std::vector<const RangeMap*> ret;
-    for (const auto& map : maps_) {
-      ret.push_back(&map->vm_map);
-    }
-    return ret;
-  }
-
   std::vector<const RangeMap*> FileMaps() const {
     std::vector<const RangeMap*> ret;
     for (const auto& map : maps_) {
-      ret.push_back(&map->file_map);
+      ret.push_back(&map->GetFileMap());
     }
     return ret;
   }
 
   std::vector<std::unique_ptr<DualMap>> maps_;
+  std::map<int, std::string> arch_names_;
 };
 
 void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
@@ -2002,14 +2045,19 @@ void Bloaty::ScanAndRollupFile(const std::string& filename, Rollup* rollup,
       rollup->file_total() + rollup->filtered_file_total();
   file->ProcessFile(sink_ptrs);
 
+  maps.SetArchNames(file->GetArchNames());
+
   // kInputFile source: Copy the base map to the filename sink(s).
   for (auto sink : filename_sink_ptrs) {
-    maps.base_map()->vm_map.ForEachRange(
-        [sink](uint64_t start, uint64_t length) {
-          sink->AddVMRange("inputfile_vmcopier", start, length,
-                           sink->input_file().filename());
-        });
-    maps.base_map()->file_map.ForEachRange(
+    for (int arch_id : maps.base_map()->VMArchIndices()) {
+      sink->set_arch_index(arch_id);
+      maps.base_map()->GetVMMap(arch_id).ForEachRange(
+          [sink](uint64_t start, uint64_t length) {
+            sink->AddVMRange("inputfile_vmcopier", start, length,
+                             sink->input_file().filename());
+          });
+    }
+    maps.base_map()->GetFileMap().ForEachRange(
         [sink](uint64_t start, uint64_t length) {
           sink->AddFileRange("inputfile_filecopier",
                              sink->input_file().filename(), start, length);
