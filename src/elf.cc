@@ -427,7 +427,7 @@ void ElfFile::Section::ReadRelocationWithAddend(Elf64_Word index,
 }
 
 void ElfFile::NoteIter::Next() {
-  if (remaining_.empty()) {
+  if (remaining_.size() < sizeof(Elf_Note)) {
     done_ = true;
     return;
   }
