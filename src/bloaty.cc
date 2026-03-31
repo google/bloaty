@@ -827,12 +827,11 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
   uint64_t file_filtered = 0;
   uint64_t vm_filtered = 0;
-  uint64_t filtered = 0;
   if (ShowFile(options)) {
-    filtered += toplevel_row_.filtered_size.file;
+    file_filtered = toplevel_row_.filtered_size.file;
   }
   if (ShowVM(options)) {
-    filtered += toplevel_row_.filtered_size.vm;
+    vm_filtered = toplevel_row_.filtered_size.vm;
   }
 
   if (vm_filtered == 0 && file_filtered == 0) {
