@@ -264,6 +264,9 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
           }
         }
       }
+      if (file_name.directory_index >= include_directories_.size()) {
+        THROW("directory index out of range");
+      }
       filenames_.push_back(file_name);
     }
   }
