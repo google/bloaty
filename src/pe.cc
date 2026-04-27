@@ -251,6 +251,7 @@ class PEObjectFile : public ObjectFile {
   }
 
   bool GetDisassemblyInfo(string_view /*symbol*/, DataSource /*symbol_source*/,
+                          const Options& /*options*/,
                           DisassemblyInfo* /*info*/) const override {
     WARN("PE files do not support disassembly yet");
     return false;

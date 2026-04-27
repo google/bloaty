@@ -85,6 +85,7 @@ struct DataSourceDefinition {
 
 constexpr DataSourceDefinition data_sources[] = {
     {DataSource::kArchiveMembers, "armembers", "the .o files in a .a file"},
+    {DataSource::kArchs, "archs", "architecture slices in universal binaries"},
     {DataSource::kCompileUnits, "compileunits",
      "source file for the .o file (translation unit). requires debug info."},
     {DataSource::kInputFiles, "inputfiles",
@@ -2158,7 +2159,7 @@ void Bloaty::DisassembleFunction(string_view function, const Options& options,
   for (const auto& file_info : input_files_) {
     auto file = GetObjectFile(file_info.filename_);
     if (file->GetDisassemblyInfo(function, EffectiveSymbolSource(options),
-                                 &info)) {
+                                 options, &info)) {
       output->SetDisassembly(::bloaty::DisassembleFunction(info));
       return;
     }

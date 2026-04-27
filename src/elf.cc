@@ -936,10 +936,10 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
             }
             if (table) {
               if (name_storage.empty()) {
-                table->insert(name, std::make_pair(full_addr, sym.st_size));
+                table->insert(name, SymbolInfo(full_addr, sym.st_size));
               } else {
                 name = table->insert(std::move(name_storage),
-                                     std::make_pair(full_addr, sym.st_size));
+                                     SymbolInfo(full_addr, sym.st_size));
               }
             }
 
@@ -1401,6 +1401,8 @@ class ElfObjectFile : public ObjectFile {
           DoReadELFSections(sink, kReportByEscapedSectionName);
           break;
         }
+        case DataSource::kArchs:
+          THROW("ELF files do not support 'archs' data source");
         default:
           THROW("unknown data source");
       }
@@ -1421,14 +1423,15 @@ class ElfObjectFile : public ObjectFile {
   }
 
   bool GetDisassemblyInfo(const std::string_view symbol,
-                          DataSource symbol_source,
+                          DataSource symbol_source, const Options& options,
                           DisassemblyInfo* info) const override {
-    return DoGetDisassemblyInfo(&symbol, symbol_source, info);
+    return DoGetDisassemblyInfo(&symbol, symbol_source, options, info);
   }
 
   bool DoGetDisassemblyInfo(const std::string_view* symbol,
-                            DataSource symbol_source,
+                            DataSource symbol_source, const Options& options,
                             DisassemblyInfo* info) const {
+    (void)options;
     // Find the corresponding file range.  This also could be optimized not to
     // build the entire map.
     DualMap base_map;
@@ -1455,8 +1458,8 @@ class ElfObjectFile : public ObjectFile {
           return false;
         }
       }
-      uint64_t vmaddr = entry->second.first;
-      uint64_t size = entry->second.second;
+      uint64_t vmaddr = entry->second.address;
+      uint64_t size = entry->second.size;
 
       // TODO(haberman); Add PLT entries to symbol map, so call <plt stub> gets
       // symbolized.

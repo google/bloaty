@@ -58,6 +58,7 @@ enum class DataSource {
   kRawRanges,
   kSections,
   kSegments,
+  kArchs,
 
   // We always set this to one of the concrete symbol types below before
   // setting it on a sink.
@@ -261,20 +262,29 @@ class NameMunger {
   std::vector<std::pair<std::unique_ptr<ReImpl>, std::string>> regexes_;
 };
 
+struct SymbolInfo {
+  uint64_t address;
+  uint64_t size;
+  uint16_t n_desc;
+
+  SymbolInfo(uint64_t addr, uint64_t sz, uint16_t desc = 0)
+      : address(addr), size(sz), n_desc(desc) {}
+};
+
 /// SymbolTable holds the symbol table for an object file.
-/// It maps symbol names to their address and size.
+/// It maps symbol names to their address, size, and other metadata.
 ///
-/// This structure is used in src/elf.cc to accumulate symbols from the ELF
-/// symbol table, which are then used to look up symbols during disassembly.
+/// This structure is used in src/elf.cc and src/macho.cc to accumulate symbols
+/// from symbol tables, which are then used to look up symbols during
+/// disassembly.
 class SymbolTable {
  public:
   /// Inserts a symbol into the table.
   /// The name must be guaranteed to outlive the SymbolTable (e.g. it points
   /// into the memory-mapped file).
   /// @return The string_view of the inserted name.
-  std::string_view insert(std::string_view name,
-                          std::pair<uint64_t, uint64_t> val) {
-    table.insert(std::make_pair(name, val));
+  std::string_view insert(std::string_view name, const SymbolInfo& info) {
+    table.insert(std::make_pair(name, info));
     return name;
   }
 
@@ -282,17 +292,16 @@ class SymbolTable {
   /// The name is moved into the SymbolTable and owned by it.
   /// @return The string_view of the inserted name (which points to the owned
   /// string).
-  std::string_view insert(std::string&& name,
-                          std::pair<uint64_t, uint64_t> val) {
+  std::string_view insert(std::string&& name, const SymbolInfo& info) {
     owned_strings.push_back(std::move(name));
     std::string_view sv = owned_strings.back();
-    table.insert(std::make_pair(sv, val));
+    table.insert(std::make_pair(sv, info));
     return sv;
   }
 
   /// Inserts a symbol into the table.
   /// The name must be guaranteed to outlive the SymbolTable.
-  void insert(std::pair<std::string_view, std::pair<uint64_t, uint64_t>> val) {
+  void insert(std::pair<std::string_view, SymbolInfo> val) {
     table.insert(val);
   }
 
@@ -304,8 +313,8 @@ class SymbolTable {
   auto end() { return table.end(); }
 
  private:
-  /// Map of symbol name to (address, size) pair.
-  std::map<std::string_view, std::pair<uint64_t, uint64_t>> table;
+  /// Map of symbol name to SymbolInfo.
+  std::map<std::string_view, SymbolInfo> table;
 
   /// Strings that are owned by this SymbolTable.
   /// This is used for synthetic symbols that don't exist in the file (e.g.
@@ -330,6 +339,7 @@ class ObjectFile {
 
   virtual bool GetDisassemblyInfo(std::string_view symbol,
                                   DataSource symbol_source,
+                                  const Options& options,
                                   DisassemblyInfo* info) const = 0;
 
   const InputFile& file_data() const { return *file_data_; }
