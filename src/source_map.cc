@@ -108,6 +108,15 @@ static int ReadBase64VLQSegment(std::string_view* data, int32_t (&values)[5]) {
   THROW("Unterminated Base64VLQ segment");
 }
 
+static std::string_view GetSourceFile(
+    const std::vector<std::string_view>& sources, int64_t source_file) {
+  if (source_file < 0 ||
+      static_cast<size_t>(source_file) >= sources.size()) {
+    THROW("source map source file index out of range");
+  }
+  return sources[source_file];
+}
+
 class VlqSegment {
  public:
   int32_t col;
@@ -149,7 +158,7 @@ void ForEachVLQSegment(std::string_view* data,
     THROW("Source file info expected in first VLQ segment");
   }
   int32_t col = values[0];
-  int32_t source_file = values[1];
+  int64_t source_file = values[1];
   int32_t source_line = values[2];
   int32_t source_col = values[3];
 
@@ -167,7 +176,8 @@ void ForEachVLQSegment(std::string_view* data,
     int new_values_count = ReadBase64VLQSegment(data, values);
     if (values_count >= 4) {
       segment_func(VlqSegment(col, values[0],
-                              sources[source_file], source_line, source_col));
+                              GetSourceFile(sources, source_file), source_line,
+                              source_col));
     }
     values_count = new_values_count;
     col += values[0];
@@ -236,4 +246,3 @@ std::unique_ptr<ObjectFile> TryOpenSourceMapFile(
 }
 
 }  // namespace bloaty
-
