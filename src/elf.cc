@@ -443,7 +443,7 @@ void ElfFile::NoteIter::Next() {
   name_ = StrictSubstr(remaining_, 0, note.n_namesz);
 
   // Size might include NULL terminator.
-  if (name_[name_.size() - 1] == 0) {
+  if (!name_.empty() && name_[name_.size() - 1] == 0) {
     name_ = name_.substr(0, name_.size() - 1);
   }
 
