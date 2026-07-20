@@ -166,6 +166,10 @@ void ForEachVLQSegment(std::string_view* data,
 
     int new_values_count = ReadBase64VLQSegment(data, values);
     if (values_count >= 4) {
+      if (source_file < 0 ||
+          static_cast<size_t>(source_file) >= sources.size()) {
+        THROWF("source index $0 out of range in source map", source_file);
+      }
       segment_func(VlqSegment(col, values[0],
                               sources[source_file], source_line, source_col));
     }
