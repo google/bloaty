@@ -65,6 +65,11 @@ static int32_t ReadBase64VLQ(std::string_view* data) {
   const char* limit = ptr + data->size();
   while (ptr < limit) {
     auto ch = *(ptr++);
+    // A well-formed VLQ encoding a 32-bit value never shifts past the width of
+    // `value`; anything more is malformed input and would shift by >= 32.
+    if (shift >= 32) {
+      THROW("Base64VLQ value out of range");
+    }
     // Base64 characters A-Z, a-f do not have the continuation bit set and are
     // the last digit.
     if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch < 'g')) {
