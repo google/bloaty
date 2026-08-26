@@ -199,7 +199,7 @@ void CU::ReadTopLevelDIE(InfoReader& reader) {
   if (!abbrev) {
     THROW("short DWARF compilation unit");
   }
-  absl::optional<uint64_t> stmt_list;
+  std::optional<uint64_t> stmt_list;
   unit_name_.clear();
 
   // First pass: Parse base addresses that other attributes may depend on.
