@@ -1,7 +1,7 @@
 # RUN: %yaml2obj %s -o %t.wasm
 # RUN: %bloaty -d symbols %t.wasm | %FileCheck %s
 
-# CHECK: _TMXfZD
+# CHECK: _Zinvalid_name
 
 --- !WASM
 FileHeader:
@@ -16,4 +16,4 @@ Sections:
     Name: name
     FunctionNames:
       - Index: 0
-        Name: "_TMXfZD\0"
+        Name: "_Zinvalid_name\0"
