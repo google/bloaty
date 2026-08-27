@@ -19,6 +19,7 @@
 
 # The "DropMe" symbol in the non-allocatable .info section should NOT appear.
 # CHECK-NOT: DropMe
+# CHECK: FILE SIZE
 
 --- !ELF
 FileHeader:
