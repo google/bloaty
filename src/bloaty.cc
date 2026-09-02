@@ -193,7 +193,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
       std::string ret(ms);
       free(ms);
       return ret;
-    } else if (swift::Demangle::isSwiftSymbol(demangle_from)) {
+    } else if (swift::Demangle::isSwiftSymbol(std::string(demangle_from).c_str())) {
       auto Opts =
           swift::Demangle::DemangleOptions::SimplifiedUIDemangleOptions();
       std::string swift =
@@ -215,7 +215,7 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
       std::string ret(rust);
       free(rust);
       return ret;
-    } else if (swift::Demangle::isSwiftSymbol(demangle_from)) {
+    } else if (swift::Demangle::isSwiftSymbol(std::string(demangle_from).c_str())) {
       swift::Demangle::DemangleOptions options;
       options.SynthesizeSugarOnTypes = true;
       return swift::Demangle::demangleSymbolAsString(demangle_from, options);
