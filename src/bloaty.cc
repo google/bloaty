@@ -472,6 +472,14 @@ void Rollup::CreateRows(RollupRow* row, const Rollup* base,
 
 Rollup* Rollup::empty_;
 
+// Returns the absolute value, with saturating behavior on overflow.
+template <typename T>
+T SaturatingAbs(T value) {
+  static_assert(std::is_signed<T>::value, "T must be a signed type");
+  return value == std::numeric_limits<T>::min() ? std::numeric_limits<T>::max()
+                                                : std::abs(value);
+}
+
 void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
                                   const Options& options,
                                   bool is_toplevel) const {
@@ -498,14 +506,14 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
   for (auto& child : child_rows) {
     switch (options.sort_by()) {
       case Options::SORTBY_VMSIZE:
-        child.sortkey = std::abs(child.size.vm);
+        child.sortkey = SaturatingAbs(child.size.vm);
         break;
       case Options::SORTBY_FILESIZE:
-        child.sortkey = std::abs(child.size.file);
+        child.sortkey = SaturatingAbs(child.size.file);
         break;
       case Options::SORTBY_BOTH:
-        child.sortkey =
-            std::max(std::abs(child.size.vm), std::abs(child.size.file));
+        child.sortkey = std::max(SaturatingAbs(child.size.vm),
+                                 SaturatingAbs(child.size.file));
         break;
       default:
         BLOATY_UNREACHABLE();
@@ -538,7 +546,8 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
     i--;
   }
 
-  if (std::abs(others_row.size.vm) > 0 || std::abs(others_row.size.file) > 0) {
+  if (SaturatingAbs(others_row.size.vm) > 0 ||
+      SaturatingAbs(others_row.size.file) > 0) {
     child_rows.push_back(others_row);
     CheckedAdd(&others_rollup.vm_total_, others_row.size.vm);
     CheckedAdd(&others_rollup.file_total_, others_row.size.file);
@@ -554,7 +563,7 @@ void Rollup::SortAndAggregateRows(RollupRow* row, const Rollup* base,
         child.sortkey = child.size.file;
         break;
       case Options::SORTBY_BOTH:
-        if (std::abs(child.size.vm) > std::abs(child.size.file)) {
+        if (SaturatingAbs(child.size.vm) > SaturatingAbs(child.size.file)) {
           child.sortkey = child.size.vm;
         } else {
           child.sortkey = child.size.file;
