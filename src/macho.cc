@@ -29,6 +29,18 @@
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
 #include "third_party/darwin_xnu_macho/mach-o/reloc.h"
 
+#ifndef CPU_SUBTYPE_ARM64E
+#define CPU_SUBTYPE_ARM64E ((cpu_subtype_t)2)
+#endif
+
+#ifndef LC_DYLD_CHAINED_FIXUPS
+#define LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD)
+#endif
+
+#ifndef LC_DYLD_EXPORTS_TRIE
+#define LC_DYLD_EXPORTS_TRIE (0x33 | LC_REQ_DYLD)
+#endif
+
 using std::string_view;
 
 namespace bloaty {
