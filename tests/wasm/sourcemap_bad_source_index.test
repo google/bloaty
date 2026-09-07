@@ -1,0 +1,24 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: echo "{\"version\": 3, \"sources\": [\"test1.java\"], \"names\": [], \"mappings\": \"AAAA,AgqjGAA,AAAA\"}" > %t.map
+# RUN: not %bloaty --raw-map %t.obj --source-map=./sourcemap.wasm.map=%t.map -d compileunits 2>&1 | %FileCheck %s
+
+# The second VLQ segment moves the source index to 100000, far past the single
+# entry in "sources".
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            CODE
+    Functions:
+      - Index:           0
+        Locals:
+          - Type:            I32
+            Count:           13
+        Body:            41002100200028028880808000210141052102200120026A210341002104200428028C808080002105200320056A2106410021072007280280808080002108200820066A21094100210A200A200936028080808000418480808000210B200B210C200C0F0B
+  - Type:            CUSTOM
+    Name:            sourceMappingURL
+    # ./sourcemap.wasm.map
+    Payload:         142E2F736F757263656D61702E7761736D2E6D6170
+
+# CHECK: source index 100000 out of range in source map
