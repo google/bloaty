@@ -1,0 +1,22 @@
+# Test that bloaty handles an ELF note with n_namesz == 0 without reading out
+# of bounds. GetBuildId() walks the notes in every SHT_NOTE section; a note
+# with an empty name used to index name_[name_.size() - 1] on an empty view.
+
+# RUN: %yaml2obj %s -o %t.so
+# RUN: %bloaty %t.so -d sections | %FileCheck %s
+
+# CHECK: TOTAL
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_X86_64
+Sections:
+  - Name:            .note.empty
+    Type:            SHT_NOTE
+    Flags:           [ SHF_ALLOC ]
+    AddressAlign:    0x0000000000000004
+    # n_namesz=0, n_descsz=0, n_type=1
+    Content:         '000000000000000001000000'
