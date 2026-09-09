@@ -56,8 +56,9 @@ class ReImpl {
 #else
 }
 
-ABSL_ATTRIBUTE_NORETURN
-static void _abort() { throw "No support for regular expressions"; }
+[[noreturn]] static void _abort() {
+  throw "No support for regular expressions";
+}
 
 namespace bloaty {
 class ReImpl {
@@ -66,21 +67,23 @@ class ReImpl {
   ReImpl(const std::string&) { _abort(); }
   bool ok() { _abort(); }
 
-  ABSL_ATTRIBUTE_NORETURN
-  static bool Extract(std::string, const ReImpl&, std::string, std::string*) {
+  [[noreturn]] static bool Extract(std::string, const ReImpl&, std::string,
+                                   std::string*) {
     _abort();
   }
   template <typename... A>
-  ABSL_ATTRIBUTE_NORETURN static bool PartialMatch(const std::string&,
-                                                   const ReImpl&, A&&...) {
+  [[noreturn]] static bool PartialMatch(const std::string&, const ReImpl&,
+                                        A&&...) {
     _abort();
   }
-  ABSL_ATTRIBUTE_NORETURN
+  [[noreturn]]
   static int GlobalReplace(std::string*, const ReImpl&, std::string) {
     _abort();
   }
-  ABSL_ATTRIBUTE_NORETURN
-  static bool Replace(std::string*, const ReImpl&, std::string) { _abort(); }
+  [[noreturn]]
+  static bool Replace(std::string*, const ReImpl&, std::string) {
+    _abort();
+  }
 
  private:
 };

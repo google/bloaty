@@ -18,8 +18,7 @@ using std::string_view;
 
 namespace bloaty {
 
-ABSL_ATTRIBUTE_NORETURN
-void Throw(const char *str, int line) {
+[[noreturn]] void Throw(const char* str, int line) {
   throw bloaty::Error(str, __FILE__, line);
 }
 

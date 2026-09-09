@@ -39,8 +39,7 @@ class Error : public std::runtime_error {
 };
 
 // Throwing emits a lot of code, so we do it out-of-line.
-ABSL_ATTRIBUTE_NORETURN
-void Throw(const char *str, int line);
+[[noreturn]] void Throw(const char* str, int line);
 
 #define THROW(msg) Throw(msg, __LINE__)
 #define THROWF(...) Throw(absl::Substitute(__VA_ARGS__).c_str(), __LINE__)
