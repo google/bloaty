@@ -672,7 +672,7 @@ bool ArFile::MemberReader::ReadMember(MemberFile* file) {
     } else if (file_id[1] == '/') {
       file->file_type = MemberFile::kLongFilenameTable;
       long_filenames_ = file->contents;
-    } else if (isdigit(file_id[1])) {
+    } else if (isdigit(static_cast<unsigned char>(file_id[1]))) {
       size_t offset = StringViewToSize(file_id.substr(1));
       size_t end = long_filenames_.find('/', offset);
 
