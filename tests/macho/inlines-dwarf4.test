@@ -1,8 +1,6 @@
-# Test -d inlines for Mach-O with DWARF v5 debug info.
-# .debug_line is raw bytes because yaml2obj can't yet emit a v5 line table
-# (llvm/llvm-project#191167).
+# Test -d inlines for Mach-O with DWARF v4 debug info.
 
-## Test inlines data source with dSYM debug info
+## Test inlines data source with DWARF v4 dSYM debug info
 # RUN: %yaml2obj --docnum=1 %s -o %t.binary
 # RUN: %yaml2obj --docnum=2 %s -o %t.dsym
 # RUN: %bloaty %t.binary --debug-file=%t.dsym -d inlines --domain=vm | %FileCheck %s
@@ -12,7 +10,6 @@
 # CHECK-DAG: test_inlines.c:9
 # CHECK-DAG: test_inlines.c:14
 
-## Minimal Mach-O executable with inline functions
 --- !mach-o
 FileHeader:
   magic:           0xFEEDFACF
@@ -307,33 +304,20 @@ LinkEditData:
                      0x0, 0x0, 0x0, 0x0, 0x0, 0x0 ]
 ...
 ...
-
 --- !mach-o
 FileHeader:
   magic:           0xFEEDFACF
   cputype:         0x100000C
   cpusubtype:      0x0
   filetype:        0xA
-  ncmds:           7
-  sizeofcmds:      1160
+  ncmds:           5
+  sizeofcmds:      624
   flags:           0x0
   reserved:        0x0
 LoadCommands:
   - cmd:             LC_UUID
     cmdsize:         24
     uuid:            23DDA184-79C3-3900-9D6F-B8E82011BEBD
-  - cmd:             LC_BUILD_VERSION
-    cmdsize:         24
-    platform:        1
-    minos:           0
-    sdk:             0
-    ntools:          0
-  - cmd:             LC_SYMTAB
-    cmdsize:         24
-    symoff:          4096
-    nsyms:           3
-    stroff:          4144
-    strsize:         43
   - cmd:             LC_SEGMENT_64
     cmdsize:         72
     segname:         __PAGEZERO
@@ -346,7 +330,7 @@ LoadCommands:
     nsects:          0
     flags:           0
   - cmd:             LC_SEGMENT_64
-    cmdsize:         232
+    cmdsize:         152
     segname:         __TEXT
     vmaddr:          4294967296
     vmsize:          16384
@@ -354,7 +338,7 @@ LoadCommands:
     filesize:        0
     maxprot:         5
     initprot:        5
-    nsects:          2
+    nsects:          1
     flags:           0
     Sections:
       - sectname:        __text
@@ -369,47 +353,33 @@ LoadCommands:
         reserved1:       0x0
         reserved2:       0x0
         reserved3:       0x0
-        content:         CFFAEDFE0C000001000000000A00000007000000
-      - sectname:        __unwind_info
-        segname:         __TEXT
-        addr:            0x10000033C
-        size:            88
-        offset:          0x0
-        align:           2
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-        content:         CFFAEDFE0C000001000000000A00000007000000D804000000000000000000001B0000001800000023DDA18479C339009D6FB8E82011BEBD32000000180000000100000000001A0000001A00000000000200000018000000
   - cmd:             LC_SEGMENT_64
     cmdsize:         72
     segname:         __LINKEDIT
     vmaddr:          4294983680
     vmsize:          4096
     fileoff:         4096
-    filesize:        91
+    filesize:        0
     maxprot:         1
     initprot:        1
     nsects:          0
     flags:           0
   - cmd:             LC_SEGMENT_64
-    cmdsize:         712
+    cmdsize:         312
     segname:         __DWARF
     vmaddr:          4294987776
     vmsize:          4096
     fileoff:         8192
-    filesize:        680
+    filesize:        116
     maxprot:         7
     initprot:        3
-    nsects:          8
+    nsects:          3
     flags:           0
     Sections:
-      - sectname:        __debug_line
+      - sectname:        __debug_abbrev
         segname:         __DWARF
         addr:            0x100005000
-        size:            101
+        size:            16
         offset:          0x2000
         align:           0
         reloff:          0x0
@@ -418,37 +388,11 @@ LoadCommands:
         reserved1:       0x0
         reserved2:       0x0
         reserved3:       0x0
-        content:         610000000500080037000000010101fb0e0d00010101010000000100000101011f010000000003011f020f051e010f00000000000000000000000000000000000000000009022803000001000000040005300a16052d4e051c064a0503060a4f0208000101
-      - sectname:        __debug_aranges
-        segname:         __DWARF
-        addr:            0x100005065
-        size:            48
-        offset:          0x2065
-        align:           0
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-      - sectname:        __debug_addr
-        segname:         __DWARF
-        addr:            0x100005095
-        size:            24
-        offset:          0x2095
-        align:           0
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-        content:         '140000000500080028030000010000003403000001000000'
       - sectname:        __debug_info
         segname:         __DWARF
-        addr:            0x1000050AD
-        size:            104
-        offset:          0x20AD
+        addr:            0x100005010
+        size:            32
+        offset:          0x2010
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -456,11 +400,11 @@ LoadCommands:
         reserved1:       0x0
         reserved2:       0x0
         reserved3:       0x0
-      - sectname:        __debug_abbrev
+      - sectname:        __debug_line
         segname:         __DWARF
-        addr:            0x100005115
-        size:            92
-        offset:          0x2115
+        addr:            0x100005030
+        size:            68
+        offset:          0x2030
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -468,214 +412,57 @@ LoadCommands:
         reserved1:       0x0
         reserved2:       0x0
         reserved3:       0x0
-      - sectname:        __debug_str
-        segname:         __DWARF
-        addr:            0x100005171
-        size:            233
-        offset:          0x2171
-        align:           0
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-      - sectname:        __debug_str_offs
-        segname:         __DWARF
-        addr:            0x10000525A
-        size:            40
-        offset:          0x225A
-        align:           0
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-        content:         2400000005000000010000003000000045000000B6000000C1000000D2000000D6000000E4000000
-      - sectname:        __debug_line_str
-        segname:         __DWARF
-        addr:            0x100005282
-        size:            38
-        offset:          0x2282
-        align:           0
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-        content:         2f6275696c642f736f7572636573006275696c642f746573745f696e6c696e65732e6300
-LinkEditData:
-  NameList:
-    - n_strx:          2
-      n_type:          0xF
-      n_sect:          1
-      n_desc:          16
-      n_value:         4294967296
-    - n_strx:          22
-      n_type:          0xF
-      n_sect:          1
-      n_desc:          0
-      n_value:         4294968104
-    - n_strx:          37
-      n_type:          0xF
-      n_sect:          1
-      n_desc:          0
-      n_value:         4294968116
-  StringTable:
-    - ''
-    - ''
-    - __mh_execute_header
-    - _external_call
-    - _main
 DWARF:
-  debug_str:
-    - ''
-    - 'Apple clang version 17.0.0 (clang-1700.3.19.1)'
-    - 'build/test_inlines.c'
-    - '/build'
-    - add
-    - external_call
-    - main
   debug_abbrev:
-    - ID:              0
-      Table:
-        - Code:            0x1
+    - Table:
+        - Code:            1
           Tag:             DW_TAG_compile_unit
-          Children:        DW_CHILDREN_yes
+          Children:        DW_CHILDREN_no
           Attributes:
-            - Attribute:       DW_AT_producer
-              Form:            DW_FORM_strx
-            - Attribute:       DW_AT_language
-              Form:            DW_FORM_data2
-            - Attribute:       DW_AT_name
-              Form:            DW_FORM_strx
-            - Attribute:       DW_AT_LLVM_sysroot
-              Form:            DW_FORM_strx
-            - Attribute:       DW_AT_APPLE_sdk
-              Form:            DW_FORM_strx
-            - Attribute:       DW_AT_str_offsets_base
-              Form:            DW_FORM_sec_offset
             - Attribute:       DW_AT_stmt_list
               Form:            DW_FORM_sec_offset
-            - Attribute:       DW_AT_comp_dir
-              Form:            DW_FORM_strx
-            - Attribute:       DW_AT_APPLE_optimized
-              Form:            DW_FORM_flag_present
-            - Attribute:       DW_AT_low_pc
-              Form:            DW_FORM_addrx
-            - Attribute:       DW_AT_high_pc
-              Form:            DW_FORM_data4
-            - Attribute:       DW_AT_addr_base
-              Form:            DW_FORM_sec_offset
-        - Code:            0x2
-          Tag:             DW_TAG_subprogram
-          Children:        DW_CHILDREN_no
-          Attributes:
             - Attribute:       DW_AT_name
-              Form:            DW_FORM_strx
-            - Attribute:       DW_AT_inline
-              Form:            DW_FORM_implicit_const
-              Value:           0x1
-        - Code:            0x3
-          Tag:             DW_TAG_subprogram
-          Children:        DW_CHILDREN_yes
-          Attributes:
-            - Attribute:       DW_AT_low_pc
-              Form:            DW_FORM_addrx
-            - Attribute:       DW_AT_high_pc
-              Form:            DW_FORM_data4
-            - Attribute:       DW_AT_APPLE_omit_frame_ptr
-              Form:            DW_FORM_flag_present
-            - Attribute:       DW_AT_call_all_calls
-              Form:            DW_FORM_flag_present
-            - Attribute:       DW_AT_name
-              Form:            DW_FORM_strx
-        - Code:            0x4
-          Tag:             DW_TAG_inlined_subroutine
-          Children:        DW_CHILDREN_no
-          Attributes:
-            - Attribute:       DW_AT_abstract_origin
-              Form:            DW_FORM_ref4
-            - Attribute:       DW_AT_low_pc
-              Form:            DW_FORM_addrx
-            - Attribute:       DW_AT_high_pc
-              Form:            DW_FORM_data4
-            - Attribute:       DW_AT_call_file
-              Form:            DW_FORM_data1
-            - Attribute:       DW_AT_call_line
-              Form:            DW_FORM_data1
-            - Attribute:       DW_AT_call_column
-              Form:            DW_FORM_data1
-        - Code:            0x5
-          Tag:             DW_TAG_subprogram
-          Children:        DW_CHILDREN_no
-          Attributes:
-            - Attribute:       DW_AT_low_pc
-              Form:            DW_FORM_addrx
-            - Attribute:       DW_AT_high_pc
-              Form:            DW_FORM_data4
-            - Attribute:       DW_AT_APPLE_omit_frame_ptr
-              Form:            DW_FORM_flag_present
-            - Attribute:       DW_AT_call_all_calls
-              Form:            DW_FORM_flag_present
-            - Attribute:       DW_AT_name
-              Form:            DW_FORM_strx
-  debug_aranges:
-    - Version:         2
-      CuOffset:        0x0
-      AddressSize:     0x8
-      Descriptors:
-        - Address:         0x100000328
-          Length:          0x14
+              Form:            DW_FORM_string
   debug_info:
-    - Version:         5
-      UnitType:        DW_UT_compile
-      AbbrevTableID:   0
-      AbbrOffset:      0x0
+    - Version:         4
+      AbbrOffset:      0
       AddrSize:        8
       Entries:
-        - AbbrCode:        0x1
+        - AbbrCode:        1
           Values:
-            - Value:           0x0
-            - Value:           0x1D
-            - Value:           0x1
-            - Value:           0x2
-            - Value:           0x3
-            - Value:           0x8
-            - Value:           0x0
-            - Value:           0x4
-            - Value:           0x1
-            - Value:           0xDEADBEEFDEADBEEF
-            - Value:           0x14
-            - Value:           0x8
-        - AbbrCode:        0x2
-          Values:
-            - Value:           0x5
-            - Value:           0xDEADBEEFDEADBEEF
-        - AbbrCode:        0x3
-          Values:
-            - Value:           0xDEADBEEFDEADBEEF
-            - Value:           0xC
-            - Value:           0x1
-            - Value:           0x1
-            - Value:           0x6
-        - AbbrCode:        0x4
-          Values:
-            - Value:           0x2E
-            - Value:           0xDEADBEEFDEADBEEF
-            - Value:           0x4
-            - Value:           0x0
-            - Value:           0x9
-            - Value:           0x23
-        - AbbrCode:        0x0
-        - AbbrCode:        0x5
-          Values:
-            - Value:           0xDEADBEEFDEADBEEF
-            - Value:           0x8
-            - Value:           0x1
-            - Value:           0x1
-            - Value:           0x7
-        - AbbrCode:        0x0
+            - Value:           0
+            - CStr:            test_inlines.c
+        - AbbrCode:        0
+  debug_line:
+    - Version:         4
+      MinInstLength:   1
+      MaxOpsPerInst:   1
+      DefaultIsStmt:   1
+      LineBase:        251
+      LineRange:       14
+      OpcodeBase:      13
+      StandardOpcodeLengths: [ 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 ]
+      Files:
+        - Name:            test_inlines.c
+          DirIdx:          0
+          ModTime:         0
+          Length:          0
+      Opcodes:
+        - Opcode:          DW_LNS_extended_op
+          ExtLen:          9
+          SubOpcode:       DW_LNE_set_address
+          Data:            4294968104
+        - Opcode:          0x16
+          Data:            0
+        - Opcode:          0x4E
+          Data:            0
+        - Opcode:          0x4A
+          Data:            0
+        - Opcode:          0x4F
+          Data:            0
+        - Opcode:          DW_LNS_advance_pc
+          Data:            8
+        - Opcode:          DW_LNS_extended_op
+          ExtLen:          1
+          SubOpcode:       DW_LNE_end_sequence
 ...
