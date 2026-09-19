@@ -837,12 +837,11 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
   uint64_t file_filtered = 0;
   uint64_t vm_filtered = 0;
-  uint64_t filtered = 0;
   if (ShowFile(options)) {
-    filtered += toplevel_row_.filtered_size.file;
+    file_filtered += toplevel_row_.filtered_size.file;
   }
   if (ShowVM(options)) {
-    filtered += toplevel_row_.filtered_size.vm;
+    vm_filtered += toplevel_row_.filtered_size.vm;
   }
 
   if (vm_filtered == 0 && file_filtered == 0) {
@@ -851,10 +850,10 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
   *out << "Filtering enabled (source_filter); omitted";
 
-  if (file_filtered > 0 && vm_filtered > 0) {
+  if (ShowFile(options) && ShowVM(options)) {
     *out << " file =" << SiPrint(file_filtered, /*force_sign=*/false)
          << ", vm =" << SiPrint(vm_filtered, /*force_sign=*/false);
-  } else if (file_filtered > 0) {
+  } else if (ShowFile(options)) {
     *out << SiPrint(file_filtered, /*force_sign=*/false);
   } else {
     *out << SiPrint(vm_filtered, /*force_sign=*/false);
