@@ -850,10 +850,10 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
   *out << "Filtering enabled (source_filter); omitted";
 
-  if (file_filtered > 0 && vm_filtered > 0) {
+  if (ShowFile(options) && ShowVM(options)) {
     *out << " file =" << SiPrint(file_filtered, /*force_sign=*/false)
          << ", vm =" << SiPrint(vm_filtered, /*force_sign=*/false);
-  } else if (file_filtered > 0) {
+  } else if (ShowFile(options)) {
     *out << SiPrint(file_filtered, /*force_sign=*/false);
   } else {
     *out << SiPrint(vm_filtered, /*force_sign=*/false);
