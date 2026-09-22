@@ -1,0 +1,42 @@
+name: clang-format
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.cc'
+      - '**.h'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**.cc'
+      - '**.h'
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch origin/main
+        run: git fetch origin main
+
+      - name: Check formatting of changed files
+        run: |
+          CHANGED=$(git diff --diff-filter=d --name-only FETCH_HEAD -- '*.cc' '*.h')
+
+          UNFORMATTED=
+          for file in $CHANGED; do
+            clang-format --style=Google --dry-run --Werror "$file" \
+              || UNFORMATTED="$UNFORMATTED $file"
+          done
+
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Fix with: clang-format -i --style=Google$UNFORMATTED"
+            exit 1
+          fi
