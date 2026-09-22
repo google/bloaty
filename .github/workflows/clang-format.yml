@@ -1,0 +1,20 @@
+name: clang-format
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch origin/main
+        run: git fetch origin main
+      - name: Check changed files
+        run: git diff --diff-filter=d --name-only FETCH_HEAD -- '*.cc' '*.h' | xargs -r clang-format --style=Google --dry-run --Werror
