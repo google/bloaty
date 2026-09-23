@@ -61,7 +61,7 @@ void LineInfoReader::Advance(uint64_t amount) {
 
 void LineInfoReader::DoAdvance(uint64_t advance, uint8_t max_per_instr) {
   info_.address += params_.minimum_instruction_length *
-                    ((info_.op_index + advance) / max_per_instr);
+                   ((info_.op_index + advance) / max_per_instr);
   info_.op_index = (info_.op_index + advance) % max_per_instr;
 }
 
@@ -154,7 +154,7 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
   } else {
     // Dwarf V5 and beyond.
     //
-    auto readPath = [&] (DwarfForm form) {
+    auto readPath = [&](DwarfForm form) {
       switch (form) {
         case DW_FORM_string:
           return ReadNullTerminated(&data);
@@ -168,7 +168,8 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     };
 
     auto readEntryFormats = [&]() {
-      std::vector<std::pair<DwarfLineNumberContentType, DwarfForm>> entryFormats;
+      std::vector<std::pair<DwarfLineNumberContentType, DwarfForm>>
+          entryFormats;
       auto formatCount = ReadFixed<uint8_t>(&data);
       for (uint8_t i = 0; i < formatCount; ++i) {
         auto type = static_cast<DwarfLineNumberContentType>(
@@ -184,7 +185,7 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     auto directoryCount = ReadLEB128<uint32_t>(&data);
     while (directoryCount--) {
       std::string_view path = "";
-      for (auto [ type, form ] : entryFormats) {
+      for (auto [type, form] : entryFormats) {
         switch (type) {
           case DW_LNCT_path:
             path = readPath(form);
@@ -199,9 +200,9 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
     auto fileCount = ReadLEB128<uint32_t>(&data);
     while (fileCount--) {
       FileName file_name;
-      auto &idx = file_name.directory_index;
+      auto& idx = file_name.directory_index;
       idx = 0;
-      for (auto &[ type, form ] : fileFormats) {
+      for (auto& [type, form] : fileFormats) {
         switch (type) {
           case DW_LNCT_path:
             file_name.name = readPath(form);
@@ -237,7 +238,8 @@ void LineInfoReader::SeekToOffset(uint64_t offset, uint8_t address_size) {
           }
           case DW_LNCT_timestamp:
           case DW_LNCT_size: {
-            // Skip optional timestamp and size fields - bloaty doesn't need them
+            // Skip optional timestamp and size fields - bloaty doesn't need
+            // them
             switch (form) {
               case DW_FORM_udata:
                 ReadLEB128<uint64_t>(&data);

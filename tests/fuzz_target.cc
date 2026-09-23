@@ -39,6 +39,7 @@ class StringPieceInputFile : public InputFile {
 class StringPieceInputFileFactory : public InputFileFactory {
  public:
   StringPieceInputFileFactory(string_view data) : data_(data) {}
+
  private:
   string_view data_;
   std::unique_ptr<InputFile> OpenFile(
@@ -59,8 +60,8 @@ void RunBloaty(const InputFileFactory& factory,
 
 }  // namespace bloaty
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-  const char *data2 = reinterpret_cast<const char*>(data);
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  const char* data2 = reinterpret_cast<const char*>(data);
   bloaty::StringPieceInputFileFactory factory(string_view(data2, size));
 
   // Try all of the data sources.

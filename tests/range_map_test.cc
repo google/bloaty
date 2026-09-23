@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bloaty.h"
+#include <tuple>
 
+#include "bloaty.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#include <tuple>
 
 namespace bloaty {
 
@@ -113,100 +112,84 @@ TEST_F(RangeMapTest, AddRange) {
 
   map_.AddRange(4, 3, "foo");
   CheckConsistency();
-  AssertMainMapEquals({
-    {4, 7, kNoTranslation, "foo"}
-  });
+  AssertMainMapEquals({{4, 7, kNoTranslation, "foo"}});
 
   map_.AddRange(30, 5, "bar");
   CheckConsistency();
-  AssertMainMapEquals({
-    {4, 7, kNoTranslation, "foo"},
-    {30, 35, kNoTranslation, "bar"}
-  });
+  AssertMainMapEquals(
+      {{4, 7, kNoTranslation, "foo"}, {30, 35, kNoTranslation, "bar"}});
 
   map_.AddRange(50, 0, "baz");  // No-op due to 0 size.
   CheckConsistency();
-  AssertMainMapEquals({
-    {4, 7, kNoTranslation, "foo"},
-    {30, 35, kNoTranslation, "bar"}
-  });
+  AssertMainMapEquals(
+      {{4, 7, kNoTranslation, "foo"}, {30, 35, kNoTranslation, "bar"}});
 
   map_.AddRange(20, 5, "baz");
   map_.AddRange(25, 5, "baz2");
   map_.AddRange(40, 5, "quux");
   CheckConsistency();
-  AssertMainMapEquals({
-    {4, 7, kNoTranslation, "foo"},
-    {20, 25, kNoTranslation, "baz"},
-    {25, 30, kNoTranslation, "baz2"},
-    {30, 35, kNoTranslation, "bar"},
-    {40, 45, kNoTranslation, "quux"}
-  });
+  AssertMainMapEquals({{4, 7, kNoTranslation, "foo"},
+                       {20, 25, kNoTranslation, "baz"},
+                       {25, 30, kNoTranslation, "baz2"},
+                       {30, 35, kNoTranslation, "bar"},
+                       {40, 45, kNoTranslation, "quux"}});
 
   map_.AddRange(21, 25, "overlapping");
   CheckConsistency();
-  AssertMainMapEquals({
-    {4, 7, kNoTranslation, "foo"},
-    {20, 25, kNoTranslation, "baz"},
-    {25, 30, kNoTranslation, "baz2"},
-    {30, 35, kNoTranslation, "bar"},
-    {35, 40, kNoTranslation, "overlapping"},
-    {40, 45, kNoTranslation, "quux"},
-    {45, 46, kNoTranslation, "overlapping"}
-  });
+  AssertMainMapEquals({{4, 7, kNoTranslation, "foo"},
+                       {20, 25, kNoTranslation, "baz"},
+                       {25, 30, kNoTranslation, "baz2"},
+                       {30, 35, kNoTranslation, "bar"},
+                       {35, 40, kNoTranslation, "overlapping"},
+                       {40, 45, kNoTranslation, "quux"},
+                       {45, 46, kNoTranslation, "overlapping"}});
 
   map_.AddRange(21, 25, "overlapping no-op");
   CheckConsistency();
-  AssertMainMapEquals({
-    {4, 7, kNoTranslation, "foo"},
-    {20, 25, kNoTranslation, "baz"},
-    {25, 30, kNoTranslation, "baz2"},
-    {30, 35, kNoTranslation, "bar"},
-    {35, 40, kNoTranslation, "overlapping"},
-    {40, 45, kNoTranslation, "quux"},
-    {45, 46, kNoTranslation, "overlapping"}
-  });
+  AssertMainMapEquals({{4, 7, kNoTranslation, "foo"},
+                       {20, 25, kNoTranslation, "baz"},
+                       {25, 30, kNoTranslation, "baz2"},
+                       {30, 35, kNoTranslation, "bar"},
+                       {35, 40, kNoTranslation, "overlapping"},
+                       {40, 45, kNoTranslation, "quux"},
+                       {45, 46, kNoTranslation, "overlapping"}});
 
   map_.AddRange(0, 100, "overlap everything");
   CheckConsistency();
   AssertMainMapEquals({
-    {0, 4, kNoTranslation, "overlap everything"},
-    {4, 7, kNoTranslation, "foo"},
-    {7, 20, kNoTranslation, "overlap everything"},
-    {20, 25, kNoTranslation, "baz"},
-    {25, 30, kNoTranslation, "baz2"},
-    {30, 35, kNoTranslation, "bar"},
-    {35, 40, kNoTranslation, "overlapping"},
-    {40, 45, kNoTranslation, "quux"},
-    {45, 46, kNoTranslation, "overlapping"},
-    {46, 100, kNoTranslation, "overlap everything"},
+      {0, 4, kNoTranslation, "overlap everything"},
+      {4, 7, kNoTranslation, "foo"},
+      {7, 20, kNoTranslation, "overlap everything"},
+      {20, 25, kNoTranslation, "baz"},
+      {25, 30, kNoTranslation, "baz2"},
+      {30, 35, kNoTranslation, "bar"},
+      {35, 40, kNoTranslation, "overlapping"},
+      {40, 45, kNoTranslation, "quux"},
+      {45, 46, kNoTranslation, "overlapping"},
+      {46, 100, kNoTranslation, "overlap everything"},
   });
 }
 
 TEST_F(RangeMapTest, UnknownSize) {
   map_.AddRange(5, kUnknownSize, "foo");
   CheckConsistency();
-  AssertMainMapEquals({
-    {5, UINT64_MAX, kNoTranslation, "foo"}
-  });
+  AssertMainMapEquals({{5, UINT64_MAX, kNoTranslation, "foo"}});
 
   map_.AddRange(100, 15, "bar");
   map_.AddRange(200, kUnknownSize, "baz");
   CheckConsistency();
-  AssertMainMapEquals({
-    {5, 100, kNoTranslation, "foo"},
-    {100, 115, kNoTranslation, "bar"},
-    {200, UINT64_MAX, kNoTranslation, "baz"}
-  });
+  AssertMainMapEquals({{5, 100, kNoTranslation, "foo"},
+                       {100, 115, kNoTranslation, "bar"},
+                       {200, UINT64_MAX, kNoTranslation, "baz"}});
 
   map2_.AddRange(5, 110, "base0");
   map2_.AddRange(200, 50, "base1");
 
   AssertRollupEquals({&map2_, &map_}, {
-    {{"base0", "foo"}, 5, 100},
-    {{"base0", "bar"}, 100, 115},
-    {{"base1", "baz"}, 200, 250},
-  });
+                                          {{"base0", "foo"}, 5, 100},
+                                          {{"base0", "bar"}, 100, 115},
+                                          {{"base1", "baz"}, 200, 250},
+                                      });
 }
 
 TEST_F(RangeMapTest, UnknownSize2) {
@@ -216,8 +199,8 @@ TEST_F(RangeMapTest, UnknownSize2) {
   map_.AddRange(100, kUnknownSize, "foo");
   map_.AddRange(95, 10, "bar");
   AssertMainMapEquals({
-    {95, 100, kNoTranslation, "bar"},
-    {100, 105, kNoTranslation, "foo"},
+      {95, 100, kNoTranslation, "bar"},
+      {100, 105, kNoTranslation, "foo"},
   });
 }
 
@@ -228,8 +211,8 @@ TEST_F(RangeMapTest, UnknownSize3) {
   // though the new label is "baz".
   map_.AddRange(100, 100, "baz");
   AssertMainMapEquals({
-    {100, 150, kNoTranslation, "foo"},
-    {150, 200, kNoTranslation, "bar"},
+      {100, 150, kNoTranslation, "foo"},
+      {150, 200, kNoTranslation, "bar"},
   });
 }
 
@@ -240,8 +223,8 @@ TEST_F(RangeMapTest, UnknownSize4) {
   // though the new label is "baz".
   map_.AddRange(100, 100, "baz");
   AssertMainMapEquals({
-    {100, 150, kNoTranslation, "foo"},
-    {150, 250, kNoTranslation, "bar"},
+      {100, 150, kNoTranslation, "foo"},
+      {150, 250, kNoTranslation, "bar"},
   });
 }
 
@@ -250,8 +233,8 @@ TEST_F(RangeMapTest, Bug1) {
   map_.AddRange(120, 20, "bar");
   map_.AddRange(100, 15, "baz");
   AssertMainMapEquals({
-    {100, 120, kNoTranslation, "foo"},
-    {120, 140, kNoTranslation, "bar"},
+      {100, 120, kNoTranslation, "foo"},
+      {120, 140, kNoTranslation, "bar"},
   });
 }
 
@@ -260,9 +243,9 @@ TEST_F(RangeMapTest, Bug2) {
   map_.AddRange(200, 50, "bar");
   map_.AddRange(150, 10, "baz");
   AssertMainMapEquals({
-    {100, 150, kNoTranslation, "foo"},
-    {150, 160, kNoTranslation, "baz"},
-    {200, 250, kNoTranslation, "bar"},
+      {100, 150, kNoTranslation, "foo"},
+      {150, 160, kNoTranslation, "baz"},
+      {200, 250, kNoTranslation, "bar"},
   });
 }
 
@@ -271,9 +254,9 @@ TEST_F(RangeMapTest, Bug3) {
   map_.AddRange(200, kUnknownSize, "bar");
   map_.AddRange(150, 10, "baz");
   AssertMainMapEquals({
-    {100, 150, kNoTranslation, "foo"},
-    {150, 160, kNoTranslation, "baz"},
-    {200, UINT64_MAX, kNoTranslation, "bar"},
+      {100, 150, kNoTranslation, "foo"},
+      {150, 160, kNoTranslation, "baz"},
+      {200, UINT64_MAX, kNoTranslation, "bar"},
   });
 }
 
@@ -282,9 +265,9 @@ TEST_F(RangeMapTest, GetLabel) {
   map_.AddRange(200, 50, "bar");
   map_.AddRange(150, 10, "baz");
   AssertMainMapEquals({
-    {100, 150, kNoTranslation, "foo"},
-    {150, 160, kNoTranslation, "baz"},
-    {200, 250, kNoTranslation, "bar"},
+      {100, 150, kNoTranslation, "foo"},
+      {150, 160, kNoTranslation, "baz"},
+      {200, 250, kNoTranslation, "bar"},
   });
 
   std::string label;
@@ -309,32 +292,22 @@ TEST_F(RangeMapTest, GetLabel) {
 TEST_F(RangeMapTest, Translation) {
   map_.AddDualRange(20, 5, 120, "foo");
   CheckConsistency();
-  AssertMainMapEquals({
-    {20, 25, 120, "foo"}
-  });
+  AssertMainMapEquals({{20, 25, 120, "foo"}});
 
   ASSERT_TRUE(map2_.AddRangeWithTranslation(20, 5, "translate me", map_, false,
                                             &map3_));
 
   CheckConsistency();
-  AssertMapEquals(map2_, {
-    {20, 25, kNoTranslation, "translate me"}
-  });
-  AssertMapEquals(map3_, {
-    {120, 125, kNoTranslation, "translate me"}
-  });
+  AssertMapEquals(map2_, {{20, 25, kNoTranslation, "translate me"}});
+  AssertMapEquals(map3_, {{120, 125, kNoTranslation, "translate me"}});
 
   map_.AddDualRange(1000, 30, 1100, "bar");
   ASSERT_TRUE(map2_.AddRangeWithTranslation(1000, 5, "translate me2", map_,
                                             false, &map3_));
-  AssertMapEquals(map2_, {
-    {20, 25, kNoTranslation, "translate me"},
-    {1000, 1005, kNoTranslation, "translate me2"}
-  });
-  AssertMapEquals(map3_, {
-    {120, 125, kNoTranslation, "translate me"},
-    {1100, 1105, kNoTranslation, "translate me2"}
-  });
+  AssertMapEquals(map2_, {{20, 25, kNoTranslation, "translate me"},
+                          {1000, 1005, kNoTranslation, "translate me2"}});
+  AssertMapEquals(map3_, {{120, 125, kNoTranslation, "translate me"},
+                          {1100, 1105, kNoTranslation, "translate me2"}});
 
   // Starts before base map.
   ASSERT_FALSE(map2_.AddRangeWithTranslation(15, 8, "translate me", map_, false,
@@ -355,50 +328,38 @@ TEST_F(RangeMapTest, Translation2) {
   map_.AddRange(25, 5, "baz");
   map_.AddDualRange(30, 5, 130, "quux");
   CheckConsistency();
-  AssertMainMapEquals({
-    {5, 10, kNoTranslation, "foo"},
-    {20, 25, 120, "bar"},
-    {25, 30, kNoTranslation, "baz"},
-    {30, 35, 130, "quux"}
-  });
+  AssertMainMapEquals({{5, 10, kNoTranslation, "foo"},
+                       {20, 25, 120, "bar"},
+                       {25, 30, kNoTranslation, "baz"},
+                       {30, 35, 130, "quux"}});
 
   ASSERT_TRUE(map2_.AddRangeWithTranslation(20, 15, "translate me", map_, false,
                                             &map3_));
   CheckConsistency();
-  AssertMapEquals(map2_, {
-    {20, 25, kNoTranslation, "translate me"},
-    {25, 30, kNoTranslation, "translate me"},
-    {30, 35, kNoTranslation, "translate me"}
-  });
-  AssertMapEquals(map3_, {
-    {120, 125, kNoTranslation, "translate me"},
-    {130, 135, kNoTranslation, "translate me"}
-  });
+  AssertMapEquals(map2_, {{20, 25, kNoTranslation, "translate me"},
+                          {25, 30, kNoTranslation, "translate me"},
+                          {30, 35, kNoTranslation, "translate me"}});
+  AssertMapEquals(map3_, {{120, 125, kNoTranslation, "translate me"},
+                          {130, 135, kNoTranslation, "translate me"}});
 }
 
 TEST_F(RangeMapTest, UnknownTranslation) {
   map_.AddDualRange(20, 10, 120, "foo");
   CheckConsistency();
-  AssertMainMapEquals({
-    {20, 30, 120, "foo"}
-  });
+  AssertMainMapEquals({{20, 30, 120, "foo"}});
 
   map2_.AddRangeWithTranslation(25, kUnknownSize, "translate me", map_, false,
                                 &map3_);
   CheckConsistency();
-  AssertMapEquals(map2_, {
-    {25, UINT64_MAX, kNoTranslation, "translate me"}
-  });
-  AssertMapEquals(map3_, {
-    {125, UINT64_MAX, kNoTranslation, "translate me"}
-  });
+  AssertMapEquals(map2_, {{25, UINT64_MAX, kNoTranslation, "translate me"}});
+  AssertMapEquals(map3_, {{125, UINT64_MAX, kNoTranslation, "translate me"}});
 
   map2_.AddRange(20, 10, "fallback");
 
   AssertRollupEquals({&map_, &map2_}, {
-    {{"foo", "fallback"}, 20, 25},
-    {{"foo", "translate me"}, 25, 30},
-  });
+                                          {{"foo", "fallback"}, 20, 25},
+                                          {{"foo", "translate me"}, 25, 30},
+                                      });
 }
 
 }  // namespace bloaty

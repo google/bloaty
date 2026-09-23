@@ -18,21 +18,21 @@
 #include <fstream>
 #include <memory>
 #include <string>
-#include <unordered_set>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
+
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
+#include "bloaty.h"
+#include "bloaty.pb.h"
 #include "gmock/gmock.h"
 #include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
-
 #include "strarr.h"
-#include "bloaty.h"
-#include "bloaty.pb.h"
 
 #if defined(_MSC_VER)
-#define PATH_MAX  4096
+#define PATH_MAX 4096
 #endif
 
 inline bool GetFileSize(const std::string& filename, uint64_t* size) {
@@ -72,7 +72,7 @@ inline std::string DebugString(const google::protobuf::Message& message) {
 class BloatyTest : public ::testing::Test {
  protected:
   void CheckConsistencyForRow(const bloaty::RollupRow& row, bool is_toplevel,
-                             bool diff_mode, int* count) {
+                              bool diff_mode, int* count) {
     // If any children exist, they should sum up to this row's values.
     // Also none of the children should have the same name.
     std::unordered_set<std::string> names;

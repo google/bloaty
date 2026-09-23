@@ -21,8 +21,7 @@ namespace dwarf {
 
 // uint64/32 max is a tombstone value added by https://reviews.llvm.org/D81784.
 bool IsValidDwarfAddress(uint64_t addr, uint8_t address_size) {
-  if (addr == 0)
-    return false;
+  if (addr == 0) return false;
   if (address_size == 4 && addr == std::numeric_limits<uint32_t>::max())
     return false;
   if (address_size == 8 && addr == std::numeric_limits<uint64_t>::max())

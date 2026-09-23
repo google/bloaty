@@ -26,7 +26,7 @@
 //
 // Usage overview:
 //   dwarf::LineInfoReader reader(file);
-//   
+//
 //   reader.SeekToOffset(ofs, cu.unit_sizes().address_size());
 //   while (reader->ReadLineInfo()) {
 //     const dwarf::LineInfo& info = reader->lineinfo();

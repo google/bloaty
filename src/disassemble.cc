@@ -57,7 +57,7 @@ void DisassembleFindReferences(const DisassemblyInfo& info, RangeSink* sink) {
     THROW("Tried to disassemble empty function.");
   }
 
-  cs_insn *in = cs_malloc(handle);
+  cs_insn* in = cs_malloc(handle);
   uint64_t address = info.start_address;
   const uint8_t* ptr = reinterpret_cast<const uint8_t*>(info.text.data());
   size_t size = info.text.size();
@@ -93,7 +93,7 @@ cleanup:
   cs_close(&handle);
 }
 
-bool TryGetJumpTarget(cs_arch arch, cs_insn *in, uint64_t* target) {
+bool TryGetJumpTarget(cs_arch arch, cs_insn* in, uint64_t* target) {
   switch (arch) {
     case CS_ARCH_X86:
       switch (in->id) {
@@ -145,9 +145,9 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
     THROW("Tried to disassemble empty function.");
   }
 
-  cs_insn *insn;
+  cs_insn* insn;
   size_t count =
-      cs_disasm(handle, reinterpret_cast<const uint8_t *>(info.text.data()),
+      cs_disasm(handle, reinterpret_cast<const uint8_t*>(info.text.data()),
                 info.text.size(), info.start_address, 0, &insn);
 
   if (count == 0) {
@@ -157,7 +157,7 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
   std::map<uint64_t, int> local_labels;
 
   for (size_t i = 0; i < count; i++) {
-    cs_insn *in = insn + i;
+    cs_insn* in = insn + i;
     uint64_t target;
     if (TryGetJumpTarget(info.arch, in, &target) &&
         target >= info.start_address &&
@@ -172,7 +172,7 @@ std::string DisassembleFunction(const DisassemblyInfo& info) {
   }
 
   for (size_t i = 0; i < count; i++) {
-    cs_insn *in = insn + i;
+    cs_insn* in = insn + i;
     std::string bytes = absl::BytesToHexString(
         string_view(reinterpret_cast<const char*>(in->bytes), in->size));
     string_view mnemonic(in->mnemonic);

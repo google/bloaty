@@ -31,11 +31,9 @@ class SourceMapObjectFile : public ObjectFile {
  public:
   SourceMapObjectFile(std::unique_ptr<InputFile> file_data,
                       std::string build_id)
-    : ObjectFile(std::move(file_data)), build_id_(build_id) {}
+      : ObjectFile(std::move(file_data)), build_id_(build_id) {}
 
-  std::string GetBuildId() const override {
-    return build_id_;
-  }
+  std::string GetBuildId() const override { return build_id_; }
 
   void ProcessFile(const std::vector<RangeSink*>& /*sinks*/) const override {
     WARN("General processing not supported for source map files");
@@ -58,4 +56,3 @@ class SourceMapObjectFile : public ObjectFile {
 }  // namespace bloaty
 
 #endif  // BLOATY_SOURCE_MAP_H_
-

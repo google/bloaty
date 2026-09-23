@@ -15,9 +15,9 @@
 #include <string_view>
 
 #include "bloaty.h"
-#include "util.h"
-#include "dwarf_constants.h"
 #include "dwarf/dwarf_util.h"
+#include "dwarf_constants.h"
+#include "util.h"
 
 using std::string_view;
 using namespace dwarf2reader;
@@ -201,7 +201,8 @@ void ReadEhFrame(string_view data, RangeSink* sink, bool is_64bit) {
           case 'B': {
             // Some compilers emit a G/B augmentation character.  We don't
             // currently handle it, but it's not a fatal error.
-            // ref: https://github.com/llvm-mirror/libunwind/commit/0930d6cee2caf71685a84b648f85a2f80bc182c4
+            // ref:
+            // https://github.com/llvm-mirror/libunwind/commit/0930d6cee2caf71685a84b648f85a2f80bc182c4
             break;
           }
           default:
@@ -216,8 +217,8 @@ void ReadEhFrame(string_view data, RangeSink* sink, bool is_64bit) {
         THROW("Couldn't find CIE for FDE");
       }
       const CIEInfo& cie_info = iter->second;
-      uint64_t address = ReadEncodedPointer(cie_info.fde_encoding, is_64bit, &entry,
-                                            nullptr, sink);
+      uint64_t address = ReadEncodedPointer(cie_info.fde_encoding, is_64bit,
+                                            &entry, nullptr, sink);
       // TODO(haberman); Technically the FDE addresses could span a
       // function/compilation unit?  They can certainly span inlines.
       /*
@@ -268,7 +269,8 @@ void ReadEhFrameHdr(string_view data, RangeSink* sink, bool is_64bit) {
     string_view entry_data = data;
     uint64_t initial_location =
         ReadEncodedPointer(table_enc, is_64bit, &data, base, sink);
-    uint64_t fde_addr = ReadEncodedPointer(table_enc, is_64bit, &data, base, sink);
+    uint64_t fde_addr =
+        ReadEncodedPointer(table_enc, is_64bit, &data, base, sink);
     entry_data.remove_suffix(data.size());
     sink->AddFileRangeForVMAddr("dwarf_fde_table", initial_location,
                                 entry_data);

@@ -193,7 +193,8 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
       std::string ret(ms);
       free(ms);
       return ret;
-    } else if (swift::Demangle::isSwiftSymbol(std::string(demangle_from).c_str())) {
+    } else if (swift::Demangle::isSwiftSymbol(
+                   std::string(demangle_from).c_str())) {
       auto Opts =
           swift::Demangle::DemangleOptions::SimplifiedUIDemangleOptions();
       std::string swift =
@@ -215,7 +216,8 @@ std::string ItaniumDemangle(string_view symbol, DataSource source) {
       std::string ret(rust);
       free(rust);
       return ret;
-    } else if (swift::Demangle::isSwiftSymbol(std::string(demangle_from).c_str())) {
+    } else if (swift::Demangle::isSwiftSymbol(
+                   std::string(demangle_from).c_str())) {
       swift::Demangle::DemangleOptions options;
       options.SynthesizeSugarOnTypes = true;
       return swift::Demangle::demangleSymbolAsString(demangle_from, options);
@@ -433,7 +435,8 @@ void Rollup::CreateRows(RollupRow* row, const Rollup* base,
     // For a diff, the percentage is a comparison against the previous size of
     // the same label at the same level.
     row->vmpercent = Percent(vm_total_ - base->vm_total_, base->vm_total_);
-    row->filepercent = Percent(file_total_ - base->file_total_, base->file_total_);
+    row->filepercent =
+        Percent(file_total_ - base->file_total_, base->file_total_);
   }
 
   for (const auto& value : children_) {
@@ -865,7 +868,8 @@ void RollupOutput::PrettyPrint(const OutputOptions& options,
 
 void RollupOutput::PrintRowToCSV(const RollupRow& row,
                                  std::vector<std::string> parent_labels,
-                                 std::ostream* out, bool tabs, bool csvDiff) const {
+                                 std::ostream* out, bool tabs,
+                                 bool csvDiff) const {
   while (parent_labels.size() < source_names_.size()) {
     // If this label had no data at this level, append an empty string.
     parent_labels.push_back("");
@@ -878,10 +882,11 @@ void RollupOutput::PrintRowToCSV(const RollupRow& row,
   // old size.
   if (csvDiff) {
     parent_labels.push_back(std::to_string(row.old_size.vm));
-  	parent_labels.push_back(std::to_string(row.old_size.file));
+    parent_labels.push_back(std::to_string(row.old_size.file));
     parent_labels.push_back(std::to_string(row.old_size.vm + (row.size.vm)));
     parent_labels.push_back(
-        std::to_string(row.old_size.file + (row.size.file)));}
+        std::to_string(row.old_size.file + (row.size.file)));
+  }
 
   std::string sep = tabs ? "\t" : ",";
   *out << absl::StrJoin(parent_labels, sep) << "\n";
@@ -889,7 +894,8 @@ void RollupOutput::PrintRowToCSV(const RollupRow& row,
 
 void RollupOutput::PrintTreeToCSV(const RollupRow& row,
                                   std::vector<std::string> parent_labels,
-                                  std::ostream* out, bool tabs, bool csvDiff) const {
+                                  std::ostream* out, bool tabs,
+                                  bool csvDiff) const {
   if (tabs) {
     parent_labels.push_back(row.name);
   } else {
@@ -1372,9 +1378,10 @@ void RangeSink::AddRange(const char* analyzer, string_view name,
   if (translator_) {
     if (!translator_->vm_map.CoversRange(vmaddr, vmsize) ||
         !translator_->file_map.CoversRange(fileoff, filesize)) {
-      WARN("AddRange($0, $1, $2, $3, $4) will be ignored, because it is not "
-           "covered by base map.",
-           name.data(), vmaddr, vmsize, fileoff, filesize);
+      WARN(
+          "AddRange($0, $1, $2, $3, $4) will be ignored, because it is not "
+          "covered by base map.",
+          name.data(), vmaddr, vmsize, fileoff, filesize);
       return;
     }
   }
@@ -1410,13 +1417,12 @@ std::string_view RangeSink::TranslateVMToFile(uint64_t address) {
   if (!translator_->vm_map.Translate(address, &translated) ||
       translated > file_->data().size()) {
     THROWF("Can't translate VM pointer ($0) to file", address);
-
   }
   return file_->data().substr(translated);
 }
 
 std::string_view RangeSink::ZlibDecompress(std::string_view data,
-                                            uint64_t uncompressed_size) {
+                                           uint64_t uncompressed_size) {
   if (!arena_) {
     THROW("This range sink isn't prepared to zlib decompress.");
   }
@@ -1443,7 +1449,7 @@ std::string_view RangeSink::ZlibDecompress(std::string_view data,
 }
 
 std::string_view RangeSink::ZstdDecompress(std::string_view data,
-                                            uint64_t uncompressed_size) {
+                                           uint64_t uncompressed_size) {
   if (!arena_) {
     THROW("This range sink isn't prepared to zstd decompress.");
   }
@@ -1451,14 +1457,14 @@ std::string_view RangeSink::ZstdDecompress(std::string_view data,
   // Limit for uncompressed size is 30x the compressed size + 128MB.
   if (uncompressed_size >
       static_cast<uint64_t>(data.size()) * 30 + (128 * mb)) {
-    WARN("ignoring compressed debug data, implausible uncompressed size "
-         "(compressed: $0, uncompressed: $1)",
-         data.size(), uncompressed_size);
+    WARN(
+        "ignoring compressed debug data, implausible uncompressed size "
+        "(compressed: $0, uncompressed: $1)",
+        data.size(), uncompressed_size);
     return std::string_view();
   }
   char* dbuf =
-      google::protobuf::Arena::CreateArray<char>(
-          arena_, uncompressed_size);
+      google::protobuf::Arena::CreateArray<char>(arena_, uncompressed_size);
   size_t zstd_len = uncompressed_size;
   size_t decompress_len =
       ZSTD_decompress(dbuf, uncompressed_size, data.data(), data.size());
@@ -1592,9 +1598,10 @@ class Bloaty {
                              const std::string& main_binary_path,
                              bool strict_validation);
 
-  std::filesystem::path ConstructDsymPath(const std::filesystem::path& binary_path);
-  std::filesystem::path GetDsymInternalPath(const std::filesystem::path& dsym_bundle,
-                                            const std::string& binary_name);
+  std::filesystem::path ConstructDsymPath(
+      const std::filesystem::path& binary_path);
+  std::filesystem::path GetDsymInternalPath(
+      const std::filesystem::path& dsym_bundle, const std::string& binary_name);
 
   const InputFileFactory& file_factory_;
   const Options options_;
@@ -1680,9 +1687,10 @@ void Bloaty::AddDebugFilename(const std::string& filename) {
 void Bloaty::AddSourceMapFilename(const std::string& filename) {
   std::size_t delimiter = filename.find('=');
   if (delimiter == std::string::npos) {
-    THROWF("Source map filename '$0' must have a build id and file name "
-           "separated by '='",
-           filename);
+    THROWF(
+        "Source map filename '$0' must have a build id and file name "
+        "separated by '='",
+        filename);
   }
   std::string sourcemap_build_id = filename.substr(0, delimiter);
   std::string sourcemap_filename = filename.substr(delimiter + 1);
@@ -1716,14 +1724,14 @@ bool Bloaty::TryValidateAndAddDsym(const std::string& dsym_path,
   if (main_build_id != dsym_build_id) {
     if (strict_validation) {
       THROWF("dSYM file $0 has mismatched build ID (expected $1, got $2)",
-             dsym_path,
-             absl::BytesToHexString(main_build_id),
+             dsym_path, absl::BytesToHexString(main_build_id),
              absl::BytesToHexString(dsym_build_id));
     } else {
-      WARN("dSYM file $0 has mismatched build ID (expected $1, got $2) - skipping",
-           dsym_path,
-           absl::BytesToHexString(main_build_id),
-           absl::BytesToHexString(dsym_build_id));
+      WARN(
+          "dSYM file $0 has mismatched build ID (expected $1, got $2) - "
+          "skipping",
+          dsym_path, absl::BytesToHexString(main_build_id),
+          absl::BytesToHexString(dsym_build_id));
     }
     return false;
   }
@@ -1732,7 +1740,8 @@ bool Bloaty::TryValidateAndAddDsym(const std::string& dsym_path,
   return true;
 }
 
-std::filesystem::path Bloaty::ConstructDsymPath(const std::filesystem::path& binary_path) {
+std::filesystem::path Bloaty::ConstructDsymPath(
+    const std::filesystem::path& binary_path) {
   std::filesystem::path binary_file(binary_path);
   std::string binary_name = binary_file.filename().string();
   std::filesystem::path binary_dir = binary_file.parent_path();
@@ -1741,8 +1750,8 @@ std::filesystem::path Bloaty::ConstructDsymPath(const std::filesystem::path& bin
   return dsym_bundle / "Contents" / "Resources" / "DWARF" / binary_name;
 }
 
-std::filesystem::path Bloaty::GetDsymInternalPath(const std::filesystem::path& dsym_bundle,
-                                                  const std::string& binary_name) {
+std::filesystem::path Bloaty::GetDsymInternalPath(
+    const std::filesystem::path& dsym_bundle, const std::string& binary_name) {
   return dsym_bundle / "Contents" / "Resources" / "DWARF" / binary_name;
 }
 
@@ -1767,8 +1776,10 @@ void Bloaty::AddDsymFilename(const Options& options,
   if (std::filesystem::is_directory(dsym_bundle)) {
     bool found_any = false;
     for (const auto& binary_filename : options.filename()) {
-      std::filesystem::path binary_name = std::filesystem::path(binary_filename).filename();
-      std::filesystem::path dsym_file = GetDsymInternalPath(dsym_bundle, binary_name.string());
+      std::filesystem::path binary_name =
+          std::filesystem::path(binary_filename).filename();
+      std::filesystem::path dsym_file =
+          GetDsymInternalPath(dsym_bundle, binary_name.string());
 
       if (std::filesystem::exists(dsym_file)) {
         if (TryValidateAndAddDsym(dsym_file.string(), binary_filename,
@@ -1796,8 +1807,8 @@ void Bloaty::AddDsymFilename(const Options& options,
 // - Ignores invalid/corrupted dSYM files
 // - Warns on buildid mismatches but continues without the dSYM
 //
-// The permissive behaviour is intentional because auto-loading is speculative and
-// shouldn't break analysis of the main binary. Users didn't explicitly
+// The permissive behaviour is intentional because auto-loading is speculative
+// and shouldn't break analysis of the main binary. Users didn't explicitly
 // request the dSYM so failures should be silent.
 void Bloaty::TryAutoLoadDsym(const std::string& binary_path,
                              const std::string& build_id) {
@@ -1812,7 +1823,7 @@ void Bloaty::TryAutoLoadDsym(const std::string& binary_path,
     // GetObjectFile() will throw if the file isn't a valid Mach-O and
     // we want auto-loading to silently fail rather than break analysis.
     if (TryValidateAndAddDsym(dsym_file.string(), binary_path,
-                             /*strict_validation=*/false)) {
+                              /*strict_validation=*/false)) {
       if (verbose_level > 1) {
         printf("Found matching dSYM file: %s\n", dsym_file.string().c_str());
       }
@@ -2156,9 +2167,10 @@ void Bloaty::ScanAndRollup(const Options& options, RollupOutput* output) {
           "$0   $1\n", absl::BytesToHexString(file_info.build_id_).c_str(),
           file_info.filename_.c_str());
     }
-    THROWF("Debug file(s) build ID did not match any input file build "
-           "ID:\n$0\nInput Files:\n$1",
-           unused_debug.c_str(), input_files.c_str());
+    THROWF(
+        "Debug file(s) build ID did not match any input file build "
+        "ID:\n$0\nInput Files:\n$1",
+        unused_debug.c_str(), input_files.c_str());
   }
 }
 

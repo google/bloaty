@@ -92,7 +92,7 @@ class RangeMap {
 
   // Translates |addr| into the other domain, returning |true| if this was
   // successful.
-  bool Translate(uint64_t addr, uint64_t *translated) const;
+  bool Translate(uint64_t addr, uint64_t* translated) const;
 
   // Looks for a range within this map that contains |addr|.  If found, returns
   // true and sets |label| to the corresponding label, and |offset| to the
@@ -318,7 +318,7 @@ void RangeMap::ComputeRollup(const std::vector<const RangeMap*>& range_maps,
       // Starting a new continuous range: all iterators must start at the same
       // place.
       current = iters[0]->first;
-      for (int i = 0; i < range_maps.size(); i++)  {
+      for (int i = 0; i < range_maps.size(); i++) {
         if (range_maps[i]->IterIsEnd(iters[i])) {
           printf(
               "Error, no more ranges for index %d but we need one "
