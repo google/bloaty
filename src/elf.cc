@@ -950,7 +950,7 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               }
               // TODO(brandonvu) Continue if VM pointer cannot be translated. Issue #315
               uint64_t unused;
-              if (!sink->Translator()->vm_map.Translate(full_addr, &unused)) {
+              if (!sink->Translator()->vm_map().Translate(full_addr, &unused)) {
                 WARN("Can't translate VM pointer ($0) to file", full_addr);
                 continue;
               }
@@ -1464,7 +1464,7 @@ class ElfObjectFile : public ObjectFile {
       // symbolized.
 
       uint64_t fileoff;
-      if (!base_map.vm_map.Translate(vmaddr, &fileoff)) {
+      if (!base_map.vm_map().Translate(vmaddr, &fileoff)) {
         THROWF("Couldn't translate VM address for function $0", symbol);
       }
 

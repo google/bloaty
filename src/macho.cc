@@ -127,6 +127,7 @@ struct LoadCommand {
   uint32_t cmd;
   string_view command_data;
   string_view file_data;
+  int arch_index = 0;  // Architecture index for universal binaries, 0 otherwise.
 };
 
 template <class Struct>
@@ -137,7 +138,7 @@ bool Is64Bit<mach_header_64>() { return true; }
 
 template <class Struct, class Func>
 void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
-                          Func&& loadcmd_func) {
+                          int arch_index, Func&& loadcmd_func) {
   string_view header_data = macho_data;
   auto header = GetStructPointerAndAdvance<Struct>(&header_data);
   MaybeAddOverhead(overhead_sink,
@@ -164,6 +165,7 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
     data.cmd = command->cmd;
     data.command_data = StrictSubstr(header_data, 0, command->cmdsize);
     data.file_data = macho_data;
+    data.arch_index = arch_index;
     std::forward<Func>(loadcmd_func)(data);
 
     MaybeAddOverhead(overhead_sink, "[Mach-O Headers]", data.command_data);
@@ -173,7 +175,7 @@ void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
 
 template <class Func>
 void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
-                      Func&& loadcmd_func) {
+                      int arch_index, Func&& loadcmd_func) {
   uint32_t magic = ReadMagic(macho_file);
   switch (magic) {
     case MH_MAGIC:
@@ -184,12 +186,12 @@ void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
       // Still, you can build 32-bit binaries as of this writing, and
       // there are existing 32-bit binaries floating around, so we might
       // as well support them.
-      ParseMachOHeaderImpl<mach_header>(macho_file, overhead_sink,
+      ParseMachOHeaderImpl<mach_header>(macho_file, overhead_sink, arch_index,
                                         std::forward<Func>(loadcmd_func));
       break;
     case MH_MAGIC_64:
       ParseMachOHeaderImpl<mach_header_64>(
-          macho_file, overhead_sink, std::forward<Func>(loadcmd_func));
+          macho_file, overhead_sink, arch_index, std::forward<Func>(loadcmd_func));
       break;
     case MH_CIGAM:
     case MH_CIGAM_64:
@@ -230,7 +232,7 @@ void ParseFatHeader(string_view fat_file, RangeSink* overhead_sink,
     auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
     string_view macho_data = StrictSubstr(
         fat_file, ByteSwap(arch->offset), ByteSwap(arch->size));
-    ParseMachOHeader(macho_data, overhead_sink,
+    ParseMachOHeader(macho_data, overhead_sink, i,
                      std::forward<Func>(loadcmd_func));
   }
 }
@@ -244,7 +246,7 @@ void ForEachLoadCommand(string_view maybe_fat_file, RangeSink* overhead_sink,
     case MH_MAGIC_64:
     case MH_CIGAM:
     case MH_CIGAM_64:
-      ParseMachOHeader(maybe_fat_file, overhead_sink,
+      ParseMachOHeader(maybe_fat_file, overhead_sink, 0,
                        std::forward<Func>(loadcmd_func));
       break;
     case FAT_CIGAM:
@@ -492,7 +494,10 @@ void ParseLoadCommand(const LoadCommand& cmd, RangeSink* sink) {
 void ParseLoadCommands(RangeSink* sink) {
   ForEachLoadCommand(
       sink->input_file().data(), sink,
-      [sink](const LoadCommand& cmd) { ParseLoadCommand(cmd, sink); });
+      [sink](const LoadCommand& cmd) {
+        sink->set_arch_index(cmd.arch_index);
+        ParseLoadCommand(cmd, sink);
+      });
 }
 
 template <class NList>
@@ -543,6 +548,7 @@ void ParseSymbols(string_view file_data, SymbolTable* symtab, RangeSink* sink) {
   ForEachLoadCommand(
       file_data, sink,
       [symtab, sink](const LoadCommand& cmd) {
+        sink->set_arch_index(cmd.arch_index);
         switch (cmd.cmd) {
           case LC_SYMTAB:
             if (cmd.is64bit) {
@@ -562,6 +568,7 @@ static void AddMachOFallback(RangeSink* sink) {
   ForEachLoadCommand(
       sink->input_file().data(), sink,
       [sink](const LoadCommand& cmd) {
+        sink->set_arch_index(cmd.arch_index);
         switch (cmd.cmd) {
           case LC_SEGMENT_64:
             AddSegmentAsFallback<segment_command_64, section_64>(
@@ -633,6 +640,9 @@ static void ReadDebugSectionsFromMachO(const InputFile &file,
   dwarf->open = &ReadDebugSectionsFromMachO;
   ForEachLoadCommand(
       file.data(), nullptr, [dwarf, sink](const LoadCommand &cmd) {
+        if (sink) {
+          sink->set_arch_index(cmd.arch_index);
+        }
         switch (cmd.cmd) {
         case LC_SEGMENT_64:
           ReadDebugSectionsFromSegment<segment_command_64, section_64>(
@@ -667,6 +677,25 @@ class MachOObjectFile : public ObjectFile {
     });
 
     return id;
+  }
+
+  // For universal binaries, name each VM address space after its architecture
+  // slice (e.g. {0: "x86_64", 1: "arm64"}).  Single-arch binaries have one
+  // address space and need no names.
+  std::map<int, std::string> GetArchNames() const override {
+    std::map<int, std::string> names;
+    if (ReadMagic(file_data().data()) != FAT_CIGAM) {
+      return names;
+    }
+    string_view header_data = file_data().data();
+    auto header = GetStructPointerAndAdvance<fat_header>(&header_data);
+    uint32_t nfat_arch = ByteSwap(header->nfat_arch);
+    for (uint32_t i = 0; i < nfat_arch; i++) {
+      auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
+      names[i] = CpuTypeToString(ByteSwap(arch->cputype),
+                                 ByteSwap(arch->cpusubtype));
+    }
+    return names;
   }
 
   void ProcessFile(const std::vector<RangeSink*>& sinks) const override {
@@ -735,12 +764,14 @@ class MachOObjectFile : public ObjectFile {
         std::string arch_name = CpuTypeToString(cputype, cpusubtype);
         string_view slice_data = StrictSubstr(file_data().data(), offset, size);
 
+        sink->set_arch_index(i);
         sink->AddFileRange("archs", arch_name, slice_data);
       }
     } else {
       auto header = GetStructPointer<mach_header>(file_data().data());
       std::string arch_name = CpuTypeToString(header->cputype, header->cpusubtype);
 
+      sink->set_arch_index(0);
       sink->AddFileRange("archs", arch_name, file_data().data());
     }
   }

@@ -20,12 +20,14 @@
 #define BLOATY_H_
 
 #include <stdlib.h>
+#include <cassert>
 #define __STDC_LIMIT_MACROS
 #define __STDC_FORMAT_MACROS
 #include <stdint.h>
 #include <inttypes.h>
 
 #include <list>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -127,6 +129,8 @@ public:
   DataSource data_source() const { return data_source_; }
   const InputFile &input_file() const { return *file_; }
   bool IsBaseMap() const { return translator_ == nullptr; }
+  int arch_index() const { return arch_index_; }
+  void set_arch_index(int arch_index) { arch_index_ = arch_index; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
@@ -239,6 +243,7 @@ public:
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
   google::protobuf::Arena *arena_;
+  int arch_index_ = 0;
 };
 
 // NameMunger //////////////////////////////////////////////////////////////////
@@ -329,6 +334,11 @@ class ObjectFile {
   // given here, otherwise it is |this|.
   virtual void ProcessFile(const std::vector<RangeSink*>& sinks) const = 0;
 
+  // Optionally return human-readable names keyed by arch index, e.g.
+  // {0: "x86_64", 1: "arm64"}.  Only meaningful for formats with multiple VM
+  // address spaces, such as Mach-O universal binaries.
+  virtual std::map<int, std::string> GetArchNames() const { return {}; }
+
   virtual bool GetDisassemblyInfo(std::string_view symbol,
                                   DataSource symbol_source,
                                   DisassemblyInfo* info) const = 0;
@@ -376,11 +386,44 @@ std::string ItaniumDemangle(std::string_view symbol, DataSource source);
 
 // DualMap /////////////////////////////////////////////////////////////////////
 
-// Contains a RangeMap for VM space and file space for a given file.
+// Contains RangeMaps for VM space and file space for a given file.
+// For universal binaries, each architecture slice has its own VM address space
+// (keyed by arch_index). File offsets are shared across all arches and use a
+// single RangeMap. For single-arch binaries, only arch_index 0 is used.
 
 struct DualMap {
-  RangeMap vm_map;
+  RangeMap& GetVMMap(int arch_index) { return vm_maps_[arch_index]; }
+  const RangeMap& GetVMMap(int arch_index) const {
+    auto it = vm_maps_.find(arch_index);
+    if (it == vm_maps_.end()) {
+      static const RangeMap empty;
+      return empty;
+    }
+    return it->second;
+  }
+
+  RangeMap& GetFileMap() { return file_map; }
+  const RangeMap& GetFileMap() const { return file_map; }
+
+  bool HasVMMap(int arch_index) const {
+    return vm_maps_.find(arch_index) != vm_maps_.end();
+  }
+
+  std::vector<int> VMArchIndices() const {
+    std::vector<int> ids;
+    for (const auto& kv : vm_maps_) {
+      ids.push_back(kv.first);
+    }
+    return ids;
+  }
+
+  RangeMap& vm_map() { return GetVMMap(0); }
+  const RangeMap& vm_map() const { return GetVMMap(0); }
+
   RangeMap file_map;
+
+ private:
+  std::map<int, RangeMap> vm_maps_;
 };
 
 struct DisassemblyInfo {
