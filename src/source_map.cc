@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "source_map.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -20,7 +22,6 @@
 #include <vector>
 
 #include "bloaty.h"
-#include "source_map.h"
 #include "util.h"
 
 namespace bloaty {
@@ -71,9 +72,8 @@ static int32_t ReadBase64VLQ(std::string_view* data) {
       uint32_t digit = ch < 'a' ? ch - 'A' : ch - 'a' + 26;
       value |= digit << shift;
       data->remove_prefix(ptr - data->data());
-      return value & 1
-          ? -static_cast<int32_t>(value >> 1)
-          : static_cast<int32_t>(value >> 1);
+      return value & 1 ? -static_cast<int32_t>(value >> 1)
+                       : static_cast<int32_t>(value >> 1);
     }
     if (!(ch >= 'g' && ch <= 'z') && !(ch >= '0' && ch <= '9') && ch != '+' &&
         ch != '/') {
@@ -81,8 +81,9 @@ static int32_t ReadBase64VLQ(std::string_view* data) {
     }
     // Base64 characters g-z, 0-9, + and / have the continuation bit set and
     // must be followed by another digit.
-    uint32_t digit =
-      ch > '9' ? ch - 'g' : (ch >= '0' ? ch - '0' + 20 : (ch == '+' ? 30 : 31));
+    uint32_t digit = ch > '9'
+                         ? ch - 'g'
+                         : (ch >= '0' ? ch - '0' + 20 : (ch == '+' ? 30 : 31));
     value |= digit << shift;
     shift += 5;
   }
@@ -117,17 +118,18 @@ class VlqSegment {
   int32_t source_line;
   int32_t source_col;
 
-  VlqSegment(int32_t col, int32_t length,
-             std::string_view source_file,
+  VlqSegment(int32_t col, int32_t length, std::string_view source_file,
              int32_t source_line, int32_t source_col)
-      : col(col), length(length),
+      : col(col),
+        length(length),
         source_file(source_file),
-        source_line(source_line), source_col(source_col) {}
+        source_line(source_line),
+        source_col(source_col) {}
 
   void addToSink(RangeSink* sink) const {
     auto name = sink->data_source() == DataSource::kInlines
-        ? source_file + ":" + std::to_string(source_line)
-        : source_file;
+                    ? source_file + ":" + std::to_string(source_line)
+                    : source_file;
     sink->AddFileRange("sourcemap", name, col, length);
   }
 };
@@ -166,8 +168,8 @@ void ForEachVLQSegment(std::string_view* data,
 
     int new_values_count = ReadBase64VLQSegment(data, values);
     if (values_count >= 4) {
-      segment_func(VlqSegment(col, values[0],
-                              sources[source_file], source_line, source_col));
+      segment_func(VlqSegment(col, values[0], sources[source_file], source_line,
+                              source_col));
     }
     values_count = new_values_count;
     col += values[0];
@@ -214,8 +216,8 @@ static void ProcessToSink(std::string_view data, RangeSink* sink) {
 }
 
 void SourceMapObjectFile::ProcessFileToSink(RangeSink* sink) const {
-  if (sink->data_source() != DataSource::kCompileUnits
-      && sink->data_source() != DataSource::kInlines) {
+  if (sink->data_source() != DataSource::kCompileUnits &&
+      sink->data_source() != DataSource::kInlines) {
     THROW("Source map doesn't support this data source");
   }
 
@@ -236,4 +238,3 @@ std::unique_ptr<ObjectFile> TryOpenSourceMapFile(
 }
 
 }  // namespace bloaty
-

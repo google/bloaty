@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <iostream>
+
 #include "bloaty.h"
 #include "bloaty.pb.h"
 
-#include <iostream>
-
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   bloaty::Options options;
   bloaty::OutputOptions output_options;
   std::string error;

@@ -22,8 +22,8 @@
 #include <stdlib.h>
 #define __STDC_LIMIT_MACROS
 #define __STDC_FORMAT_MACROS
-#include <stdint.h>
 #include <inttypes.h>
+#include <stdint.h>
 
 #include <list>
 #include <memory>
@@ -34,10 +34,9 @@
 #include <vector>
 
 #include "absl/strings/strip.h"
-#include "capstone/capstone.h"
-
-#include "dwarf/debug_info.h"
 #include "bloaty.pb.h"
+#include "capstone/capstone.h"
+#include "dwarf/debug_info.h"
 #include "range_map.h"
 #include "re.h"
 
@@ -112,29 +111,29 @@ class MmapInputFileFactory : public InputFileFactory {
 // A RangeSink allows data sources to assign labels to ranges of VM address
 // space and/or file offsets.
 class RangeSink {
-public:
-  RangeSink(const InputFile *file, const Options &options,
-            DataSource data_source, const DualMap *translator,
-            google::protobuf::Arena *arena);
-  RangeSink(const RangeSink &) = delete;
-  RangeSink &operator=(const RangeSink &) = delete;
+ public:
+  RangeSink(const InputFile* file, const Options& options,
+            DataSource data_source, const DualMap* translator,
+            google::protobuf::Arena* arena);
+  RangeSink(const RangeSink&) = delete;
+  RangeSink& operator=(const RangeSink&) = delete;
   ~RangeSink();
 
-  const Options &options() const { return options_; }
+  const Options& options() const { return options_; }
 
-  void AddOutput(DualMap *map, const NameMunger *munger);
+  void AddOutput(DualMap* map, const NameMunger* munger);
 
   DataSource data_source() const { return data_source_; }
-  const InputFile &input_file() const { return *file_; }
+  const InputFile& input_file() const { return *file_; }
   bool IsBaseMap() const { return translator_ == nullptr; }
 
   // If vmsize or filesize is zero, this mapping is presumed not to exist in
   // that domain.  For example, .bss mappings don't exist in the file, and
   // .debug_* mappings don't exist in memory.
-  void AddRange(const char *analyzer, std::string_view name, uint64_t vmaddr,
+  void AddRange(const char* analyzer, std::string_view name, uint64_t vmaddr,
                 uint64_t vmsize, uint64_t fileoff, uint64_t filesize);
 
-  void AddRange(const char *analyzer, std::string_view name, uint64_t vmaddr,
+  void AddRange(const char* analyzer, std::string_view name, uint64_t vmaddr,
                 uint64_t vmsize, std::string_view file_range) {
     AddRange(analyzer, name, vmaddr, vmsize,
              file_range.data() - file_->data().data(), file_range.size());
@@ -207,18 +206,17 @@ public:
   std::string_view TranslateVMToFile(uint64_t address);
   const DualMap* Translator() { return translator_; }
 
-
   // Decompresses zlib-formatted data and returns the decompressed data.
   // Since the decompressed data is not actually part of the file, any
   // Add*Range() calls to this region will be no-ops.
   std::string_view ZlibDecompress(std::string_view contents,
-                                   uint64_t uncompressed_size);
+                                  uint64_t uncompressed_size);
 
   // Decompresses zstd-formatted data and returns the decompressed data.
   // Since the decompressed data is not actually part of the file, any
   // Add*Range() calls to this region will be no-ops.
   std::string_view ZstdDecompress(std::string_view contents,
-                                   uint64_t uncompressed_size);
+                                  uint64_t uncompressed_size);
 
   static constexpr uint64_t kUnknownSize = RangeMap::kUnknownSize;
 
@@ -238,7 +236,7 @@ public:
   DataSource data_source_;
   const DualMap* translator_;
   std::vector<std::pair<DualMap*, const NameMunger*>> outputs_;
-  google::protobuf::Arena *arena_;
+  google::protobuf::Arena* arena_;
 };
 
 // NameMunger //////////////////////////////////////////////////////////////////
@@ -351,7 +349,8 @@ class ObjectFile {
 
 std::unique_ptr<ObjectFile> TryOpenELFFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file);
-std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(std::unique_ptr<InputFile>& file);
+std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(
+    std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenPEFile(std::unique_ptr<InputFile>& file);
 std::unique_ptr<ObjectFile> TryOpenSourceMapFile(
     std::unique_ptr<InputFile>& file, std::string build_id);
@@ -372,7 +371,6 @@ void ReadEhFrameHdr(std::string_view contents, RangeSink* sink, bool is_64bit);
 // Demangle C++ symbols according to the Itanium ABI.  The |source| argument
 // controls what demangling mode we are using.
 std::string ItaniumDemangle(std::string_view symbol, DataSource source);
-
 
 // DualMap /////////////////////////////////////////////////////////////////////
 
@@ -419,7 +417,7 @@ struct RollupRow {
 
   // The size of the base in a diff mode. Otherwise stay 0.
   DomainSizes old_size = {0, 0};
-  
+
   std::vector<RollupRow> sorted_children;
 
   static bool Compare(const RollupRow& a, const RollupRow& b) {
@@ -491,11 +489,11 @@ struct RollupOutput {
   void PrettyPrintTree(const RollupRow& row, size_t indent,
                        const OutputOptions& options, std::ostream* out) const;
   void PrintRowToCSV(const RollupRow& row,
-                     std::vector<std::string> parent_labels,
-                     std::ostream* out, bool tabs, bool csvDiff) const;
+                     std::vector<std::string> parent_labels, std::ostream* out,
+                     bool tabs, bool csvDiff) const;
   void PrintTreeToCSV(const RollupRow& row,
-                      std::vector<std::string> parent_labels,
-                      std::ostream* out, bool tabs, bool csvDiff) const;
+                      std::vector<std::string> parent_labels, std::ostream* out,
+                      bool tabs, bool csvDiff) const;
 };
 
 bool ParseOptions(bool skip_unknown, int* argc, char** argv[], Options* options,

@@ -27,10 +27,11 @@ class CU;
 
 class AttrValue {
  public:
-  static AttrValue ParseAttr(const CU& cu, uint16_t form, std::string_view* data);
+  static AttrValue ParseAttr(const CU& cu, uint16_t form,
+                             std::string_view* data);
 
-  AttrValue(const AttrValue &) = default;
-  AttrValue &operator=(const AttrValue &) = default;
+  AttrValue(const AttrValue&) = default;
+  AttrValue& operator=(const AttrValue&) = default;
 
   uint16_t form() const { return form_; }
 
@@ -64,32 +65,28 @@ class AttrValue {
   // $ dwarfdump -i bloaty
   //   COMPILE_UNIT<header overall offset = 0x00000000>:
   // < 0><0x0000000c>  DW_TAG_compile_unit
-  //                     DW_AT_producer              (indexed string: 0x00000000)Debian clang version 11.0.1-2
-  //                     DW_AT_language              DW_LANG_C_plus_plus_14
-  //                     DW_AT_name                  (indexed string: 0x00000001)../src/main.cc
-  //                     DW_AT_str_offsets_base      0x00000008
+  //                     DW_AT_producer              (indexed string:
+  //                     0x00000000)Debian clang version 11.0.1-2 DW_AT_language
+  //                     DW_LANG_C_plus_plus_14 DW_AT_name (indexed string:
+  //                     0x00000001)../src/main.cc DW_AT_str_offsets_base
+  //                     0x00000008
   //
   // Note that DW_AT_name comes before DW_AT_str_offset_base, but the latter
   // value is required to resolve the name attribute.
-  enum class Type {
-    kUint,
-    kString,
-    kUnresolvedUint,
-    kUnresolvedString
-  };
+  enum class Type { kUint, kString, kUnresolvedUint, kUnresolvedString };
 
   Type type() const { return type_; }
 
   static AttrValue UnresolvedUint(uint16_t form, uint64_t val) {
-     AttrValue ret(form, val);
-     ret.type_ = Type::kUnresolvedUint;
-     return ret;
+    AttrValue ret(form, val);
+    ret.type_ = Type::kUnresolvedUint;
+    return ret;
   }
 
   static AttrValue UnresolvedString(uint16_t form, uint64_t val) {
-     AttrValue ret(form, val);
-     ret.type_ = Type::kUnresolvedString;
-     return ret;
+    AttrValue ret(form, val);
+    ret.type_ = Type::kUnresolvedString;
+    return ret;
   }
 
   union {
@@ -105,14 +102,14 @@ class AttrValue {
   static std::string_view ReadVariableBlock(std::string_view* data);
   template <class D>
   static std::string_view ReadIndirectString(const CU& cu,
-                                              std::string_view* data);
+                                             std::string_view* data);
   static std::string_view ResolveIndirectString(const CU& cu, uint64_t ofs);
   template <class D>
   static std::string_view ReadIndirectLineString(const CU& cu,
-                                              std::string_view* data);
+                                                 std::string_view* data);
   static std::string_view ResolveIndirectLineString(const CU& cu, uint64_t ofs);
 
-  std::string_view ResolveDoubleIndirectString(const CU &cu) const;
+  std::string_view ResolveDoubleIndirectString(const CU& cu) const;
   uint64_t ResolveIndirectAddress(const CU& cu) const;
 };
 

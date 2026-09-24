@@ -71,45 +71,44 @@ TEST_F(BloatyTest, SimpleObjectFile) {
 
   // For inputfiles we should get everything attributed to the input file.
   RunBloaty({"bloaty", "-d", "inputfiles", file});
-  AssertChildren(*top_row_, {
-    std::make_tuple("02-simple.o", kUnknown, kUnknown)
-  });
+  AssertChildren(*top_row_,
+                 {std::make_tuple("02-simple.o", kUnknown, kUnknown)});
 
   // For symbols we should get entries for all our expected symbols.
   RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
   AssertChildren(*top_row_, {
-    std::make_tuple("func1", kUnknown, kSameAsVM),
-    std::make_tuple("func2", kUnknown, kSameAsVM),
-    std::make_tuple("bss_a", 8, 0),
-    std::make_tuple("data_a", 8, 8),
-    std::make_tuple("rodata_a", 8, 8),
-    std::make_tuple("bss_b", 4, 0),
-    std::make_tuple("data_b", 4, 4),
-    std::make_tuple("rodata_b", 4, 4),
-  });
+                                std::make_tuple("func1", kUnknown, kSameAsVM),
+                                std::make_tuple("func2", kUnknown, kSameAsVM),
+                                std::make_tuple("bss_a", 8, 0),
+                                std::make_tuple("data_a", 8, 8),
+                                std::make_tuple("rodata_a", 8, 8),
+                                std::make_tuple("bss_b", 4, 0),
+                                std::make_tuple("data_b", 4, 4),
+                                std::make_tuple("rodata_b", 4, 4),
+                            });
 
   RunBloaty({"bloaty", "-d", "sections,symbols", "-n", "50", file});
 
   auto row = FindRow(".bss");
   ASSERT_TRUE(row != nullptr);
   AssertChildren(*row, {
-    std::make_tuple("bss_a", 8, 0),
-    std::make_tuple("bss_b", 4, 0),
-  });
+                           std::make_tuple("bss_a", 8, 0),
+                           std::make_tuple("bss_b", 4, 0),
+                       });
 
   row = FindRow(".data");
   ASSERT_TRUE(row != nullptr);
   AssertChildren(*row, {
-    std::make_tuple("data_a", 8, 8),
-    std::make_tuple("data_b", 4, 4),
-  });
+                           std::make_tuple("data_a", 8, 8),
+                           std::make_tuple("data_b", 4, 4),
+                       });
 
   row = FindRow(".rodata");
   ASSERT_TRUE(row != nullptr);
   AssertChildren(*row, {
-    std::make_tuple("rodata_a", 8, 8),
-    std::make_tuple("rodata_b", 4, 4),
-  });
+                           std::make_tuple("rodata_a", 8, 8),
+                           std::make_tuple("rodata_b", 4, 4),
+                       });
 }
 
 TEST_F(BloatyTest, SimpleArchiveFile) {
@@ -120,26 +119,27 @@ TEST_F(BloatyTest, SimpleArchiveFile) {
   RunBloaty({"bloaty", file});
   EXPECT_GT(top_row_->size.vm, 8000);
   EXPECT_LT(top_row_->size.vm, 12000);
-  //EXPECT_EQ(top_row_->size.file, size);
+  // EXPECT_EQ(top_row_->size.file, size);
   EXPECT_GT(top_row_->sorted_children.size(), 3);
 
   RunBloaty({"bloaty", "-d", "segments", file});
   EXPECT_GT(top_row_->size.vm, 8000);
   EXPECT_LT(top_row_->size.vm, 12000);
-  //EXPECT_EQ(top_row_->size.file, size);
+  // EXPECT_EQ(top_row_->size.file, size);
 
   RunBloaty({"bloaty", "-d", "symbols", "-n", "40", "-s", "vm", file});
-  AssertChildren(*top_row_, {
-    std::make_tuple("bar_x", 4000, 4000),
-    std::make_tuple("foo_x", 4000, 0),
-    std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    std::make_tuple("long_filename_x", 12, 12),
-    std::make_tuple("bar_y", 4, 4),
-    std::make_tuple("bar_z", 4, 0),
-    std::make_tuple("foo_y", 4, 0),
-    std::make_tuple("long_filename_y", 4, 4),
-  });
+  AssertChildren(*top_row_,
+                 {
+                     std::make_tuple("bar_x", 4000, 4000),
+                     std::make_tuple("foo_x", 4000, 0),
+                     std::make_tuple("bar_func", kUnknown, kSameAsVM),
+                     std::make_tuple("foo_func", kUnknown, kSameAsVM),
+                     std::make_tuple("long_filename_x", 12, 12),
+                     std::make_tuple("bar_y", 4, 4),
+                     std::make_tuple("bar_z", 4, 0),
+                     std::make_tuple("foo_y", 4, 0),
+                     std::make_tuple("long_filename_y", 4, 4),
+                 });
 
   RunBloaty({"bloaty", "-d", "armembers,symbols", file});
   AssertChildren(*top_row_,
@@ -153,26 +153,26 @@ TEST_F(BloatyTest, SimpleArchiveFile) {
   auto row = FindRow("bar.o");
   ASSERT_TRUE(row != nullptr);
   AssertChildren(*row, {
-    std::make_tuple("bar_x", 4000, 4000),
-    std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    std::make_tuple("bar_y", 4, 4),
-    std::make_tuple("bar_z", 4, 0),
-  });
+                           std::make_tuple("bar_x", 4000, 4000),
+                           std::make_tuple("bar_func", kUnknown, kSameAsVM),
+                           std::make_tuple("bar_y", 4, 4),
+                           std::make_tuple("bar_z", 4, 0),
+                       });
 
   row = FindRow("foo.o");
   ASSERT_TRUE(row != nullptr);
   AssertChildren(*row, {
-    std::make_tuple("foo_x", 4000, 0),
-    std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    std::make_tuple("foo_y", 4, 0),
-  });
+                           std::make_tuple("foo_x", 4000, 0),
+                           std::make_tuple("foo_func", kUnknown, kSameAsVM),
+                           std::make_tuple("foo_y", 4, 0),
+                       });
 
   row = FindRow("a_filename_longer_than_sixteen_chars.o");
   ASSERT_TRUE(row != nullptr);
   AssertChildren(*row, {
-    std::make_tuple("long_filename_x", 12, 12),
-    std::make_tuple("long_filename_y", 4, 4),
-  });
+                           std::make_tuple("long_filename_x", 12, 12),
+                           std::make_tuple("long_filename_y", 4, 4),
+                       });
 }
 
 TEST_F(BloatyTest, SimpleSharedObjectFile) {
@@ -192,12 +192,13 @@ TEST_F(BloatyTest, SimpleSharedObjectFile) {
   EXPECT_EQ(top_row_->size.file, size);
 
   RunBloaty({"bloaty", "-d", "symbols", "-n", "50", file});
-  AssertChildren(*top_row_, {
-    std::make_tuple("bar_x", 4000, 4000),
-    std::make_tuple("foo_x", 4000, kUnknown),
-    std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    std::make_tuple("foo_func", kUnknown, kSameAsVM),
-  });
+  AssertChildren(*top_row_,
+                 {
+                     std::make_tuple("bar_x", 4000, 4000),
+                     std::make_tuple("foo_x", 4000, kUnknown),
+                     std::make_tuple("bar_func", kUnknown, kSameAsVM),
+                     std::make_tuple("foo_func", kUnknown, kSameAsVM),
+                 });
 }
 
 TEST_F(BloatyTest, SimpleBinary) {
@@ -217,16 +218,14 @@ TEST_F(BloatyTest, SimpleBinary) {
   EXPECT_EQ(top_row_->size.file, size);
 
   RunBloaty({"bloaty", "-d", "symbols", "-n", "50", "-s", "vm", file});
-  AssertChildren(*top_row_, {
-    std::make_tuple("bar_x", 4000, 4000),
-    std::make_tuple("foo_x", 4000, 0),
-    std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    std::make_tuple("main", kUnknown, kSameAsVM),
-    std::make_tuple("bar_y", 4, 4),
-    std::make_tuple("bar_z", 4, 0),
-    std::make_tuple("foo_y", 4, 0)
-  });
+  AssertChildren(
+      *top_row_,
+      {std::make_tuple("bar_x", 4000, 4000), std::make_tuple("foo_x", 4000, 0),
+       std::make_tuple("bar_func", kUnknown, kSameAsVM),
+       std::make_tuple("foo_func", kUnknown, kSameAsVM),
+       std::make_tuple("main", kUnknown, kSameAsVM),
+       std::make_tuple("bar_y", 4, 4), std::make_tuple("bar_z", 4, 0),
+       std::make_tuple("foo_y", 4, 0)});
 
   RunBloaty({"bloaty", "-d", "compileunits,symbols", file});
   auto row = FindRow("bar.o.c");
@@ -234,21 +233,21 @@ TEST_F(BloatyTest, SimpleBinary) {
 
   // This only includes functions (not data) for now.
   AssertChildren(*row, {
-    std::make_tuple("bar_x", 4000, kSameAsVM),
-    std::make_tuple("bar_func", kUnknown, kSameAsVM),
-    std::make_tuple("bar_y", kUnknown, kSameAsVM),
-    std::make_tuple("bar_z", kUnknown, kSameAsVM),
-  });
+                           std::make_tuple("bar_x", 4000, kSameAsVM),
+                           std::make_tuple("bar_func", kUnknown, kSameAsVM),
+                           std::make_tuple("bar_y", kUnknown, kSameAsVM),
+                           std::make_tuple("bar_z", kUnknown, kSameAsVM),
+                       });
 
   row = FindRow("foo.o.c");
   ASSERT_TRUE(row != nullptr);
 
   // This only includes functions (not data) for now.
   AssertChildren(*row, {
-    std::make_tuple("foo_x", 4000, 0),
-    std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    std::make_tuple("foo_y", kUnknown, kSameAsVM),
-  });
+                           std::make_tuple("foo_x", 4000, 0),
+                           std::make_tuple("foo_func", kUnknown, kSameAsVM),
+                           std::make_tuple("foo_y", kUnknown, kSameAsVM),
+                       });
 
   RunBloaty({"bloaty", "-d", "sections,inlines", file});
 }
@@ -278,7 +277,8 @@ TEST_F(BloatyTest, InputFiles) {
       }
     }
     data_source: "rewritten_inputfiles"
-  )", &options);
+  )",
+                                                &options);
 
   RunBloatyWithOptions(options, bloaty::OutputOptions());
   AssertChildren(*top_row_, {std::make_tuple("binary", kUnknown,
@@ -287,10 +287,8 @@ TEST_F(BloatyTest, InputFiles) {
 
 TEST_F(BloatyTest, DiffMode) {
   RunBloaty({"bloaty", "06-diff.a", "--", "03-simple.a", "-d", "symbols"});
-  AssertChildren(*top_row_, {
-    std::make_tuple("foo_func", kUnknown, kSameAsVM),
-    std::make_tuple("foo_y", 4, 0)
-  });
+  AssertChildren(*top_row_, {std::make_tuple("foo_func", kUnknown, kSameAsVM),
+                             std::make_tuple("foo_y", 4, 0)});
 }
 
 TEST_F(BloatyTest, SeparateDebug) {

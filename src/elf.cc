@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "third_party/freebsd_elf/elf.h"
+
+#include <assert.h>
+#include <limits.h>
+#include <stdlib.h>
+
 #include <algorithm>
 #include <iostream>
 #include <string>
@@ -20,13 +26,8 @@
 #include "absl/numeric/int128.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/substitute.h"
-#include "third_party/freebsd_elf/elf.h"
 #include "bloaty.h"
 #include "util.h"
-
-#include <assert.h>
-#include <limits.h>
-#include <stdlib.h>
 
 using std::string_view;
 
@@ -47,7 +48,9 @@ struct ByteSwapFunc {
 
 struct NullFunc {
   template <class T>
-  T operator()(T val) { return val; }
+  T operator()(T val) {
+    return val;
+  }
 };
 
 size_t StringViewToSize(string_view str) {
@@ -63,11 +66,7 @@ void AdvancePastStruct(string_view* data) {
   *data = data->substr(sizeof(T));
 }
 
-enum class SectionCompressionType {
-  Zlib,
-  Zstd,
-  None
-};
+enum class SectionCompressionType { Zlib, Zstd, None };
 
 // ElfFile /////////////////////////////////////////////////////////////////////
 
@@ -75,9 +74,7 @@ enum class SectionCompressionType {
 
 class ElfFile {
  public:
-  ElfFile(string_view data) : data_(data) {
-    ok_ = Initialize();
-  }
+  ElfFile(string_view data) : data_(data) { ok_ = Initialize(); }
 
   bool IsOpen() { return ok_; }
 
@@ -213,8 +210,7 @@ class ElfFile {
     string_view data_;
 
     template <class T32, class T64, class Munger>
-    void ReadFallback(uint64_t offset, std::string_view* range,
-                      T64* out) const;
+    void ReadFallback(uint64_t offset, std::string_view* range, T64* out) const;
 
     template <class T>
     void Memcpy(uint64_t offset, std::string_view* out_range, T* out) const {
@@ -254,61 +250,61 @@ struct EhdrMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Ehdr* to, Func func) {
     memmove(&to->e_ident[0], &from.e_ident[0], EI_NIDENT);
-    to->e_type       = func(from.e_type);
-    to->e_machine    = func(from.e_machine);
-    to->e_version    = func(from.e_version);
-    to->e_entry      = func(from.e_entry);
-    to->e_phoff      = func(from.e_phoff);
-    to->e_shoff      = func(from.e_shoff);
-    to->e_flags      = func(from.e_flags);
-    to->e_ehsize     = func(from.e_ehsize);
-    to->e_phentsize  = func(from.e_phentsize);
-    to->e_phnum      = func(from.e_phnum);
-    to->e_shentsize  = func(from.e_shentsize);
-    to->e_shnum      = func(from.e_shnum);
-    to->e_shstrndx   = func(from.e_shstrndx);
+    to->e_type = func(from.e_type);
+    to->e_machine = func(from.e_machine);
+    to->e_version = func(from.e_version);
+    to->e_entry = func(from.e_entry);
+    to->e_phoff = func(from.e_phoff);
+    to->e_shoff = func(from.e_shoff);
+    to->e_flags = func(from.e_flags);
+    to->e_ehsize = func(from.e_ehsize);
+    to->e_phentsize = func(from.e_phentsize);
+    to->e_phnum = func(from.e_phnum);
+    to->e_shentsize = func(from.e_shentsize);
+    to->e_shnum = func(from.e_shnum);
+    to->e_shstrndx = func(from.e_shstrndx);
   }
 };
 
 struct ShdrMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Shdr* to, Func func) {
-    to->sh_name       = func(from.sh_name);
-    to->sh_type       = func(from.sh_type);
-    to->sh_flags      = func(from.sh_flags);
-    to->sh_addr       = func(from.sh_addr);
-    to->sh_offset     = func(from.sh_offset);
-    to->sh_size       = func(from.sh_size);
-    to->sh_link       = func(from.sh_link);
-    to->sh_info       = func(from.sh_info);
-    to->sh_addralign  = func(from.sh_addralign);
-    to->sh_entsize    = func(from.sh_entsize);
+    to->sh_name = func(from.sh_name);
+    to->sh_type = func(from.sh_type);
+    to->sh_flags = func(from.sh_flags);
+    to->sh_addr = func(from.sh_addr);
+    to->sh_offset = func(from.sh_offset);
+    to->sh_size = func(from.sh_size);
+    to->sh_link = func(from.sh_link);
+    to->sh_info = func(from.sh_info);
+    to->sh_addralign = func(from.sh_addralign);
+    to->sh_entsize = func(from.sh_entsize);
   }
 };
 
 struct PhdrMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Phdr* to, Func func) {
-    to->p_type   = func(from.p_type);
-    to->p_flags  = func(from.p_flags);
+    to->p_type = func(from.p_type);
+    to->p_flags = func(from.p_flags);
     to->p_offset = func(from.p_offset);
-    to->p_vaddr  = func(from.p_vaddr);
-    to->p_paddr  = func(from.p_paddr);
+    to->p_vaddr = func(from.p_vaddr);
+    to->p_paddr = func(from.p_paddr);
     to->p_filesz = func(from.p_filesz);
-    to->p_memsz  = func(from.p_memsz);
-    to->p_align  = func(from.p_align);
+    to->p_memsz = func(from.p_memsz);
+    to->p_align = func(from.p_align);
   }
 };
 
 struct SymMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Sym* to, Func func) {
-    to->st_name   = func(from.st_name);
-    to->st_info   = func(from.st_info);
-    to->st_other  = func(from.st_other);
-    to->st_shndx  = func(from.st_shndx);
-    to->st_value  = func(from.st_value);
-    to->st_size   = func(from.st_size);
+    to->st_name = func(from.st_name);
+    to->st_info = func(from.st_info);
+    to->st_other = func(from.st_other);
+    to->st_shndx = func(from.st_shndx);
+    to->st_value = func(from.st_value);
+    to->st_size = func(from.st_size);
   }
 };
 
@@ -316,7 +312,7 @@ struct RelMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Rel* to, Func func) {
     to->r_offset = func(from.r_offset);
-    to->r_info   = func(from.r_info);
+    to->r_info = func(from.r_info);
   }
 };
 
@@ -324,7 +320,7 @@ struct RelaMunger {
   template <class From, class Func>
   void operator()(const From& from, Elf64_Rela* to, Func func) {
     to->r_offset = func(from.r_offset);
-    to->r_info   = func(from.r_info);
+    to->r_info = func(from.r_info);
     to->r_addend = func(from.r_addend);
   }
 };
@@ -334,7 +330,7 @@ struct NoteMunger {
   void operator()(const From& from, Elf64_Nhdr* to, Func func) {
     to->n_namesz = func(from.n_namesz);
     to->n_descsz = func(from.n_descsz);
-    to->n_type   = func(from.n_type);
+    to->n_type = func(from.n_type);
   }
 };
 
@@ -343,7 +339,7 @@ struct ChdrMunger {
   void operator()(const From& from, Elf64_Chdr* to, Func func) {
     to->ch_type = func(from.ch_type);
     to->ch_size = func(from.ch_size);
-    to->ch_addralign   = func(from.ch_addralign);
+    to->ch_addralign = func(from.ch_addralign);
   }
 };
 
@@ -576,7 +572,6 @@ bool ElfFile::FindSectionByName(std::string_view name, Section* section) const {
   }
   return false;
 }
-
 
 // ArFile //////////////////////////////////////////////////////////////////////
 
@@ -842,7 +837,8 @@ static bool ElfMachineToCapstone(Elf64_Half e_machine, cs_arch* arch,
   }
 }
 
-static bool ReadElfArchMode(const InputFile& file, cs_arch* arch, cs_mode* mode) {
+static bool ReadElfArchMode(const InputFile& file, cs_arch* arch,
+                            cs_mode* mode) {
   bool capstone_available = true;
   ForEachElf(file, nullptr,
              [&capstone_available, arch, mode](const ElfFile& elf,
@@ -948,13 +944,15 @@ static void ReadELFSymbols(const InputFile& file, RangeSink* sink,
               if (verbose_level > 1) {
                 printf("Disassembling function: %s\n", name.data());
               }
-              // TODO(brandonvu) Continue if VM pointer cannot be translated. Issue #315
+              // TODO(brandonvu) Continue if VM pointer cannot be translated.
+              // Issue #315
               uint64_t unused;
               if (!sink->Translator()->vm_map.Translate(full_addr, &unused)) {
                 WARN("Can't translate VM pointer ($0) to file", full_addr);
                 continue;
               }
-              infop->text = sink->TranslateVMToFile(full_addr).substr(0, sym.st_size);
+              infop->text =
+                  sink->TranslateVMToFile(full_addr).substr(0, sym.st_size);
               infop->start_address = full_addr;
               DisassembleFindReferences(*infop, sink);
             }
@@ -1072,7 +1070,8 @@ enum ReportSectionsBy {
   kReportByArchiveMember,
 };
 
-static void DoReadELFSections(RangeSink* sink, enum ReportSectionsBy report_by) {
+static void DoReadELFSections(RangeSink* sink,
+                              enum ReportSectionsBy report_by) {
   bool is_object = IsObjectFile(sink->input_file().data());
   ForEachElf(
       sink->input_file(), sink,
@@ -1232,8 +1231,8 @@ static void ReadELFSegments(RangeSink* sink) {
 // reader directly on them.  At the moment we don't attempt to make these
 // work with object files.
 
-void ReadDWARFSections(const InputFile &file, dwarf::File *dwarf,
-                       RangeSink *sink) {
+void ReadDWARFSections(const InputFile& file, dwarf::File* dwarf,
+                       RangeSink* sink) {
   ElfFile elf(file.data());
   assert(elf.IsOpen());
   dwarf->file = &file;
@@ -1320,7 +1319,6 @@ void AddCatchAll(RangeSink* sink) {
   }
   DoReadELFSegments(sink, kReportByEscapedSegmentName);
 
-
   // The last-line fallback to make sure we cover the entire file.
   sink->AddFileRange("elf_catchall", "[Unmapped]", sink->input_file().data());
 }
@@ -1381,8 +1379,7 @@ class ElfObjectFile : public ObjectFile {
           SymbolTable symtab;
           DualMap symbol_map;
           NameMunger empty_munger;
-          RangeSink symbol_sink(&debug_file().file_data(),
-                                sink->options(),
+          RangeSink symbol_sink(&debug_file().file_data(), sink->options(),
                                 DataSource::kRawSymbols,
                                 &sinks[0]->MapAtIndex(0), nullptr);
           symbol_sink.AddOutput(&symbol_map, &empty_munger);

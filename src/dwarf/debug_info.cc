@@ -13,8 +13,9 @@
 // limitations under the License.
 
 #include "dwarf/debug_info.h"
-#include "dwarf_constants.h"
+
 #include "dwarf/dwarf_util.h"
+#include "dwarf_constants.h"
 
 using namespace dwarf2reader;
 
@@ -158,7 +159,8 @@ void CU::ReadHeader(string_view entire_unit, string_view data,
       case DW_UT_partial:
         break;
       default:
-        fprintf(stderr, "warning: Unknown DWARF Unit Type in user defined range\n");
+        fprintf(stderr,
+                "warning: Unknown DWARF Unit Type in user defined range\n");
         break;
     }
 

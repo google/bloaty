@@ -43,13 +43,11 @@ void SkipLEB128(std::string_view* data);
 
 bool IsValidDwarfAddress(uint64_t addr, uint8_t address_size);
 
-inline int DivRoundUp(int n, int d) {
-  return (n + (d - 1)) / d;
-}
+inline int DivRoundUp(int n, int d) { return (n + (d - 1)) / d; }
 
 std::string_view ReadDebugStrEntry(std::string_view section, size_t ofs);
 
-}  // namepsace dwarf
-}  // namepsace bloaty
+}  // namespace dwarf
+}  // namespace bloaty
 
 #endif  // BLOATY_DWARF_UTIL_H_

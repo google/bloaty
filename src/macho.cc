@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <iostream>
-#include "string.h"
-#include "bloaty.h"
-#include "util.h"
-
 #include <cassert>
+#include <iostream>
 #include <string_view>
 
-#include "absl/strings/str_join.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/substitute.h"
-#include "third_party/darwin_xnu_macho/mach/machine.h"
-#include "third_party/darwin_xnu_macho/mach-o/loader.h"
+#include "bloaty.h"
+#include "string.h"
 #include "third_party/darwin_xnu_macho/mach-o/fat.h"
+#include "third_party/darwin_xnu_macho/mach-o/loader.h"
 #include "third_party/darwin_xnu_macho/mach-o/nlist.h"
 #include "third_party/darwin_xnu_macho/mach-o/reloc.h"
+#include "third_party/darwin_xnu_macho/mach/machine.h"
+#include "util.h"
 
 using std::string_view;
 
@@ -72,7 +71,8 @@ void MaybeAddOverhead(RangeSink* sink, const char* label, string_view data) {
 }
 
 // ARM64E capability field constants
-static constexpr uint32_t ARM64E_SUBTYPE_MASK = 0x00FFFFFF;  // Low 24 bits: subtype proper
+static constexpr uint32_t ARM64E_SUBTYPE_MASK =
+    0x00FFFFFF;  // Low 24 bits: subtype proper
 
 static bool IsArm64eSubtype(uint32_t cpusubtype) {
   uint32_t subtype_proper = cpusubtype & ARM64E_SUBTYPE_MASK;
@@ -130,18 +130,21 @@ struct LoadCommand {
 };
 
 template <class Struct>
-bool Is64Bit() { return false; }
+bool Is64Bit() {
+  return false;
+}
 
 template <>
-bool Is64Bit<mach_header_64>() { return true; }
+bool Is64Bit<mach_header_64>() {
+  return true;
+}
 
 template <class Struct, class Func>
 void ParseMachOHeaderImpl(string_view macho_data, RangeSink* overhead_sink,
                           Func&& loadcmd_func) {
   string_view header_data = macho_data;
   auto header = GetStructPointerAndAdvance<Struct>(&header_data);
-  MaybeAddOverhead(overhead_sink,
-                   "[Mach-O Headers]",
+  MaybeAddOverhead(overhead_sink, "[Mach-O Headers]",
                    macho_data.substr(0, sizeof(Struct)));
   uint32_t ncmds = header->ncmds;
 
@@ -188,8 +191,8 @@ void ParseMachOHeader(string_view macho_file, RangeSink* overhead_sink,
                                         std::forward<Func>(loadcmd_func));
       break;
     case MH_MAGIC_64:
-      ParseMachOHeaderImpl<mach_header_64>(
-          macho_file, overhead_sink, std::forward<Func>(loadcmd_func));
+      ParseMachOHeaderImpl<mach_header_64>(macho_file, overhead_sink,
+                                           std::forward<Func>(loadcmd_func));
       break;
     case MH_CIGAM:
     case MH_CIGAM_64:
@@ -228,8 +231,8 @@ void ParseFatHeader(string_view fat_file, RangeSink* overhead_sink,
 
   for (uint32_t i = 0; i < nfat_arch; i++) {
     auto arch = GetStructPointerAndAdvance<fat_arch>(&header_data);
-    string_view macho_data = StrictSubstr(
-        fat_file, ByteSwap(arch->offset), ByteSwap(arch->size));
+    string_view macho_data =
+        StrictSubstr(fat_file, ByteSwap(arch->offset), ByteSwap(arch->size));
     ParseMachOHeader(macho_data, overhead_sink,
                      std::forward<Func>(loadcmd_func));
   }
@@ -506,8 +509,8 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
     THROW("invalid symbol count in symbol table");
   }
 
-  string_view symtab = StrictSubstr(cmd.file_data, symtab_cmd->symoff,
-                                    nsyms * sizeof(NList));
+  string_view symtab =
+      StrictSubstr(cmd.file_data, symtab_cmd->symoff, nsyms * sizeof(NList));
   string_view strtab =
       StrictSubstr(cmd.file_data, symtab_cmd->stroff, symtab_cmd->strsize);
 
@@ -540,45 +543,42 @@ void ParseSymbolsFromSymbolTable(const LoadCommand& cmd, SymbolTable* table,
 }
 
 void ParseSymbols(string_view file_data, SymbolTable* symtab, RangeSink* sink) {
-  ForEachLoadCommand(
-      file_data, sink,
-      [symtab, sink](const LoadCommand& cmd) {
-        switch (cmd.cmd) {
-          case LC_SYMTAB:
-            if (cmd.is64bit) {
-              ParseSymbolsFromSymbolTable<nlist_64>(cmd, symtab, sink);
-            } else {
-              ParseSymbolsFromSymbolTable<struct nlist>(cmd, symtab, sink);
-            }
-            break;
-          case LC_DYSYMTAB:
-            //ParseSymbolsFromDynamicSymbolTable(command_data, file_data, sink);
-            break;
+  ForEachLoadCommand(file_data, sink, [symtab, sink](const LoadCommand& cmd) {
+    switch (cmd.cmd) {
+      case LC_SYMTAB:
+        if (cmd.is64bit) {
+          ParseSymbolsFromSymbolTable<nlist_64>(cmd, symtab, sink);
+        } else {
+          ParseSymbolsFromSymbolTable<struct nlist>(cmd, symtab, sink);
         }
-      });
+        break;
+      case LC_DYSYMTAB:
+        // ParseSymbolsFromDynamicSymbolTable(command_data, file_data, sink);
+        break;
+    }
+  });
 }
 
 static void AddMachOFallback(RangeSink* sink) {
-  ForEachLoadCommand(
-      sink->input_file().data(), sink,
-      [sink](const LoadCommand& cmd) {
-        switch (cmd.cmd) {
-          case LC_SEGMENT_64:
-            AddSegmentAsFallback<segment_command_64, section_64>(
-                cmd.command_data, cmd.file_data, sink);
-            break;
-          case LC_SEGMENT:
-            AddSegmentAsFallback<segment_command, section>(cmd.command_data,
-                                                           cmd.file_data, sink);
-            break;
-        }
-      });
+  ForEachLoadCommand(sink->input_file().data(), sink,
+                     [sink](const LoadCommand& cmd) {
+                       switch (cmd.cmd) {
+                         case LC_SEGMENT_64:
+                           AddSegmentAsFallback<segment_command_64, section_64>(
+                               cmd.command_data, cmd.file_data, sink);
+                           break;
+                         case LC_SEGMENT:
+                           AddSegmentAsFallback<segment_command, section>(
+                               cmd.command_data, cmd.file_data, sink);
+                           break;
+                       }
+                     });
   sink->AddFileRange("macho_fallback", "[Unmapped]", sink->input_file().data());
 }
 
 template <class Segment, class Section>
-void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
-                                  RangeSink *sink) {
+void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File* dwarf,
+                                  RangeSink* sink) {
   auto segment = GetStructPointerAndAdvance<Segment>(&cmd.command_data);
   string_view segname = ArrayToStr(segment->segname, 16);
 
@@ -617,7 +617,7 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
       dwarf->SetFieldByName(sectname, contents);
     } else if (sectname.find("__zdebug_") == 0) {
       sectname.remove_prefix(string_view("__zdebug_").size());
-      string_view *member = dwarf->GetFieldByName(sectname);
+      string_view* member = dwarf->GetFieldByName(sectname);
       if (!member || ReadBytes(4, &contents) != "ZLIB") {
         continue;
       }
@@ -627,21 +627,21 @@ void ReadDebugSectionsFromSegment(LoadCommand cmd, dwarf::File *dwarf,
   }
 }
 
-static void ReadDebugSectionsFromMachO(const InputFile &file,
-                                       dwarf::File *dwarf, RangeSink *sink) {
+static void ReadDebugSectionsFromMachO(const InputFile& file,
+                                       dwarf::File* dwarf, RangeSink* sink) {
   dwarf->file = &file;
   dwarf->open = &ReadDebugSectionsFromMachO;
   ForEachLoadCommand(
-      file.data(), nullptr, [dwarf, sink](const LoadCommand &cmd) {
+      file.data(), nullptr, [dwarf, sink](const LoadCommand& cmd) {
         switch (cmd.cmd) {
-        case LC_SEGMENT_64:
-          ReadDebugSectionsFromSegment<segment_command_64, section_64>(
-              cmd, dwarf, sink);
-          break;
-        case LC_SEGMENT:
-          ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf,
-                                                                 sink);
-          break;
+          case LC_SEGMENT_64:
+            ReadDebugSectionsFromSegment<segment_command_64, section_64>(
+                cmd, dwarf, sink);
+            break;
+          case LC_SEGMENT:
+            ReadDebugSectionsFromSegment<segment_command, section>(cmd, dwarf,
+                                                                   sink);
+            break;
         }
       });
 }
@@ -739,7 +739,8 @@ class MachOObjectFile : public ObjectFile {
       }
     } else {
       auto header = GetStructPointer<mach_header>(file_data().data());
-      std::string arch_name = CpuTypeToString(header->cputype, header->cpusubtype);
+      std::string arch_name =
+          CpuTypeToString(header->cputype, header->cpusubtype);
 
       sink->AddFileRange("archs", arch_name, file_data().data());
     }
@@ -755,7 +756,7 @@ class MachOObjectFile : public ObjectFile {
 
 }  // namespace macho
 
-std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile> &file) {
+std::unique_ptr<ObjectFile> TryOpenMachOFile(std::unique_ptr<InputFile>& file) {
   uint32_t magic = macho::ReadMagic(file->data());
 
   // We only support little-endian host and little endian binaries (see

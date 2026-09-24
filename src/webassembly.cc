@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "absl/strings/substitute.h"
 #include "bloaty.h"
 #include "source_map.h"
 #include "util.h"
-
-#include "absl/strings/substitute.h"
 
 using std::string_view;
 
@@ -67,7 +66,7 @@ int8_t ReadVarint7(string_view* data) {
 }
 
 string_view ReadPiece(size_t bytes, string_view* data) {
-  if(data->size() < bytes) {
+  if (data->size() < bytes) {
     THROW("premature EOF reading variable-length DWARF data");
   }
   string_view ret = data->substr(0, bytes);
@@ -122,39 +121,39 @@ class Section {
   }
 
   enum Name {
-    kType      = 1,
-    kImport    = 2,
-    kFunction  = 3,
-    kTable     = 4,
-    kMemory    = 5,
-    kGlobal    = 6,
-    kExport    = 7,
-    kStart     = 8,
-    kElement   = 9,
-    kCode      = 10,
-    kData      = 11,
+    kType = 1,
+    kImport = 2,
+    kFunction = 3,
+    kTable = 4,
+    kMemory = 5,
+    kGlobal = 6,
+    kExport = 7,
+    kStart = 8,
+    kElement = 9,
+    kCode = 10,
+    kData = 11,
     kDataCount = 12,
-    kEvent     = 13,
+    kEvent = 13,
   };
 
   static const char* names[];
 };
 
 const char* Section::names[] = {
-  "<none>",    // 0
-  "Type",      // 1
-  "Import",    // 2
-  "Function",  // 3
-  "Table",     // 4
-  "Memory",    // 5
-  "Global",    // 6
-  "Export",    // 7
-  "Start",     // 8
-  "Element",   // 9
-  "Code",      // 10
-  "Data",      // 11
-  "DataCount", // 12
-  "Event",     // 13
+    "<none>",     // 0
+    "Type",       // 1
+    "Import",     // 2
+    "Function",   // 3
+    "Table",      // 4
+    "Memory",     // 5
+    "Global",     // 6
+    "Export",     // 7
+    "Start",      // 8
+    "Element",    // 9
+    "Code",       // 10
+    "Data",       // 11
+    "DataCount",  // 12
+    "Event",      // 13
 };
 
 struct ExternalKind {
@@ -229,22 +228,20 @@ void ReadNames(const Section& section, IndexedNames* func_names,
         uint32_t index = ReadVarUInt32(&section);
         uint32_t name_len = ReadVarUInt32(&section);
         string_view name = ReadPiece(name_len, &section);
-        entry = StrictSubstr(entry, 0, name.data() - entry.data() + name.size());
+        entry =
+            StrictSubstr(entry, 0, name.data() - entry.data() + name.size());
         sink->AddFileRange("wasm_funcname", name, entry);
-        IndexedNames *names = (type == NameType::kFunction ? func_names : dataseg_names);
+        IndexedNames* names =
+            (type == NameType::kFunction ? func_names : dataseg_names);
         (*names)[index] = std::string(name);
       }
     }
   }
 }
 
-int ReadValueType(string_view* data) {
-  return ReadVarint7(data);
-}
+int ReadValueType(string_view* data) { return ReadVarint7(data); }
 
-int ReadElemType(string_view* data) {
-  return ReadVarint7(data);
-}
+int ReadElemType(string_view* data) { return ReadVarint7(data); }
 
 void ReadResizableLimits(string_view* data) {
   auto flags = ReadVarUInt1(data);
@@ -264,9 +261,7 @@ void ReadTableType(string_view* data) {
   ReadResizableLimits(data);
 }
 
-void ReadMemoryType(string_view* data) {
-  ReadResizableLimits(data);
-}
+void ReadMemoryType(string_view* data) { ReadResizableLimits(data); }
 
 void ReadTagType(string_view* data) {
   ReadFixed<uint8_t>(data);
@@ -332,7 +327,9 @@ void ReadCodeSection(const Section& section, const IndexedNames& names,
       std::string name = "func[" + std::to_string(i) + "]";
       sink->AddFileRange("wasm_function", name, func);
     } else {
-      sink->AddFileRange("wasm_function", ItaniumDemangle(iter->second, sink->data_source()), func);
+      sink->AddFileRange("wasm_function",
+                         ItaniumDemangle(iter->second, sink->data_source()),
+                         func);
     }
   }
 }
@@ -344,17 +341,17 @@ void SkipInitializerExpression(string_view* data) {
   // decode t.const or global.get
   uint8_t opcode = ReadFixed<uint8_t>(data);
   switch (opcode) {
-    case 0x23: // global.get
-    case 0x41: // i32.const
+    case 0x23:  // global.get
+    case 0x41:  // i32.const
       ReadVarUInt32(data);
       break;
-    case 0x42: // i64.const
+    case 0x42:  // i64.const
       ReadVarUInt64(data);
       break;
-    case 0x43: // f32.const
+    case 0x43:  // f32.const
       ReadFixed<float>(data);
       break;
-    case 0x44: // f64.const
+    case 0x44:  // f64.const
       ReadFixed<double>(data);
       break;
     default:
@@ -373,7 +370,7 @@ void ReadDataSection(const Section& section, const IndexedNames& names,
     string_view segment = data;
     uint32_t mode = ReadVarUInt32(&data);
     if (mode > 1) THROW("multi-memory extension isn't supported");
-    if (mode == 0) { // Active segment
+    if (mode == 0) {  // Active segment
       SkipInitializerExpression(&data);
     }
 
@@ -393,7 +390,6 @@ void ReadDataSection(const Section& section, const IndexedNames& names,
   }
 }
 
-
 void ParseSymbols(RangeSink* sink) {
   // First pass: read the custom naming section to get function names.
   std::unordered_map<int, std::string> func_names;
@@ -409,7 +405,8 @@ void ParseSymbols(RangeSink* sink) {
 
   // Second pass: read the function/code sections.
   ForEachSection(sink->input_file().data(),
-                 [&func_names, &dataseg_names, &num_imports, sink](const Section& section) {
+                 [&func_names, &dataseg_names, &num_imports,
+                  sink](const Section& section) {
                    if (section.id == Section::kImport) {
                      num_imports = GetNumFunctionImports(section);
                    } else if (section.id == Section::kCode) {
@@ -440,13 +437,12 @@ class WebAssemblyObjectFile : public ObjectFile {
     // source map.
     std::string id;
 
-    FindSection(file_data().data(), "sourceMappingURL",
-                [&id](Section& section) {
-                  uint32_t size = ReadVarUInt32(&section.contents);
-                  string_view source_mapping_url =
-                      ReadPiece(size, &section.contents);
-                  id.assign(source_mapping_url);
-                });
+    FindSection(
+        file_data().data(), "sourceMappingURL", [&id](Section& section) {
+          uint32_t size = ReadVarUInt32(&section.contents);
+          string_view source_mapping_url = ReadPiece(size, &section.contents);
+          id.assign(source_mapping_url);
+        });
 
     return id;
   }
@@ -467,8 +463,8 @@ class WebAssemblyObjectFile : public ObjectFile {
         case DataSource::kCompileUnits:
         case DataSource::kInlines:
           if (const sourcemap::SourceMapObjectFile* source_map =
-                dynamic_cast<const sourcemap::SourceMapObjectFile*>(
-                  &debug_file())) {
+                  dynamic_cast<const sourcemap::SourceMapObjectFile*>(
+                      &debug_file())) {
             source_map->ProcessFileToSink(sink);
           } else {
             THROW("Data source requires a source map");
@@ -504,4 +500,3 @@ std::unique_ptr<ObjectFile> TryOpenWebAssemblyFile(
 }
 
 }  // namespace bloaty
-

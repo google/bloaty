@@ -29,7 +29,8 @@ uint64_t RangeMap::TranslateWithEntry(T iter, uint64_t addr) const {
 
 template <class T>
 bool RangeMap::TranslateAndTrimRangeWithEntry(T iter, uint64_t addr,
-                                              uint64_t size, uint64_t* trimmed_addr,
+                                              uint64_t size,
+                                              uint64_t* trimmed_addr,
                                               uint64_t* translated_addr,
                                               uint64_t* trimmed_size) const {
   addr = std::max(addr, iter->first);
@@ -252,8 +253,7 @@ void RangeMap::AddDualRange(uint64_t addr, uint64_t size, uint64_t otheraddr,
 // warn if not.
 bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
                                        const std::string& val,
-                                       const RangeMap& translator,
-                                       bool verbose,
+                                       const RangeMap& translator, bool verbose,
                                        RangeMap* other) {
   auto it = translator.FindContaining(addr);
   uint64_t end;
@@ -275,8 +275,8 @@ bool RangeMap::AddRangeWithTranslation(uint64_t addr, uint64_t size,
     if (translator.TranslateAndTrimRangeWithEntry(
             it, addr, size, &trimmed_addr, &translated_addr, &trimmed_size)) {
       if (verbose_level > 2 || verbose) {
-        printf("  -> translates to: [%" PRIx64 " %" PRIx64 "]\n", translated_addr,
-               trimmed_size);
+        printf("  -> translates to: [%" PRIx64 " %" PRIx64 "]\n",
+               translated_addr, trimmed_size);
       }
       other->AddRange(translated_addr, trimmed_size, val);
     }

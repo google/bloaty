@@ -89,7 +89,8 @@ string_view AttrValue::ResolveIndirectString(const CU& cu, uint64_t ofs) {
 }
 
 string_view AttrValue::ResolveIndirectLineString(const CU& cu, uint64_t ofs) {
-  // offset into a string table contained in the .debug_line_str of the object file.
+  // offset into a string table contained in the .debug_line_str of the object
+  // file.
   string_view ret = ReadDebugStrEntry(cu.dwarf().debug_line_str, ofs);
   cu.AddIndirectString(ret);
   return ret;
@@ -105,8 +106,7 @@ string_view AttrValue::ReadIndirectLineString(const CU& cu, string_view* data) {
   return ResolveIndirectLineString(cu, ReadFixed<D>(data));
 }
 
-string_view
-AttrValue::ResolveDoubleIndirectString(const CU &cu) const {
+string_view AttrValue::ResolveDoubleIndirectString(const CU& cu) const {
   uint64_t ofs = uint_;
   string_view offsets = cu.dwarf().debug_str_offsets;
   uint64_t ofs2;
@@ -243,5 +243,5 @@ AttrValue AttrValue::ParseAttr(const CU& cu, uint16_t form, string_view* data) {
   }
 }
 
-}  // namepsace dwarf
+}  // namespace dwarf
 }  // namespace bloaty

@@ -33,11 +33,11 @@
 #include "absl/types/optional.h"
 #include "bloaty.h"
 #include "bloaty.pb.h"
-#include "dwarf_constants.h"
-#include "util.h"
 #include "dwarf/attr.h"
 #include "dwarf/dwarf_util.h"
 #include "dwarf/line_info.h"
+#include "dwarf_constants.h"
+#include "util.h"
 
 using namespace dwarf2reader;
 using std::string_view;
@@ -128,7 +128,6 @@ bool AddressRanges::NextUnit() {
   return true;
 }
 
-
 // LocationList ////////////////////////////////////////////////////////////////
 
 // Code for reading entries out of a location list.
@@ -168,7 +167,8 @@ bool LocationList::NextEntry() {
 string_view GetLocationListRange(CompilationUnitSizes sizes,
                                  string_view available) {
   LocationList list(sizes, available);
-  while (list.NextEntry()) {}
+  while (list.NextEntry()) {
+  }
   return available.substr(0, list.read_offset() - available.data());
 }
 
@@ -249,8 +249,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
   class FilenameMap {
    public:
     FilenameMap(const dwarf::File& file)
-        : info_reader_(file),
-          missing_("[DWARF is missing filename]") {}
+        : info_reader_(file), missing_("[DWARF is missing filename]") {}
 
     std::string GetFilename(uint64_t compilation_unit_offset) {
       auto& name = map_[compilation_unit_offset];
@@ -266,7 +265,7 @@ static bool ReadDWARFAddressRanges(const dwarf::File& file, RangeSink* sink) {
       dwarf::CUIter iter = info_reader_.GetCUIter(sec, offset);
       dwarf::CU cu;
       if (!iter.NextCU(info_reader_, &cu)) {
-          return false;
+        return false;
       }
       *name = cu.unit_name();
       return true;
@@ -406,7 +405,7 @@ uint64_t TryReadPcPair(const dwarf::CU& cu, const GeneralDIE& die,
     size = *die.high_pc_addr - addr;
   } else if (die.high_pc_size) {
     size = *die.high_pc_size;
-  } else{
+  } else {
     return 0;
   }
 
@@ -456,7 +455,8 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
 
   // Sometimes a location is given as an offset into debug_loc.
   if (die.location_uint64 && cu.unit_sizes().dwarf_version() < 5) {
-    uint64_t location = *die.location_uint64;;
+    uint64_t location = *die.location_uint64;
+    ;
     if (location < cu.dwarf().debug_loc.size()) {
       std::string_view loc_range = cu.dwarf().debug_loc.substr(location);
       loc_range = GetLocationListRange(cu.unit_sizes(), loc_range);
@@ -479,8 +479,8 @@ void AddDIE(const dwarf::CU& cu, const GeneralDIE& die,
           StrictSubstr(cu.dwarf().debug_rnglists,
                        cu.range_lists_base() + (range_list * offset_size));
       uint64_t offset = cu.unit_sizes().ReadDWARFOffset(&offset_data);
-      data = StrictSubstr(
-          cu.dwarf().debug_rnglists, cu.range_lists_base() + offset);
+      data = StrictSubstr(cu.dwarf().debug_rnglists,
+                          cu.range_lists_base() + offset);
     } else if (die.ranges) {
       // Handle DW_FORM_sec_offset (direct offset)
       uint64_t ranges_offset = *die.ranges;
@@ -624,7 +624,8 @@ static std::string ConstructDwoPath(const DwoFilePointer& dwo_info) {
     return dwo_info.dwo_name;
   }
 
-  std::filesystem::path result = std::filesystem::path(dwo_info.comp_dir) / dwo_info.dwo_name;
+  std::filesystem::path result =
+      std::filesystem::path(dwo_info.comp_dir) / dwo_info.dwo_name;
   return result.string();
 }
 
@@ -649,8 +650,7 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
       continue;
     }
     die_reader.ReadAttributes(
-        cu, abbrev,
-        [&](uint16_t tag, dwarf::AttrValue value) {
+        cu, abbrev, [&](uint16_t tag, dwarf::AttrValue value) {
           ReadGeneralDIEAttr(tag, value, cu, &compileunit_die);
           switch (tag) {
             case DW_AT_comp_dir:
@@ -691,7 +691,8 @@ static void ReadDWARFDebugInfo(dwarf::InfoReader& reader,
       ReadDWARFStmtListRange(cu, *compileunit_die.stmt_list, sink);
     }
 
-    sink->AddFileRange("dwarf_abbrev", cu.unit_name(), cu.unit_abbrev().abbrev_data());
+    sink->AddFileRange("dwarf_abbrev", cu.unit_name(),
+                       cu.unit_abbrev().abbrev_data());
 
     while (auto abbrev = die_reader.ReadCode(cu)) {
       GeneralDIE die;
@@ -789,18 +790,20 @@ void ReadDWARFInlines(const dwarf::File& file, RangeSink* sink,
     while (auto abbrev = die_reader.ReadCode(cu)) {
       absl::optional<uint64_t> stmt_list;
       die_reader.ReadAttributes(cu, abbrev,
-          [&](uint16_t tag, dwarf::AttrValue val) {
-            if (tag == DW_AT_stmt_list) {
-              stmt_list = val.ToUint(cu);
-            }});
+                                [&](uint16_t tag, dwarf::AttrValue val) {
+                                  if (tag == DW_AT_stmt_list) {
+                                    stmt_list = val.ToUint(cu);
+                                  }
+                                });
 
       if (stmt_list) {
-        line_info_reader.SeekToOffset(*stmt_list, cu.unit_sizes().address_size());
+        line_info_reader.SeekToOffset(*stmt_list,
+                                      cu.unit_sizes().address_size());
         ReadDWARFStmtList(include_line, &line_info_reader, sink);
       }
-      break; // only root-level unit entries have DW_AT_stmt_list attributes.
+      break;  // only root-level unit entries have DW_AT_stmt_list attributes.
     }
   }
 }
 
-} // namespace bloaty
+}  // namespace bloaty

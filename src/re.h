@@ -28,8 +28,8 @@ namespace bloaty {
 #ifdef USE_RE2
 class ReImpl {
  public:
-  ReImpl(const char* pattern) : re2_(pattern){};
-  ReImpl(const std::string& pattern) : re2_(pattern){};
+  ReImpl(const char* pattern) : re2_(pattern) {}
+  ReImpl(const std::string& pattern) : re2_(pattern) {}
   bool ok() { return re2_.ok(); }
 
   static bool Extract(std::string text, const ReImpl& re, std::string rewrite,

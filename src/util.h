@@ -49,20 +49,24 @@ class Error : public std::runtime_error {
   }
 
 #if !defined(_MSC_VER)
-#define BLOATY_UNREACHABLE() do { \
-  assert(false); \
-  __builtin_unreachable(); \
-} while (0)
+#define BLOATY_UNREACHABLE() \
+  do {                       \
+    assert(false);           \
+    __builtin_unreachable(); \
+  } while (0)
 #else
-#define BLOATY_UNREACHABLE() do { \
-  assert(false); \
-  __assume(0); \
-} while (0)
+#define BLOATY_UNREACHABLE() \
+  do {                       \
+    assert(false);           \
+    __assume(0);             \
+  } while (0)
 #endif
 
 #ifdef NDEBUG
 // Prevent "unused variable" warnings.
-#define BLOATY_ASSERT(expr) do {} while (false && (expr))
+#define BLOATY_ASSERT(expr) \
+  do {                      \
+  } while (false && (expr))
 #else
 #define BLOATY_ASSERT(expr) assert(expr)
 #endif
@@ -86,7 +90,7 @@ inline uint64_t CheckedMul(uint64_t a, uint64_t b) {
 }
 
 inline std::string_view StrictSubstr(std::string_view data, size_t off,
-                                      size_t n) {
+                                     size_t n) {
   uint64_t end = CheckedAdd(off, n);
   if (end > data.size()) {
     THROW("region out-of-bounds");
@@ -113,13 +117,14 @@ enum class Endian { kBig, kLittle };
 
 inline Endian GetMachineEndian() {
   int x = 1;
-  return *(char *)&x == 1 ? Endian::kLittle : Endian::kBig;
+  return *(char*)&x == 1 ? Endian::kLittle : Endian::kBig;
 }
 
 // Generic algorithm for byte-swapping an integer of arbitrary size.
 //
 // With modern GCC/Clang this optimizes to a "bswap" instruction.
-template <size_t N, class T> constexpr T _BS(T val) {
+template <size_t N, class T>
+constexpr T _BS(T val) {
   if constexpr (N == 1) {
     return val & 0xff;
   } else {
@@ -129,11 +134,13 @@ template <size_t N, class T> constexpr T _BS(T val) {
 };
 
 // Byte swaps the given integer, and returns the byte-swapped value.
-template <class T> constexpr T ByteSwap(T val) {
-    return _BS<sizeof(T)>(val);
+template <class T>
+constexpr T ByteSwap(T val) {
+  return _BS<sizeof(T)>(val);
 }
 
-template <class T, size_t N = sizeof(T)> T ReadFixed(std::string_view *data) {
+template <class T, size_t N = sizeof(T)>
+T ReadFixed(std::string_view* data) {
   static_assert(N <= sizeof(T), "N too big for this data type");
   T val = 0;
   if (data->size() < N) {
@@ -144,16 +151,19 @@ template <class T, size_t N = sizeof(T)> T ReadFixed(std::string_view *data) {
   return val;
 }
 
-template <class T> T ReadEndian(std::string_view *data, Endian endian) {
+template <class T>
+T ReadEndian(std::string_view* data, Endian endian) {
   T val = ReadFixed<T>(data);
   return endian == GetMachineEndian() ? val : ByteSwap(val);
 }
 
-template <class T> T ReadLittleEndian(std::string_view *data) {
+template <class T>
+T ReadLittleEndian(std::string_view* data) {
   return ReadEndian<T>(data, Endian::kLittle);
 }
 
-template <class T> T ReadBigEndian(std::string_view *data) {
+template <class T>
+T ReadBigEndian(std::string_view* data) {
   return ReadEndian<T>(data, Endian::kBig);
 }
 

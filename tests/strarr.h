@@ -40,7 +40,7 @@ class StrArr {
     }
   }
 
-  char **get() const { return array_.get(); }
+  char** get() const { return array_.get(); }
 
   size_t size() const { return size_; }
 
@@ -50,4 +50,4 @@ class StrArr {
   std::unique_ptr<char*[]> array_;
 };
 
-#endif // BLOATY_TESTS_STRARR_H_
+#endif  // BLOATY_TESTS_STRARR_H_

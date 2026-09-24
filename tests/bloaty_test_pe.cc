@@ -14,21 +14,21 @@
 
 #include "test.h"
 
-struct BloatyTestEntry
-{
+struct BloatyTestEntry {
   std::string name;
   std::vector<std::string> commandline;
   std::string input_file;
   std::string result_file;
 };
 
-std::string TestEntryName(const testing::TestParamInfo<struct BloatyTestEntry>& entry) {
+std::string TestEntryName(
+    const testing::TestParamInfo<struct BloatyTestEntry>& entry) {
   return entry.param.name;
 }
 
 std::ostream& operator<<(std::ostream& os, const BloatyTestEntry& entry) {
   os << "{ ";
-  for (const auto& str: entry.commandline) {
+  for (const auto& str : entry.commandline) {
     os << str << ", ";
   }
   os << entry.input_file << ", " << entry.result_file << " }";
@@ -44,8 +44,7 @@ void Normalize(std::string& contents) {
     auto end = tmp.find_last_not_of("\t \r");
     if (end != std::string::npos) {
       tmp = tmp.substr(0, end + 1);
-    }
-    else {
+    } else {
       tmp.clear();
     }
     if (!contents.empty()) {
@@ -55,7 +54,8 @@ void Normalize(std::string& contents) {
   }
 }
 
-inline bool GetFileContents(const std::string& filename, std::string& contents) {
+inline bool GetFileContents(const std::string& filename,
+                            std::string& contents) {
   FILE* file = fopen(filename.c_str(), "rb");
   if (!file) {
     std::cerr << "Couldn't get file size for: " << filename << "\n";
@@ -72,22 +72,18 @@ inline bool GetFileContents(const std::string& filename, std::string& contents) 
   return result == size;
 }
 
-class BloatyOutputTest: public BloatyTest,
-  public testing::WithParamInterface<BloatyTestEntry>
-{
-public:
+class BloatyOutputTest : public BloatyTest,
+                         public testing::WithParamInterface<BloatyTestEntry> {
+ public:
   BloatyOutputTest()
-    : commandline(GetParam().commandline)
-    , input_file(GetParam().input_file)
-    , result_file(GetParam().result_file)
-  {
-  }
+      : commandline(GetParam().commandline),
+        input_file(GetParam().input_file),
+        result_file(GetParam().result_file) {}
 
   const std::vector<std::string>& commandline;
   const std::string& input_file;
   const std::string& result_file;
 };
-
 
 TEST_P(BloatyOutputTest, CheckOutput) {
   uint64_t size;
@@ -95,7 +91,7 @@ TEST_P(BloatyOutputTest, CheckOutput) {
   std::string expect_result;
   ASSERT_TRUE(GetFileContents(result_file, expect_result));
 
-  std::vector<std::string> cmdline = { "bloaty" };
+  std::vector<std::string> cmdline = {"bloaty"};
   cmdline.insert(cmdline.end(), commandline.begin(), commandline.end());
   cmdline.push_back(input_file);
   RunBloaty(cmdline);
@@ -109,19 +105,35 @@ TEST_P(BloatyOutputTest, CheckOutput) {
   EXPECT_EQ(tmp, expect_result);
 }
 
-static BloatyTestEntry  tests[] = {
-  { "MSVCR15DLL", {}, "msvc-15.0-foo-bar.dll", "msvc-15.0-foo-bar.dll.txt" },
-  { "MSVCR15DLLSEG", {"-d", "segments"}, "msvc-15.0-foo-bar.dll", "msvc-15.0-foo-bar.dll.seg.txt" },
-  { "MSVC15EXE", {}, "msvc-15.0-foo-bar-main-cv.bin", "msvc-15.0-foo-bar-main-cv.bin.txt" },
-  { "MSVC15EXESEG", {"-d", "segments"}, "msvc-15.0-foo-bar-main-cv.bin", "msvc-15.0-foo-bar-main-cv.bin.seg.txt" },
+static BloatyTestEntry tests[] = {
+    {"MSVCR15DLL", {}, "msvc-15.0-foo-bar.dll", "msvc-15.0-foo-bar.dll.txt"},
+    {"MSVCR15DLLSEG",
+     {"-d", "segments"},
+     "msvc-15.0-foo-bar.dll",
+     "msvc-15.0-foo-bar.dll.seg.txt"},
+    {"MSVC15EXE",
+     {},
+     "msvc-15.0-foo-bar-main-cv.bin",
+     "msvc-15.0-foo-bar-main-cv.bin.txt"},
+    {"MSVC15EXESEG",
+     {"-d", "segments"},
+     "msvc-15.0-foo-bar-main-cv.bin",
+     "msvc-15.0-foo-bar-main-cv.bin.seg.txt"},
 
-  { "MSVCR16DLL", {}, "msvc-16.0-foo-bar.dll", "msvc-16.0-foo-bar.dll.txt" },
-  { "MSVCR16DLLSEG", {"-d", "segments"}, "msvc-16.0-foo-bar.dll", "msvc-16.0-foo-bar.dll.seg.txt" },
-  { "MSVC16EXE", {}, "msvc-16.0-foo-bar-main-cv.bin", "msvc-16.0-foo-bar-main-cv.bin.txt" },
-  { "MSVC16EXESEG", {"-d", "segments"}, "msvc-16.0-foo-bar-main-cv.bin", "msvc-16.0-foo-bar-main-cv.bin.seg.txt" },
+    {"MSVCR16DLL", {}, "msvc-16.0-foo-bar.dll", "msvc-16.0-foo-bar.dll.txt"},
+    {"MSVCR16DLLSEG",
+     {"-d", "segments"},
+     "msvc-16.0-foo-bar.dll",
+     "msvc-16.0-foo-bar.dll.seg.txt"},
+    {"MSVC16EXE",
+     {},
+     "msvc-16.0-foo-bar-main-cv.bin",
+     "msvc-16.0-foo-bar-main-cv.bin.txt"},
+    {"MSVC16EXESEG",
+     {"-d", "segments"},
+     "msvc-16.0-foo-bar-main-cv.bin",
+     "msvc-16.0-foo-bar-main-cv.bin.seg.txt"},
 };
 
-INSTANTIATE_TEST_SUITE_P(BloatyTest,
-  BloatyOutputTest,
-  testing::ValuesIn(tests),
-  TestEntryName);
+INSTANTIATE_TEST_SUITE_P(BloatyTest, BloatyOutputTest, testing::ValuesIn(tests),
+                         TestEntryName);

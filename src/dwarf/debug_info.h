@@ -67,7 +67,7 @@ namespace dwarf {
 
 struct File;
 
-typedef void OpenDwarf(const InputFile &file, File *dwarf, RangeSink *sink);
+typedef void OpenDwarf(const InputFile& file, File* dwarf, RangeSink* sink);
 
 struct File {
   std::string_view debug_abbrev;
@@ -89,7 +89,7 @@ struct File {
 
   std::string_view* GetFieldByName(std::string_view name);
   void SetFieldByName(std::string_view name, std::string_view contents) {
-    std::string_view *member = GetFieldByName(name);
+    std::string_view* member = GetFieldByName(name);
     if (member) *member = contents;
   }
 };
@@ -217,10 +217,7 @@ class InfoReader {
   const File& dwarf() const { return dwarf_; }
 
   // DIEs exist in both .debug_info and .debug_types.
-  enum class Section {
-    kDebugInfo,
-    kDebugTypes
-  };
+  enum class Section { kDebugInfo, kDebugTypes };
 
   CUIter GetCUIter(Section section, uint64_t offset = 0);
 

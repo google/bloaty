@@ -16,8 +16,8 @@
 #include "bloaty.h"
 #include "util.h"
 
-using std::string_view;
 using std::string;
+using std::string_view;
 
 namespace bloaty {
 namespace pe {
