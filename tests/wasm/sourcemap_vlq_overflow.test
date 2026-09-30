@@ -1,0 +1,27 @@
+# A source map whose mappings contain an over-long Base64 VLQ field must be
+# rejected instead of shifting past the width of the 32-bit accumulator in
+# ReadBase64VLQ. The "mappings" value below is a single VLQ made of continuation
+# digits only, which drives the shift to 35.
+
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: echo "{\"version\": 3, \"sources\": [\"test1.java\",\"test2.java\"], \"names\": [], \"mappings\": \"gggggggggA\"}" > %t.map
+# RUN: %bloaty --raw-map %t.obj --source-map=./sourcemap.wasm.map=%t.map -d compileunits > %t.out 2>&1 || true
+# RUN: %FileCheck %s < %t.out
+
+# CHECK: Base64VLQ value out of range
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            CODE
+    Functions:
+      - Index:           0
+        Locals:
+          - Type:            I32
+            Count:           13
+        Body:            41002100200028028880808000210141052102200120026A210341002104200428028C808080002105200320056A2106410021072007280280808080002108200820066A21094100210A200A200936028080808000418480808000210B200B210C200C0F0B
+  - Type:            CUSTOM
+    Name:            sourceMappingURL
+    # ./sourcemap.wasm.map
+    Payload:         142E2F736F757263656D61702E7761736D2E6D6170
