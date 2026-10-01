@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.7)
 cmake_policy(SET CMP0048 NEW)
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
@@ -565,13 +565,29 @@ else()
 
       file(GLOB fuzz_corpus tests/testdata/fuzz_corpus/*)
 
+      # Create a fixture for each test executable to ensure it builds before running
+      foreach(target ${TEST_TARGETS} fuzz_test)
+        add_test(NAME build_${target}
+          COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target ${target})
+        set_tests_properties(build_${target} PROPERTIES FIXTURES_SETUP ${target}_fixture)
+      endforeach()
+
       add_test(NAME range_map_test COMMAND range_map_test)
+      set_tests_properties(range_map_test PROPERTIES FIXTURES_REQUIRED range_map_test_fixture)
+
       add_test(NAME bloaty_test_x86-64 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86_64)
       add_test(NAME bloaty_test_x86 COMMAND bloaty_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/linux-x86)
+      set_tests_properties(bloaty_test_x86-64 bloaty_test_x86 PROPERTIES FIXTURES_REQUIRED bloaty_test_fixture)
+
       add_test(NAME bloaty_test_pe_x64 COMMAND bloaty_test_pe WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/PE/x64)
       add_test(NAME bloaty_test_pe_x86 COMMAND bloaty_test_pe WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/PE/x86)
+      set_tests_properties(bloaty_test_pe_x64 bloaty_test_pe_x86 PROPERTIES FIXTURES_REQUIRED bloaty_test_pe_fixture)
+
       add_test(NAME bloaty_misc_test COMMAND bloaty_misc_test WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/misc)
+      set_tests_properties(bloaty_misc_test PROPERTIES FIXTURES_REQUIRED bloaty_misc_test_fixture)
+
       add_test(NAME fuzz_test COMMAND fuzz_test ${fuzz_corpus} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata/fuzz_corpus)
+      set_tests_properties(fuzz_test PROPERTIES FIXTURES_REQUIRED fuzz_test_fixture)
     endif()
   endif()
 
