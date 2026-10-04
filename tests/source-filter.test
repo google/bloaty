@@ -1,0 +1,22 @@
+# Test that --source-filter displays the filtering summary message.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: %yaml2obj %S/macho/no-dsym.test -o %t/test_binary
+
+# Test 1: Both domains - should show file and vm omitted sizes
+# RUN: %bloaty %t/test_binary -d sections --source-filter="text" | %FileCheck --check-prefix=BOTH %s
+# BOTH: __TEXT,__text
+# BOTH: TOTAL
+# BOTH: Filtering enabled (source_filter); omitted
+
+# Test 2: VM only - should show vm omitted size
+# RUN: %bloaty %t/test_binary -d sections --domain=vm --source-filter="text" | %FileCheck --check-prefix=VM %s
+# VM: __TEXT,__text
+# VM: TOTAL
+# VM: Filtering enabled (source_filter); omitted
+
+# Test 3: File only - should show file omitted size
+# RUN: %bloaty %t/test_binary -d sections --domain=file --source-filter="text" | %FileCheck --check-prefix=FILE %s
+# FILE: __TEXT,__text
+# FILE: TOTAL
+# FILE: Filtering enabled (source_filter); omitted
