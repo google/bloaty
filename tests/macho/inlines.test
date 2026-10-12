@@ -1,16 +1,6 @@
-# Test that -d inlines works for Mach-O binaries
-#
-# The YAML below was generated from tests/testdata/macho/test_inlines.c.
-#
-# On macOS:
-#   clang -g1 -O2 -o test_inlines tests/testdata/macho/test_inlines.c
-#   obj2yaml test_inlines > binary.yaml
-#   obj2yaml test_inlines.dSYM/Contents/Resources/DWARF/test_inlines > dsym.yaml
-#
-# Then manually modified to work around yaml2obj roundtrip bug
-# https://github.com/llvm/llvm-project/issues/166993:
-#   - Removed Length field from debug_aranges and debug_line sections
-#   - Manually adjusted __DWARF segment size and section offsets to match actual content sizes
+# Test -d inlines for Mach-O with DWARF v5 debug info.
+# .debug_line is raw bytes because yaml2obj can't yet emit a v5 line table
+# (llvm/llvm-project#191167).
 
 ## Test inlines data source with dSYM debug info
 # RUN: %yaml2obj --docnum=1 %s -o %t.binary
@@ -107,7 +97,7 @@ LoadCommands:
     symoff:          16520
     nsyms:           16
     stroff:          16776
-    strsize:         160
+    strsize:         111
   - cmd:             LC_DYSYMTAB
     cmdsize:         80
     ilocalsym:       0
@@ -139,12 +129,12 @@ LoadCommands:
   - cmd:             LC_BUILD_VERSION
     cmdsize:         32
     platform:        1
-    minos:           1703936
-    sdk:             1703936
+    minos:           0
+    sdk:             0
     ntools:          1
     Tools:
       - tool:            3
-        version:         80020480
+        version:         0
   - cmd:             LC_SOURCE_VERSION
     cmdsize:         16
     version:         0
@@ -157,7 +147,7 @@ LoadCommands:
     dylib:
       name:            24
       timestamp:       2
-      current_version: 88866816
+      current_version: 0
       compatibility_version: 65536
     Content:         '/usr/lib/libSystem.B.dylib'
     ZeroPadBytes:    6
@@ -300,7 +290,7 @@ LinkEditData:
     - _main
     - '/build/'
     - test_inlines.c
-    - '/var/folders/kj/fky4wd_x10x_5snv5v9d7lrm0000gn/T/test_inlines-2d34e4.o'
+    - '/build/test_inlines.o'
     - ''
     - ''
     - ''
@@ -325,7 +315,7 @@ FileHeader:
   cpusubtype:      0x0
   filetype:        0xA
   ncmds:           7
-  sizeofcmds:      1240
+  sizeofcmds:      1160
   flags:           0x0
   reserved:        0x0
 LoadCommands:
@@ -335,8 +325,8 @@ LoadCommands:
   - cmd:             LC_BUILD_VERSION
     cmdsize:         24
     platform:        1
-    minos:           1703936
-    sdk:             1703936
+    minos:           0
+    sdk:             0
     ntools:          0
   - cmd:             LC_SYMTAB
     cmdsize:         24
@@ -405,21 +395,21 @@ LoadCommands:
     nsects:          0
     flags:           0
   - cmd:             LC_SEGMENT_64
-    cmdsize:         792
+    cmdsize:         712
     segname:         __DWARF
     vmaddr:          4294987776
     vmsize:          4096
     fileoff:         8192
-    filesize:        780
+    filesize:        680
     maxprot:         7
     initprot:        3
-    nsects:          9
+    nsects:          8
     flags:           0
     Sections:
       - sectname:        __debug_line
         segname:         __DWARF
         addr:            0x100005000
-        size:            268
+        size:            101
         offset:          0x2000
         align:           0
         reloff:          0x0
@@ -428,11 +418,12 @@ LoadCommands:
         reserved1:       0x0
         reserved2:       0x0
         reserved3:       0x0
+        content:         610000000500080037000000010101fb0e0d00010101010000000100000101011f010000000003011f020f051e010f00000000000000000000000000000000000000000009022803000001000000040005300a16052d4e051c064a0503060a4f0208000101
       - sectname:        __debug_aranges
         segname:         __DWARF
-        addr:            0x10000510C
+        addr:            0x100005065
         size:            48
-        offset:          0x210C
+        offset:          0x2065
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -442,9 +433,9 @@ LoadCommands:
         reserved3:       0x0
       - sectname:        __debug_addr
         segname:         __DWARF
-        addr:            0x10000513C
+        addr:            0x100005095
         size:            24
-        offset:          0x213C
+        offset:          0x2095
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -455,9 +446,9 @@ LoadCommands:
         content:         '140000000500080028030000010000003403000001000000'
       - sectname:        __debug_info
         segname:         __DWARF
-        addr:            0x100005154
+        addr:            0x1000050AD
         size:            104
-        offset:          0x2154
+        offset:          0x20AD
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -467,9 +458,9 @@ LoadCommands:
         reserved3:       0x0
       - sectname:        __debug_abbrev
         segname:         __DWARF
-        addr:            0x1000051BC
+        addr:            0x100005115
         size:            92
-        offset:          0x21BC
+        offset:          0x2115
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -479,9 +470,9 @@ LoadCommands:
         reserved3:       0x0
       - sectname:        __debug_str
         segname:         __DWARF
-        addr:            0x100005218
+        addr:            0x100005171
         size:            233
-        offset:          0x2218
+        offset:          0x2171
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -491,9 +482,9 @@ LoadCommands:
         reserved3:       0x0
       - sectname:        __debug_str_offs
         segname:         __DWARF
-        addr:            0x100005301
+        addr:            0x10000525A
         size:            40
-        offset:          0x2301
+        offset:          0x225A
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -504,9 +495,9 @@ LoadCommands:
         content:         2400000005000000010000003000000045000000B6000000C1000000D2000000D6000000E4000000
       - sectname:        __debug_line_str
         segname:         __DWARF
-        addr:            0x100005329
+        addr:            0x100005282
         size:            38
-        offset:          0x2329
+        offset:          0x2282
         align:           0
         reloff:          0x0
         nreloc:          0
@@ -515,19 +506,6 @@ LoadCommands:
         reserved2:       0x0
         reserved3:       0x0
         content:         2f6275696c642f736f7572636573006275696c642f746573745f696e6c696e65732e6300
-      - sectname:        __debug_names
-        segname:         __DWARF
-        addr:            0x10000534F
-        size:            136
-        offset:          0x234F
-        align:           2
-        reloff:          0x0
-        nreloc:          0
-        flags:           0x0
-        reserved1:       0x0
-        reserved2:       0x0
-        reserved3:       0x0
-        content:         8400000005000000010000000000000000000000030000000300000011000000080000004C4C564D3037303000000000000000000100000000000000CE5C880B833E1C476A7F9A7CD2000000D6000000E4000000000000000A00000010000000011D031304130000022E03130419000000012E0000000A00000000022700000000023C0000000000
 LinkEditData:
   NameList:
     - n_strx:          2
@@ -685,7 +663,7 @@ DWARF:
             - Value:           0x6
         - AbbrCode:        0x4
           Values:
-            - Value:           0x25
+            - Value:           0x2E
             - Value:           0xDEADBEEFDEADBEEF
             - Value:           0x4
             - Value:           0x0
@@ -700,33 +678,4 @@ DWARF:
             - Value:           0x1
             - Value:           0x7
         - AbbrCode:        0x0
-  debug_line:
-    - Length:          97
-      Version:         5
-      PrologueLength:  3604488
-      MinInstLength:   0
-      MaxOpsPerInst:   0
-      DefaultIsStmt:   1
-      LineBase:        1
-      LineRange:       1
-      OpcodeBase:      251
-      StandardOpcodeLengths: [ 14, 13, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0,
-                               1, 1, 1, 31, 1, 0, 0, 0, 0, 3, 1, 31, 2,
-                               11, 5, 30, 1, 17, 0, 0, 0, 0, 126, 254,
-                               107, 147, 231, 16, 142, 48, 183, 68, 7,
-                               134, 86, 92, 116, 244, 0, 9, 2, 40, 3, 0,
-                               0, 1, 0, 0, 0, 4, 0, 5, 48, 10, 22, 5, 45,
-                               78, 5, 28, 6, 74, 5, 3, 6, 10, 79, 2, 8,
-                               0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
 ...
