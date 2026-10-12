@@ -1,0 +1,15 @@
+# RUN: %yaml2obj %s -o %t.obj
+# RUN: echo "{\"version\": 3, \"sources\": [\"test.js\"], \"names\": [], \"mappings\": \"ggggggggA\"}" > %t.map
+# RUN: not %bloaty --raw-map %t.obj --source-map=./sourcemap.wasm.map=%t.map -d compileunits 2>&1 | %FileCheck %s
+
+# An overlong Base64 VLQ shifts a 32-bit accumulator by 32 or more bits.
+# CHECK: Base64VLQ value out of range
+
+--- !WASM
+FileHeader:
+  Version:         0x1
+Sections:
+  - Type:            CUSTOM
+    Name:            sourceMappingURL
+    # ./sourcemap.wasm.map
+    Payload:         142E2F736F757263656D61702E7761736D2E6D6170
