@@ -71,6 +71,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   RunBloaty(factory, "compileunits");
   RunBloaty(factory, "inlines");
   RunBloaty(factory, "armembers");
+  // The remaining built-in data sources, previously never fuzzed: universal
+  // binary slices, the per-filename rollup, and the three symbol flavours
+  // that drive the demangler paths.
+  RunBloaty(factory, "archs");
+  RunBloaty(factory, "inputfiles");
+  RunBloaty(factory, "rawsymbols");
+  RunBloaty(factory, "fullsymbols");
+  RunBloaty(factory, "shortsymbols");
 
   return 0;
 }
