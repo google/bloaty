@@ -24,6 +24,7 @@
 
 ## Minimal Mach-O executable with inline functions
 --- !mach-o
+IsLittleEndian: true
 FileHeader:
   magic:           0xFEEDFACF
   cputype:         0x100000C
@@ -319,6 +320,7 @@ LinkEditData:
 ...
 
 --- !mach-o
+IsLittleEndian: true
 FileHeader:
   magic:           0xFEEDFACF
   cputype:         0x100000C

@@ -56,6 +56,7 @@ FatArchs:
     align:           12
 Slices:
   - !mach-o
+    IsLittleEndian: true
     FileHeader:
       magic:           0xFEEDFACF
       cputype:         0x1000007
@@ -124,6 +125,7 @@ Slices:
         - ' '
         - _main
   - !mach-o
+    IsLittleEndian: true
     FileHeader:
       magic:           0xFEEDFACF
       cputype:         0x100000C
@@ -194,6 +196,7 @@ Slices:
 
 ## Single x86_64 Mach-O executable
 --- !mach-o
+IsLittleEndian: true
 FileHeader:
   magic:           0xFEEDFACF
   cputype:         0x1000007
