@@ -9,6 +9,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   windows:
     runs-on: windows-2022
@@ -22,7 +25,7 @@ jobs:
           # - { arch: "ARM64 "}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           repository: llvm/llvm-project
           ref: llvmorg-17.0.0-rc3
@@ -32,7 +35,7 @@ jobs:
         id: llvm-revision
         run: |
           echo "revision=$(git -C ${{ github.workspace }}/llvm-project rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: llvm-build
         with:
           path: ${{ github.workspace }}/build/llvm-project
@@ -46,12 +49,12 @@ jobs:
           cmake --build ${{ github.workspace }}/build/llvm-project --config Release --target FileCheck
           cmake --build ${{ github.workspace }}/build/llvm-project --config Release --target yaml2obj
       - name: Upload LLVM tools as an artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: llvm-tools-${{ matrix.artifact_key }}
           path: ./build/llvm-project/Release/bin
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           path: bloaty
       - name: configure
@@ -74,9 +77,9 @@ jobs:
           - { cflags: "-fmodules", cxxflags: "-fmodules", artifact_key: "macos-modules" }
 
     steps:
-      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: seanmiddleditch/gha-setup-ninja@7e868db0f3406270dd46e1dac26c65f621456723 # master
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           repository: llvm/llvm-project
           ref: llvmorg-17.0.0-rc3
@@ -86,7 +89,7 @@ jobs:
         id: llvm-revision
         run: |
           echo "revision=$(git -C ${{ github.workspace }}/llvm-project rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: llvm-build
         with:
           path: ${{ github.workspace }}/build/llvm-project
@@ -100,12 +103,12 @@ jobs:
           cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
           cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
       - name: Upload LLVM tools as an artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: llvm-tools-${{ matrix.artifact_key }}
           path: ./build/llvm-project/bin
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           path: ${{ github.workspace }}/bloaty
       - name: configure
@@ -127,9 +130,9 @@ jobs:
           - { CC: clang, CXX: clang++, artifact_key: "linux-clang" }
 
     steps:
-      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: seanmiddleditch/gha-setup-ninja@7e868db0f3406270dd46e1dac26c65f621456723 # master
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           repository: llvm/llvm-project
           ref: llvmorg-17.0.0-rc3
@@ -139,7 +142,7 @@ jobs:
         id: llvm-revision
         run: |
           echo "revision=$(git -C ${{ github.workspace }}/llvm-project rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: llvm-build
         with:
           path: ${{ github.workspace }}/build/llvm-project
@@ -153,12 +156,12 @@ jobs:
           cmake --build ${{ github.workspace }}/build/llvm-project --target FileCheck
           cmake --build ${{ github.workspace }}/build/llvm-project --target yaml2obj
       - name: Upload LLVM tools as an artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: llvm-tools-${{ matrix.artifact_key }}
           path: ./build/llvm-project/bin
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           path: ${{ github.workspace }}/bloaty
       - name: configure
