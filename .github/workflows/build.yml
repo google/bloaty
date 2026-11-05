@@ -172,3 +172,41 @@ jobs:
         run: |
           cmake --build build/bloaty --config Debug --target test
           cmake --build build/bloaty --config Debug --target check-bloaty
+
+  cmake4-bundled-deps:
+    name: CMake 4 with bundled deps (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install CMake 4
+        run: python -m pip install "cmake>=4,<5"
+
+      - name: Show CMake version
+        run: cmake --version
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -D CMAKE_BUILD_TYPE=Debug
+          -D BLOATY_PREFER_SYSTEM_ZLIB=NO
+          -D BLOATY_PREFER_SYSTEM_ABSL=NO
+          -D CMAKE_DISABLE_FIND_PACKAGE_ZLIB=ON
+
+      - name: Build
+        run: cmake --build build --config Debug
+
+      - name: Test
+        run: ctest --test-dir build -C Debug --output-on-failure
