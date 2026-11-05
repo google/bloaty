@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           repository: llvm/llvm-project
-          ref: llvmorg-17.0.0-rc3
+          ref: llvmorg-22.1.8
           path: llvm-project
           fetch-depth: 1
       - name: Get LLVM Revision
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           repository: llvm/llvm-project
-          ref: llvmorg-17.0.0-rc3
+          ref: llvmorg-22.1.8
           path: llvm-project
           fetch-depth: 1
       - name: Get LLVM Revision
@@ -135,7 +135,7 @@ jobs:
       - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
         with:
           repository: llvm/llvm-project
-          ref: llvmorg-17.0.0-rc3
+          ref: llvmorg-22.1.8
           path: llvm-project
           fetch-depth: 1
       - name: Get LLVM Revision
